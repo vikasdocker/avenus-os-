@@ -25,10 +25,13 @@ APPEND="console=ttyS0 tsc=unstable panic=-1 aether=single"
     sleep 2
     printf 'aetherctl status\n'
     sleep 4
-    # The AI conversation test: UI -> Agent -> Provider -> Agent -> UI.
-    printf 'Hello Aether\r'
+    # Capability test 1 (UI -> Agent -> app.list -> Control Plane).
+    printf 'Show me the available applications.\r'
+    sleep 6
+    # Capability test 2 (app.launch).
+    printf 'Open the calculator.\r'
     sleep 8
-} | timeout 60 qemu-system-x86_64 \
+} | timeout 75 qemu-system-x86_64 \
     -m 512M -nographic -no-reboot \
     -vga none \
     -device virtio-gpu-pci,xres=1024,yres=768 \
@@ -56,11 +59,11 @@ PY
         [ -S "$MON" ] && break
         sleep 1
     done
-    # Before the message: splash only.
+    # Before any capability message: splash only.
     sleep 20
     screendump "$SHOT_BEFORE"
-    sleep 10
-    # After "Hello Aether": user line + AI reply rendered.
+    sleep 22
+    # After both capability sentences: list + launch rendered.
     screendump "$SHOT_AFTER"
 ) &
 

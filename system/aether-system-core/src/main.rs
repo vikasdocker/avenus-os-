@@ -4,6 +4,7 @@
 // serves the local control protocol used by `aetherctl`:
 // newline-delimited JSON requests/responses over TCP loopback.
 
+use aether_application_manager::ApplicationManager;
 use aether_core::ipc::{IpcError, IpcRequest, IpcResponse};
 use aether_core::types::ServiceStatus;
 use aether_system_core::{
@@ -12,6 +13,35 @@ use aether_system_core::{
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Applications the capability layer exposes. Commands are spawned directly
+/// as argv vectors (never through a shell); `sleep` placeholders stand in
+/// for real graphical apps in this phase.
+const SEED_APPS: &[(&str, &str, &str)] = &[
+    ("calculator", "Calculator", "/bin/sleep 3600"),
+    ("notes", "Notes", "/bin/sleep 3601"),
+    ("files", "Files", "/bin/sleep 3602"),
+];
+
+fn unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+/// Structured audit line for every capability request dispatched here.
+fn audit(capability: &str, args: &serde_json::Value, component: &str, ok: bool) {
+    eprintln!(
+        "[audit] ts={} component={} capability={} args={} result={}",
+        unix_ms(),
+        component,
+        capability,
+        args,
+        if ok { "success" } else { "failure" }
+    );
+}
 
 /// In-process executor: internal services run inside this daemon; process
 /// services are represented with a deterministic pseudo-pid for now.
@@ -43,11 +73,36 @@ impl ServiceExecutor for LocalExecutor {
     }
 }
 
-fn dispatch(manager: &mut aether_system_core::manager::ServiceManager, req: &IpcRequest) -> IpcResponse {
+fn dispatch(
+    manager: &mut aether_system_core::manager::ServiceManager,
+    apps: &mut ApplicationManager,
+    req: &IpcRequest,
+) -> IpcResponse {
+    // Capability requests (app.*) are audited with their arguments; service
+    // lifecycle commands keep the generic audit line.
+    let is_capability = req.command.starts_with("app.") || req.command == "system.status";
+    let started_ok = true;
+    let response = dispatch_inner(manager, apps, req);
+    if is_capability {
+        audit(
+            &req.command,
+            &req.parameters,
+            &req.service_id,
+            started_ok && response.ok,
+        );
+    }
+    response
+}
+
+fn dispatch_inner(
+    manager: &mut aether_system_core::manager::ServiceManager,
+    apps: &mut ApplicationManager,
+    req: &IpcRequest,
+) -> IpcResponse {
     let mut executor = LocalExecutor::default();
     match req.command.as_str() {
-        "status" => match serde_json::to_value(manager.system_status()) {
-            Ok(result) => IpcResponse::ok("status", result),
+        "status" | "system.status" => match serde_json::to_value(manager.system_status()) {
+            Ok(result) => IpcResponse::ok(&req.command, result),
             Err(e) => IpcResponse::err(
                 "status",
                 IpcError {
@@ -121,6 +176,55 @@ fn dispatch(manager: &mut aether_system_core::manager::ServiceManager, req: &Ipc
                 }
             }
         }
+        "app.list" => {
+            let apps_list: Vec<serde_json::Value> = apps
+                .list()
+                .into_iter()
+                .map(|(id, name, _)| serde_json::json!({ "id": id, "name": name }))
+                .collect();
+            IpcResponse::ok("app.list", serde_json::json!({ "apps": apps_list }))
+        }
+        "app.launch" => match req.parameters.get("app").and_then(|v| v.as_str()) {
+            Some(app_id) => match apps.launch(app_id) {
+                Ok(instance) => IpcResponse::ok(
+                    "app.launch",
+                    serde_json::json!({ "app": app_id, "instance": instance }),
+                ),
+                Err(e) => IpcResponse::err(
+                    "app.launch",
+                    IpcError {
+                        code: "APP_ERROR".to_string(),
+                        message: e.to_string(),
+                    },
+                ),
+            },
+            None => IpcResponse::err(
+                "app.launch",
+                IpcError {
+                    code: "INVALID_INPUT".to_string(),
+                    message: "parameter 'app' is required".to_string(),
+                },
+            ),
+        },
+        "app.close" => match req.parameters.get("instance").and_then(|v| v.as_u64()) {
+            Some(instance) => match apps.close(instance) {
+                Ok(closed) => IpcResponse::ok("app.close", serde_json::json!({ "closed": closed })),
+                Err(e) => IpcResponse::err(
+                    "app.close",
+                    IpcError {
+                        code: "APP_ERROR".to_string(),
+                        message: e.to_string(),
+                    },
+                ),
+            },
+            None => IpcResponse::err(
+                "app.close",
+                IpcError {
+                    code: "INVALID_INPUT".to_string(),
+                    message: "numeric parameter 'instance' is required".to_string(),
+                },
+            ),
+        },
         "shutdown" => IpcResponse::ok("shutdown", serde_json::json!({ "state": "SHUTTING_DOWN" })),
         other => IpcResponse::err(
             other,
@@ -169,9 +273,17 @@ fn main() {
         eprintln!("[system-core] fatal: {e}");
         std::process::exit(1);
     }
+
+    let mut apps = ApplicationManager::default();
+    for (id, name, command) in SEED_APPS {
+        if let Err(e) = apps.register_json(id, name, command) {
+            eprintln!("[system-core] seed app '{id}' rejected: {e}");
+        }
+    }
     eprintln!(
-        "[system-core] {} services running; control plane on 127.0.0.1:{port}",
-        manager.graph().len()
+        "[system-core] {} services running; {} app capabilities registered; control plane on 127.0.0.1:{port}",
+        manager.graph().len(),
+        apps.list().len()
     );
 
     let listener = match std::net::TcpListener::bind((bind_addr.as_str(), port)) {
@@ -210,7 +322,7 @@ fn main() {
                     if req.command == "shutdown" {
                         stop_requested = true;
                     }
-                    dispatch(&mut manager, &req)
+                    dispatch(&mut manager, &mut apps, &req)
                 }
                 Err(e) => IpcResponse::err(
                     "?",

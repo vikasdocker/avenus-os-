@@ -4,6 +4,8 @@
 // intent queries (status, health, events, tasks) for the local AI brain
 // and interactive sessions. All state is in-memory and auditable.
 
+pub mod intent;
+
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use uuid::Uuid;
@@ -44,6 +46,8 @@ pub struct AgentState {
     tasks: Vec<TaskRecord>,
     now_ms: fn() -> u64,
     provider: Box<dyn AiProvider + Send>,
+    /// Control-plane port used by the capability executor.
+    pub control_port: u16,
 }
 
 /// Replaceable AI backend. The UI never talks to a model directly; the
@@ -137,7 +141,7 @@ impl AiProvider for OllamaProvider {
 /// Selects the provider from the environment:
 /// AETHER_AI_PROVIDER=echo|ollama, AETHER_OLLAMA_URL, AETHER_OLLAMA_MODEL.
 /// Falls back to echo when the requested provider is unreachable later at
-/// call time — selection here only picks the preferred backend.
+/// call time - selection here only picks the preferred backend.
 pub fn provider_from_env() -> Box<dyn AiProvider + Send> {
     match std::env::var("AETHER_AI_PROVIDER").as_deref() {
         Ok("ollama") => Box::new(OllamaProvider {
@@ -157,7 +161,13 @@ impl AgentState {
             tasks: Vec::new(),
             now_ms,
             provider: provider_from_env(),
+            control_port: 4747,
         }
+    }
+
+    pub fn with_control_port(mut self, port: u16) -> Self {
+        self.control_port = port;
+        self
     }
 
     pub fn provider_name(&self) -> &str {
@@ -169,7 +179,12 @@ impl AgentState {
     }
 
     /// Records an event, evicting the oldest when full.
-    pub fn record_event(&mut self, severity: EventSeverity, source: &str, message: &str) -> AgentEvent {
+    pub fn record_event(
+        &mut self,
+        severity: EventSeverity,
+        source: &str,
+        message: &str,
+    ) -> AgentEvent {
         let event = AgentEvent {
             id: Uuid::new_v4(),
             severity,
@@ -267,6 +282,7 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
                 "health": state.health_verdict(),
                 "event_count": state.recent_events(usize::MAX).len(),
                 "task_count": state.tasks().len(),
+                "provider": state.provider_name(),
             }),
         },
         "events" => {
@@ -297,7 +313,11 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
         "task.add" => match request.argument.as_deref() {
             Some(text) if !text.trim().is_empty() => {
                 let task = state.add_task(text);
-                state.record_event(EventSeverity::Info, "tasks", &format!("added '{}'", task.description));
+                state.record_event(
+                    EventSeverity::Info,
+                    "tasks",
+                    &format!("added '{}'", task.description),
+                );
                 AgentResponse {
                     ok: true,
                     result: serde_json::to_value(task).unwrap_or(serde_json::Value::Null),
@@ -308,7 +328,11 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
                 result: serde_json::json!({ "error": "'argument' with task text required" }),
             },
         },
-        "task.done" => match request.argument.as_deref().and_then(|a| Uuid::parse_str(a).ok()) {
+        "task.done" => match request
+            .argument
+            .as_deref()
+            .and_then(|a| Uuid::parse_str(a).ok())
+        {
             Some(id) => {
                 let completed = state.complete_task(id);
                 AgentResponse {
@@ -324,6 +348,58 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
         "chat" => match request.argument.as_deref() {
             Some(text) if !text.trim().is_empty() => {
                 state.record_event(EventSeverity::Info, "ai", &format!("user: {text}"));
+
+                // Structured intent first; plain AI chat only when the text
+                // carries no capability request.
+                if let Some(intent) = intent::parse_intent(text) {
+                    let capability = intent.capability;
+                    let reply = match intent::validate(&intent) {
+                        Err(rejection) => {
+                            state.record_event(
+                                EventSeverity::Warning,
+                                "capability",
+                                &format!("rejected: {rejection} ({})", capability.as_str()),
+                            );
+                            format!("REQUEST REJECTED - {rejection}")
+                        }
+                        Ok(()) => {
+                            let client = intent::control_client(state.control_port);
+                            match intent::execute(&intent, &client) {
+                                Ok(result) => {
+                                    let formatted =
+                                        intent::format_result(capability, &result);
+                                    state.record_event(
+                                        EventSeverity::Info,
+                                        "capability",
+                                        &format!(
+                                            "{} -> {}",
+                                            capability.as_str(),
+                                            formatted
+                                        ),
+                                    );
+                                    formatted
+                                }
+                                Err(e) => {
+                                    state.record_event(
+                                        EventSeverity::Error,
+                                        "capability",
+                                        &format!("{} failed: {e}", capability.as_str()),
+                                    );
+                                    format!("ACTION FAILED - {e}")
+                                }
+                            }
+                        }
+                    };
+                    return AgentResponse {
+                        ok: true,
+                        result: serde_json::json!({
+                            "response": reply,
+                            "capability": capability.as_str(),
+                            "provider": "capability-layer",
+                        }),
+                    };
+                }
+
                 let outcome = state.provider.complete(text);
                 let (provider, response) = match outcome {
                     Ok(reply) => (state.provider.name().to_string(), reply),
@@ -359,7 +435,6 @@ mod tests {
     use std::cell::Cell;
 
     fn fake_clock(start: u64) -> (fn() -> u64, impl Fn()) {
-        // Deterministic monotonic clock for tests.
         thread_local! {
             static NOW: Cell<u64> = const { Cell::new(0) };
         }
@@ -424,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn chat_flows_through_default_echo_provider() {
+    fn chat_flows_through_provider_for_plain_text() {
         let (clock, _tick) = fake_clock(0);
         let mut state = AgentState::new(clock);
         let res = handle_request(

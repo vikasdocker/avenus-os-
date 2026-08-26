@@ -80,9 +80,14 @@ fn serve_tcp(state: Arc<Mutex<aether_agentd::AgentState>>) {
 }
 
 fn main() {
-    let state = Arc::new(Mutex::new(aether_agentd::AgentState::new(
-        aether_agentd::system_time_ms,
-    )));
+    let control_port = std::env::var("AETHER_CONTROL_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(4747);
+    let state = Arc::new(Mutex::new(
+        aether_agentd::AgentState::new(aether_agentd::system_time_ms)
+            .with_control_port(control_port),
+    ));
 
     if std::env::args().any(|a| a == "--stdio") {
         state.lock().unwrap_or_else(|p| p.into_inner()).record_event(

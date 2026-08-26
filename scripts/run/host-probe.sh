@@ -30,6 +30,15 @@ def call(port, req, timeout=8):
 
 print("GUEST AGENT status :", call(14748, {"command": "status"}))
 print("GUEST AGENT chat   :", call(14748, {"command": "chat", "argument": "HOST PROBE"}))
+print("CAP system.status  :", call(14747, {"service_id": "ai", "command": "system.status", "parameters": {}})[:100])
+print("CAP app.list       :", call(14747, {"service_id": "ai", "command": "app.list", "parameters": {}}))
+launch = call(14747, {"service_id": "ai", "command": "app.launch", "parameters": {"app": "calculator"}})
+print("CAP app.launch     :", launch)
+try:
+    instance = json.loads(launch)["result"]["instance"]["instance_id"]
+    print("CAP app.close      :", call(14747, {"service_id": "ai", "command": "app.close", "parameters": {"instance": instance}}))
+except (json.JSONDecodeError, KeyError):
+    print("CAP app.close      : skipped (launch failed)")
 print("CONTROL PLANE      :", call(14747, {"service_id": "aether-system-core", "command": "status", "parameters": {}})[:120])
 PY
 

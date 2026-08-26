@@ -6,6 +6,8 @@ version = 4
 name = "aether-agentd"
 version = "0.1.0"
 dependencies = [
+ "aether-core",
+ "aether-sdk",
  "serde",
  "serde_json",
  "uuid",
@@ -112,6 +114,7 @@ dependencies = [
 name = "aether-system-core"
 version = "0.1.0"
 dependencies = [
+ "aether-application-manager",
  "aether-core",
  "serde",
  "serde_json",
