@@ -20,7 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// graphical test app, `sleep` placeholders stand in for the rest.
 const SEED_APPS: &[(&str, &str, &str, &str)] = &[
     ("calculator", "Calculator", "0.1.0", "/bin/aether-calculator"),
-    ("notes", "Notes", "0.1.0", "/bin/sleep 3601"),
+    ("notes", "Notes", "0.1.0", "/bin/aether-notes"),
     ("files", "Files", "0.1.0", "/bin/sleep 3602"),
 ];
 

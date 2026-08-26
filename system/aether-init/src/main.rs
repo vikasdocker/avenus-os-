@@ -136,6 +136,7 @@ fn net_up() {
             log_warn("early-mounts", "virtio_net modprobe skipped (builtin?)");
         }
     }
+    let _ = Command::new("modprobe").arg("psmouse").status();
     // udhcpc requires the interface administratively UP.
     let _ = Command::new("/bin/ifconfig").args(["eth0", "up"]).status();
     // Built-in kernels have no module entry; driver may already be active.

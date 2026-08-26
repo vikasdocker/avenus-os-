@@ -41,8 +41,8 @@ pub struct AppDefinition {
     /// Entry point as an argv string; spawned directly, never via shell.
     pub command: String,
     pub app_type: AppType,
-    /// Declared permissions (e.g. "display", "filesystem.read"). Enforcement
-    /// arrives with the sandbox phase; declaration is required today.
+    /// Declared permissions (e.g. "display"). Enforcement arrives with the
+    /// sandbox phase; declaration is required today.
     pub permissions: Vec<String>,
 }
 
@@ -82,12 +82,13 @@ pub enum InstanceState {
 
 impl std::fmt::Display for InstanceState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Running => write!(f, "RUNNING"),
-            Self::Exited => write!(f, "EXITED"),
-            Self::Failed => write!(f, "FAILED"),
-            Self::Closed => write!(f, "CLOSED"),
-        }
+        let s = match self {
+            Self::Running => "RUNNING",
+            Self::Exited => "EXITED",
+            Self::Failed => "FAILED",
+            Self::Closed => "CLOSED",
+        };
+        write!(f, "{s}")
     }
 }
 
@@ -105,8 +106,6 @@ pub struct Instance {
 pub struct AppStateReport {
     pub app_id: String,
     pub installed: bool,
-    /// Worst-case aggregate: RUNNING when any instance runs, else the last
-    /// known instance state, else INSTALLED.
     pub state: String,
     pub instances: Vec<Instance>,
 }
@@ -153,6 +152,31 @@ impl From<AppManifestError> for AppManagerError {
     }
 }
 
+// ------------------------------------------------------------------ stdio
+
+/// Opens per-app output files as stdio redirections so failures remain
+/// diagnosable without a controlling terminal.
+fn app_stdio(out_path: &str) -> Option<(Stdio, Stdio)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let out = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o644)
+            .open(out_path)
+            .ok()?;
+        let err = out.try_clone().ok()?;
+        Some((Stdio::from(out), Stdio::from(err)))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = out_path;
+        None
+    }
+}
+
 // ----------------------------------------------------------------- manager
 
 /// Registry + runtime + lifecycle owner.
@@ -183,7 +207,13 @@ impl ApplicationManager {
         display_name: &str,
         command: &str,
     ) -> Result<(), AppManagerError> {
-        self.register(AppDefinition::new(id, display_name, "0.1.0", command, &["display"])?)
+        self.register(AppDefinition::new(
+            id,
+            display_name,
+            "0.1.0",
+            command,
+            &["display"],
+        )?)
     }
 
     /// DISCOVER: all registered definitions sorted by id.
@@ -198,9 +228,7 @@ impl ApplicationManager {
 
     // ---- lifecycle ----
 
-    /// Reaps finished children, updating their recorded states. Called at
-    /// the top of every query/mutation so states stay fresh without a
-    /// dedicated supervisor thread.
+    /// Reaps finished children, updating their recorded states.
     fn reap(&mut self) {
         let ids: Vec<u64> = self.instances.keys().copied().collect();
         for id in ids {
@@ -219,7 +247,6 @@ impl ApplicationManager {
                         };
                     }
                     Ok(None) => {
-                        // Still running: put the child back.
                         record.child = child_slot;
                     }
                     Err(_) => {
@@ -252,49 +279,54 @@ impl ApplicationManager {
         let Some(program) = parts.next() else {
             return Err(AppManagerError::LaunchFailed("empty command".to_string()));
         };
-        match Command::new(program)
-            .args(parts.collect::<Vec<_>>())
+        let args: Vec<&str> = parts.collect();
+        let app_name = program.rsplit('/').next().unwrap_or("app");
+        let stdio_pair = app_stdio(&format!("/tmp/{app_name}.out"));
+        let (out_stdio, err_stdio) = match stdio_pair {
+            Some((o, e)) => (Some(o), Some(e)),
+            None => (None, None),
+        };
+
+        let spawn_result = Command::new(program)
+            .args(&args)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
+            .stdout(out_stdio.unwrap_or(Stdio::null()))
+            .stderr(err_stdio.unwrap_or(Stdio::null()))
+            .spawn();
+
+        let (child_handle, pid) = match spawn_result {
             Ok(child) => {
                 let pid = Some(child.id());
-                let instance = Instance {
-                    instance_id,
-                    app_id: def.id.clone(),
-                    pid,
-                    state: InstanceState::Running,
-                };
-                self.instances.insert(
-                    instance_id,
-                    InstanceRecord {
-                        instance: instance.clone(),
-                        child: Some(child),
-                    },
-                );
-                Ok(instance)
+                (Some(child), pid)
             }
-            Err(e) => {
-                let instance = Instance {
-                    instance_id,
-                    app_id: def.id.clone(),
-                    pid: None,
-                    state: InstanceState::Failed,
-                };
-                self.instances.insert(
-                    instance_id,
-                    InstanceRecord {
-                        instance: instance.clone(),
-                        child: None,
-                    },
-                );
-                Err(AppManagerError::LaunchFailed(format!(
-                    "{e} (recorded as FAILED instance {instance_id})"
-                )))
-            }
+            Err(_) => (None, None),
+        };
+
+        let state = if child_handle.is_some() {
+            InstanceState::Running
+        } else {
+            InstanceState::Failed
+        };
+        let instance = Instance {
+            instance_id,
+            app_id: def.id.clone(),
+            pid,
+            state,
+        };
+        self.instances.insert(
+            instance_id,
+            InstanceRecord {
+                instance: instance.clone(),
+                child: child_handle,
+            },
+        );
+
+        if state == InstanceState::Failed {
+            return Err(AppManagerError::LaunchFailed(format!(
+                "spawn failed; recorded as FAILED instance {instance_id}"
+            )));
         }
+        Ok(instance)
     }
 
     /// RUNNING: live instances (after reaping).
@@ -379,19 +411,6 @@ impl ApplicationManager {
     }
 }
 
-// ------------------------------------------------------------ compatibility
-
-impl ApplicationManager {
-    /// Legacy accessor kept for existing callers: running instances.
-    pub fn running_legacy(&self) -> Vec<Instance> {
-        self.instances
-            .values()
-            .filter(|r| r.instance.state == InstanceState::Running)
-            .map(|r| r.instance.clone())
-            .collect()
-    }
-}
-
 // ------------------------------------------------------------------- tests
 
 #[cfg(test)]
@@ -411,8 +430,14 @@ mod tests {
     fn failed_spawn_is_recorded_as_failed_instance() {
         let mut am = ApplicationManager::new();
         am.register(
-            AppDefinition::new("badapp", "Bad", "0.1.0", "/definitely/not/a/binary", &["display"])
-                .unwrap_or_else(|e| panic!("{e}")),
+            AppDefinition::new(
+                "badapp",
+                "Bad",
+                "0.1.0",
+                "/definitely/not/a/binary",
+                &["display"],
+            )
+            .unwrap_or_else(|e| panic!("{e}")),
         )
         .unwrap_or_else(|e| panic!("{e}"));
         let err = am
@@ -464,6 +489,7 @@ mod tests {
         assert_eq!(ids, vec!["alpha".to_string(), "zeta".to_string()]);
     }
 
+    // Spawn-dependent lifecycle tests require a unix userspace (/bin/sleep).
     #[cfg(unix)]
     #[test]
     fn status_query_tracks_lifecycle() {
@@ -474,7 +500,6 @@ mod tests {
         )
         .unwrap_or_else(|e| panic!("{e}"));
 
-        // Before launch: INSTALLED, no instances.
         let before = am.app_state("lifecycle");
         assert_eq!(before.state, "INSTALLED");
         assert!(before.instances.is_empty());

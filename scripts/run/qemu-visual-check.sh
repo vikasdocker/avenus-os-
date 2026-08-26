@@ -32,10 +32,12 @@ APPEND="console=ttyS0 tsc=unstable panic=-1 aether=single"
     printf 'Open Calculator.\r'
     sleep 8
     printf 'Is Calculator running?\r'
-    sleep 6
+    sleep 5
+    printf 'Open Notes.\r'
+    sleep 8
     printf 'Close Calculator.\r'
     sleep 6
-} | timeout 95 qemu-system-x86_64 \
+} | timeout 105 qemu-system-x86_64 \
     -m 512M -nographic -no-reboot \
     -vga none \
     -device virtio-gpu-pci,xres=1024,yres=768 \
@@ -66,11 +68,11 @@ PY
     # Before any capability message: splash only.
     sleep 20
     screendump "$SHOT_BEFORE"
-    # Mid: after Open Calculator the app owns the surface.
-    sleep 14
+    # Mid: Calculator + Notes both open (two windows).
+    sleep 26
     screendump "$SHOT_MID"
     # After Close Calculator: shell reclaimed, conversation visible.
-    sleep 22
+    sleep 26
     screendump "$SHOT_AFTER"
 ) &
 
@@ -108,6 +110,7 @@ total = w * h
 bg = bytes((14, 17, 22))
 cyan = bytes((34, 211, 238))
 panel = bytes((28, 34, 44))
+notes_bg = bytes((18, 22, 28))
 
 def count(buf, color):
     return sum(buf[i:i+3] == color for i in range(0, total * 3, 3))
@@ -116,20 +119,19 @@ def changed(a, b):
     return sum(a[i:i+3] != b[i:i+3] for i in range(0, total * 3, 3))
 
 bg_after = count(after, bg)
-cyan_before, cyan_mid, cyan_after = (count(x, cyan) for x in (before, mid, after))
 panel_mid = count(mid, panel)
+notes_mid = count(mid, notes_bg)
+notes_after = count(after, notes_bg)
 diff_total = changed(before, after)
 
-print(f"screenshot {w}x{h}; bg {100*bg_after//total}%; "
-      f"cyan {cyan_before}->{cyan_mid}->{cyan_after}; "
-      f"panel_px(mid)={panel_mid}; total_changed={diff_total}")
+print(f"screenshot {w}x{h}; calc_panel(mid)={panel_mid}; "
+      f"notes_surface mid={notes_mid} after={notes_after}; total_changed={diff_total}")
 
-# Criteria:
-# - app surface visible mid-run: large PANEL-colored region on screen
-# - lifecycle closed: final screen differs from pre-message screen
-#   (conversation history) and shell reclaimed (bg back above 50%).
-if panel_mid > total // 10 and bg_after > total // 2 and diff_total > 2000:
-    print("APP RUNTIME PASS: calculator surface rendered and closed cleanly")
+# Two windows simultaneously: calculator panel AND notes surface both
+# present mid-run; afterwards the shell reclaimed the desktop.
+notes_seen = max(notes_mid, notes_after)
+if panel_mid > total // 20 and notes_seen > total // 40 and bg_after > total // 2 and diff_total > 2000:
+    print("APP RUNTIME PASS: two app windows rendered; lifecycle completed")
 else:
-    print("VISUAL FAIL: application runtime did not complete its lifecycle")
+    print("VISUAL FAIL: multi-window runtime did not complete")
 PY

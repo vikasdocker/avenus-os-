@@ -1,0 +1,12 @@
+[package]
+name = "aether-wm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether Window Manager - window model and management logic"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+[lints]
+workspace = true

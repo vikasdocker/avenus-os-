@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
   "apps/aether-apps",
+  "apps/aether-surface",
   "apps/calculator",
+  "apps/notes",
   "core/aether-core",
   "security/aether-security",
   "system/aether-process-manager",
@@ -15,6 +17,7 @@ members = [
   "shell/aether-shell",
   "graphics/libaether-graphics",
   "graphics/aether-graphical-shell",
+  "graphics/aether-wm",
   "sdk/rust/aether-sdk",
   "tools/aetherctl"
 ]

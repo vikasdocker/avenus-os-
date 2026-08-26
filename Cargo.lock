@@ -34,6 +34,9 @@ dependencies = [
 [[package]]
 name = "aether-calculator"
 version = "0.1.0"
+dependencies = [
+ "aether-surface",
+]
 
 [[package]]
 name = "aether-core"
@@ -48,6 +51,8 @@ dependencies = [
 name = "aether-graphical-shell"
 version = "0.1.0"
 dependencies = [
+ "aether-wm",
+ "serde",
  "serde_json",
 ]
 
@@ -59,6 +64,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "aether-notes"
+version = "0.1.0"
+dependencies = [
+ "aether-surface",
 ]
 
 [[package]]
@@ -115,6 +127,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-surface"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aether-system-core"
 version = "0.1.0"
 dependencies = [
@@ -128,6 +148,13 @@ dependencies = [
 [[package]]
 name = "aether-voice"
 version = "0.1.0"
+
+[[package]]
+name = "aether-wm"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "aetherctl"

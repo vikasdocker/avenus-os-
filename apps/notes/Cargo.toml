@@ -1,16 +1,17 @@
 [package]
-name = "aether-calculator"
+name = "aether-notes"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Aether Calculator - minimal graphical test application"
+description = "Aether Notes - minimal graphical text scratchpad application"
 
 [[bin]]
-name = "aether-calculator"
+name = "aether-notes"
 path = "src/main.rs"
 
 [dependencies]
 aether-surface = { path = "../aether-surface" }
+
 [lints]
 workspace = true

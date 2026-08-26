@@ -32,7 +32,7 @@ chmod 1777 "$STAGE/tmp"
 # 1. Aether binaries.
 cargo build --release $TARGET_ARGS -p aether-init -p aether-system-core \
     -p aetherctl -p aether-shell -p aether-graphical-shell -p aether-agentd \
-    -p aether-calculator
+    -p aether-calculator -p aether-notes
 
 copy_binary() {
     local src="$1" dst="$2" tries=0
@@ -52,6 +52,7 @@ copy_binary "$BIN_DIR/aethersh"           "$STAGE/bin/"
 copy_binary "$BIN_DIR/aetherctl"          "$STAGE/usr/bin/"
 copy_binary "$BIN_DIR/aether-graphical-shell" "$STAGE/bin/"
 copy_binary "$BIN_DIR/aether-calculator"     "$STAGE/bin/"
+copy_binary "$BIN_DIR/aether-notes"          "$STAGE/bin/"
 copy_binary "$BIN_DIR/aether-agentd"         "$STAGE/sbin/"
 
 # Fail loudly if a dynamic binary slipped through: the initramfs has no loader.
@@ -96,6 +97,7 @@ if [[ -d "$MODDIR" ]]; then
     {
         modprobe --set-version="$REL" --show-depends virtio_gpu 2>/dev/null || true
         modprobe --set-version="$REL" --show-depends virtio_net 2>/dev/null || true
+        modprobe --set-version="$REL" --show-depends psmouse 2>/dev/null || true
     } >"$DEPS_LIST"
     staged=0
     while read -r line; do
