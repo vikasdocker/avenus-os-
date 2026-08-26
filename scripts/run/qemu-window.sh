@@ -29,6 +29,8 @@ exec qemu-system-x86_64 \
     -display gtk,gl=off,zoom-to-fit=on \
     -vga none \
     -device virtio-gpu-pci,xres=1024,yres=768 \
+    -netdev user,id=n0,hostfwd=tcp::14748-:4748,hostfwd=tcp::14747-:4747 \
+    -device virtio-net-pci,netdev=n0 \
     -no-reboot \
     -kernel "$KERNEL" -initrd "$INITRD" \
     -append "$APPEND"
