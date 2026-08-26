@@ -1,0 +1,54 @@
+AETHER OS - PHASE STATUS
+========================
+
+Updated: 2026-08-26
+Overall: ALL RUST/PHASES COMPILED, TESTED, AND BOOTED
+
+VERIFICATION SUMMARY
+--------------------
+1. Workspace build ............ PASS (14 crates, zero warnings, clippy clean)
+2. Rust unit tests ............ PASS (66/66)
+3. Python brain + SDK tests ... PASS (6/6)
+4. Live host demo ............. PASS (control plane boot -> status -> restart -> shutdown)
+5. QEMU boot smoke test ....... PASS (kernel 6.8, initramfs, PID1 boot stages)
+6. In-VM control-plane test ... PASS (aetherctl status/restart/shutdown from console)
+
+CRATES IN WORKSPACE
+-------------------
+apps/aether-apps                    application manifest contracts
+core/aether-core                    shared domain types, errors, IPC, manifests
+security/aether-security            capability policy
+system/aether-process-manager       process discovery/lifecycle/security
+system/aether-init                  PID1: boot stages, kernel params, console session
+system/aether-system-core           service lifecycle owner + TCP control plane
+system/aether-application-manager   app registry + launch lifecycle
+services/aether-agentd              AI control-plane agent (events, tasks)
+services/aether-supervisor          restart policies with exponential backoff
+voice/aether-voice                  voice domain contracts
+shell/aether-shell                  aethersh interactive REPL (35 commands)
+graphics/libaether-graphics         display/renderer/input/window/cursor/output/
+                                    compositor/session/workspace/desktop shell
+sdk/rust/aether-sdk                 Rust client library for the control plane
+sdk/python/aether_sdk               Python wire-protocol helpers
+tools/aetherctl                     CLI control client
+
+BOOTABLE IMAGE
+--------------
+Build : bash scripts/iso/build-initramfs.sh   (WSL/Linux; static musl binaries)
+Boot  : AETHER_KERNEL=<bzImage> bash scripts/run/qemu.sh
+Smoke : AETHER_KERNEL=<bzImage> bash scripts/run/qemu.sh --smoke 45
+Drive : bash scripts/run/qemu-drive.sh        (status/restart/shutdown over serial)
+
+Boot sequence verified under QEMU (x86_64, kernel 6.8):
+  [aether-init] early mounts + loopback up
+  [aether-init] kernel params parsed (aether=quiet,port=N,manifests=DIR)
+  [system-core] manifests loaded, dependency graph resolved
+  [system-core] services started in dependency order (core -> agentd -> apps)
+  [system-core] control plane listening on 127.0.0.1:4747
+  console session on /dev/console; poweroff clean
+
+KNOWN LIMITATIONS (NEXT PHASES)
+-------------------------------
+- system-core runs Internal services in-process; Process spawning via supervisor
+- graphics stack is headless-capable software rendering; no DRM/KMS backend yet
+- Qt/QML shell assets present but not integrated into image

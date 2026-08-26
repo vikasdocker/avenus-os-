@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+echo '{"component":"aether-shutdown","event":"shutdown-request","message":"clean shutdown requested"}'
+
+if [ -p /run/aether/ipc/aether-core.commands ]; then
+    echo stop > /run/aether/ipc/aether-core.commands || true
+fi
+
+sync
+poweroff -f
+

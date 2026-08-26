@@ -1,0 +1,122 @@
+#!/bin/sh
+set -eu
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PATH
+
+BOOT_LOG=/var/log/aether/boot.log
+CORE_PID=""
+
+timestamp() {
+    date '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date
+}
+
+log() {
+    level="$1"
+    component="$2"
+    event="$3"
+    message="$4"
+    line="{\"ts\":\"$(timestamp)\",\"level\":\"$level\",\"component\":\"$component\",\"event\":\"$event\",\"message\":\"$message\"}"
+    echo "$line"
+    echo "$line" >> "$BOOT_LOG" 2>/dev/null || true
+}
+
+mount_fs() {
+    type="$1"
+    source="$2"
+    target="$3"
+    mkdir -p "$target"
+    if grep -qs " $target " /proc/mounts 2>/dev/null; then
+        log info init mount-skip "$target already mounted"
+    elif mount -t "$type" "$source" "$target"; then
+        log info init mount "$target mounted"
+    else
+        log error init mount-failed "$target mount failed"
+    fi
+}
+
+prepare_devices() {
+    [ -e /dev/console ] || mknod /dev/console c 5 1
+    [ -e /dev/null ] || mknod /dev/null c 1 3
+    [ -e /dev/ttyS0 ] || mknod /dev/ttyS0 c 4 64 || true
+}
+
+start_network() {
+    ifconfig lo up >/dev/null 2>&1 || true
+    if ifconfig eth0 up >/dev/null 2>&1; then
+        if udhcpc -i eth0 -s /usr/share/udhcpc/default.script -q -t 5 -n >/dev/null 2>&1; then
+            log info network dhcp "eth0 configured by DHCP"
+            echo "AETHER_NETWORK_READY interface=eth0 mode=dhcp"
+        else
+            ifconfig eth0 10.0.2.15 netmask 255.255.255.0 >/dev/null 2>&1 || true
+            route add default gw 10.0.2.2 eth0 >/dev/null 2>&1 || true
+            log warn network fallback "eth0 DHCP failed; static QEMU fallback attempted"
+            echo "AETHER_NETWORK_READY interface=eth0 mode=fallback"
+        fi
+    else
+        log warn network unavailable "eth0 unavailable"
+        echo "AETHER_NETWORK_UNAVAILABLE interface=eth0"
+    fi
+}
+
+start_service() {
+    name="$1"
+    command="$2"
+    log info init service-start "starting $name"
+    $command &
+    pid="$!"
+    sleep 1
+    if kill -0 "$pid" >/dev/null 2>&1; then
+        log info init service-ready "$name pid=$pid"
+        CORE_PID="$pid"
+    else
+        log error init service-failed "$name failed during startup"
+    fi
+}
+
+stop_services() {
+    log info init shutdown "stopping services"
+    if [ -x /usr/bin/aetherctl ]; then
+        /usr/bin/aetherctl --socket /run/aether/ipc/aether-system-core.sock system shutdown >/dev/null 2>&1 || true
+    fi
+    if [ -n "$CORE_PID" ] && kill -0 "$CORE_PID" >/dev/null 2>&1; then
+        kill "$CORE_PID" >/dev/null 2>&1 || true
+        wait "$CORE_PID" >/dev/null 2>&1 || true
+    fi
+    sync
+    log info init shutdown "services stopped"
+}
+
+shutdown_handler() {
+    stop_services
+    poweroff -f
+}
+
+trap shutdown_handler INT TERM
+
+mkdir -p /var/log/aether /run/aether/health /run/aether/ipc /tmp /home
+: > "$BOOT_LOG"
+echo "AETHER_INIT_STARTED"
+log info init startup "Aether init started"
+
+prepare_devices
+mount_fs proc proc /proc
+mount_fs sysfs sysfs /sys
+mount_fs devtmpfs devtmpfs /dev
+mount_fs devpts devpts /dev/pts
+mount_fs tmpfs tmpfs /run
+mkdir -p /run/aether/health /run/aether/ipc /var/log/aether /tmp /home
+chmod 1777 /tmp
+
+start_network
+if [ -x /usr/sbin/aether-system-core ]; then
+    start_service aether-system-core "/usr/sbin/aether-system-core --manifest-dir /etc/aether/services.d --socket /run/aether/ipc/aether-system-core.sock --filesystem-socket /run/aether/ipc/aether-filesystemd.sock --log /var/log/aether/aether-system-core.log --audit-log /var/log/aether/aether-audit.log"
+else
+    start_service aether-core /usr/sbin/aether-core
+fi
+
+log info init shell "interactive shell ready on console"
+echo "AETHER_SHELL_READY"
+cttyhack /bin/sh -i </dev/console >/dev/console 2>&1 || /bin/sh -i </dev/console >/dev/console 2>&1
+stop_services
+poweroff -f

@@ -1,0 +1,13 @@
+config BR2_PACKAGE_AETHER_SYSTEM_CORE
+	bool "aether-system-core"
+	depends on BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS
+	select BR2_PACKAGE_AETHER_CORE
+	select BR2_PACKAGE_HOST_RUSTC
+	help
+	  Install the Rust Aether System Core service manager and the
+	  IPC-based aetherctl development CLI. This package also installs
+	  the Phase 1.5 aether-filesystemd storage service used by System
+	  Core after capability authorization. The System Core loads service
+	  manifests, resolves dependencies, supervises process services,
+	  evaluates health, exposes metrics, and serves the first local
+	  Aether IPC control socket.

@@ -1,0 +1,2 @@
+source "$BR2_EXTERNAL_AETHER_PATH/package/aether-core/Config.in"
+source "$BR2_EXTERNAL_AETHER_PATH/package/aether-system-core/Config.in"

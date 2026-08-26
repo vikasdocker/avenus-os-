@@ -1,0 +1,68 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 22,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Developer build",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/cmake/dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "AETHER_WARNINGS_AS_ERRORS": "ON",
+        "AETHER_BUILD_UI": "OFF"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release build",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/cmake/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "AETHER_WARNINGS_AS_ERRORS": "ON",
+        "AETHER_BUILD_UI": "OFF"
+      }
+    },
+    {
+      "name": "initramfs-static",
+      "displayName": "Static native binaries for initramfs",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/cmake/initramfs-static",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "AETHER_WARNINGS_AS_ERRORS": "ON",
+        "AETHER_STATIC": "ON",
+        "AETHER_BUILD_UI": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "initramfs-static",
+      "configurePreset": "initramfs-static"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,14 @@
+[package]
+name = "aether-security"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Security domain contracts for Aether OS"
+
+[dependencies]
+aether-core = { path = "../../core/aether-core" }
+
+[lints]
+workspace = true
+

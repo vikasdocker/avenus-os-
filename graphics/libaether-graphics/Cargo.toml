@@ -1,0 +1,13 @@
+[package]
+name = "libaether-graphics"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Project Genesis Contributors"]
+
+[dependencies]
+aether-core = { path = "../../core/aether-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"

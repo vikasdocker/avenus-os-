@@ -1,0 +1,21 @@
+[project]
+name = "aether-os-devtools"
+version = "0.1.0"
+description = "Python developer tools and AI brain package for Project Genesis Aether OS"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "Project Genesis Contributors" }
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["brain", "sdk/python"]
+testpaths = ["tests/python"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM"]
+

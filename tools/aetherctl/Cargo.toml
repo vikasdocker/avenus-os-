@@ -1,0 +1,18 @@
+[package]
+name = "aetherctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aetherctl - local development control client for Aether OS"
+
+[[bin]]
+name = "aetherctl"
+path = "src/main.rs"
+
+[dependencies]
+aether-sdk = { path = "../../sdk/rust/aether-sdk" }
+serde_json = "1"
+
+[lints]
+workspace = true

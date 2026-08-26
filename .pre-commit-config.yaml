@@ -1,0 +1,19 @@
+repos:
+  - repo: local
+    hooks:
+      - id: aether-format
+        name: Aether format
+        entry: bash scripts/format.sh
+        language: system
+        pass_filenames: false
+      - id: aether-lint
+        name: Aether lint
+        entry: bash scripts/lint.sh
+        language: system
+        pass_filenames: false
+      - id: aether-test
+        name: Aether tests
+        entry: bash scripts/test.sh
+        language: system
+        pass_filenames: false
+

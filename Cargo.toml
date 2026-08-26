@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+  "apps/aether-apps",
+  "core/aether-core",
+  "security/aether-security",
+  "system/aether-process-manager",
+  "system/aether-init",
+  "system/aether-system-core",
+  "system/aether-application-manager",
+  "services/aether-agentd",
+  "services/aether-supervisor",
+  "voice/aether-voice",
+  "shell/aether-shell",
+  "graphics/libaether-graphics",
+  "sdk/rust/aether-sdk",
+  "tools/aetherctl"
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Project Genesis Contributors"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "deny"
+unwrap_used = "deny"
+expect_used = "deny"

@@ -1,0 +1,94 @@
+#!/bin/sh
+set -eu
+
+CONFIG_FILE="${AETHER_CORE_CONFIG:-/etc/aether/aether-core.conf}"
+LOG_FILE="${AETHER_CORE_LOG:-/var/log/aether/aether-core.log}"
+HEALTH_FILE="${AETHER_CORE_HEALTH:-/run/aether/health/aether-core.json}"
+IPC_DIR="${AETHER_CORE_IPC_DIR:-/run/aether/ipc}"
+IPC_FIFO="$IPC_DIR/aether-core.commands"
+IPC_RESPONSES="$IPC_DIR/aether-core.responses"
+SERVICE_NAME="aether-core"
+STATE_INTERVAL=5
+RUNNING=1
+
+load_config() {
+    if [ -r "$CONFIG_FILE" ]; then
+        # The file is part of the signed root filesystem for this development image.
+        # shellcheck disable=SC1090
+        . "$CONFIG_FILE"
+    fi
+}
+
+timestamp() {
+    date '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date
+}
+
+log() {
+    level="$1"
+    event="$2"
+    message="$3"
+    line="{\"ts\":\"$(timestamp)\",\"level\":\"$level\",\"component\":\"$SERVICE_NAME\",\"event\":\"$event\",\"message\":\"$message\"}"
+    echo "$line"
+    echo "$line" >> "$LOG_FILE"
+}
+
+write_health() {
+    state="$1"
+    mkdir -p "$(dirname "$HEALTH_FILE")"
+    cat > "$HEALTH_FILE" <<HEALTH
+{"component":"$SERVICE_NAME","state":"$state","ipc":"$IPC_FIFO","pid":$$}
+HEALTH
+}
+
+shutdown() {
+    RUNNING=0
+    log info shutdown "graceful shutdown requested"
+    write_health stopping
+    rm -f "$IPC_FIFO"
+    write_health stopped
+    exit 0
+}
+
+handle_command() {
+    command="$1"
+    case "$command" in
+        ping)
+            echo "pong" >> "$IPC_RESPONSES"
+            ;;
+        status)
+            cat "$HEALTH_FILE" >> "$IPC_RESPONSES"
+            ;;
+        stop)
+            echo "stopping" >> "$IPC_RESPONSES"
+            shutdown
+            ;;
+        "")
+            ;;
+        *)
+            echo "unsupported command: $command" >> "$IPC_RESPONSES"
+            ;;
+    esac
+}
+
+trap shutdown INT TERM
+load_config
+
+mkdir -p "$(dirname "$LOG_FILE")" "$IPC_DIR"
+rm -f "$IPC_FIFO"
+mkfifo "$IPC_FIFO"
+: > "$IPC_RESPONSES"
+
+log info startup "configuration loaded from $CONFIG_FILE"
+write_health ready
+touch "$IPC_DIR/aether-core.ready"
+echo "AETHER_CORE_READY"
+
+while [ "$RUNNING" -eq 1 ]; do
+    if read -r command < "$IPC_FIFO"; then
+        handle_command "$command"
+    fi
+    write_health ready
+    sleep "$STATE_INTERVAL" &
+    wait "$!" || true
+done
+

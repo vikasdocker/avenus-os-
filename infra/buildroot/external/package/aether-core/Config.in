@@ -1,0 +1,9 @@
+config BR2_PACKAGE_AETHER_CORE
+	bool "aether-core"
+	help
+	  Install the minimal non-AI Aether Core service used by the
+	  Phase 1.2 bootable Buildroot image. The service demonstrates
+	  configuration loading, structured logging, health state,
+	  graceful shutdown, and local IPC readiness without exposing
+	  network services.
+
