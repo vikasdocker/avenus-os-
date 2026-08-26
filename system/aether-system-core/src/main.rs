@@ -16,12 +16,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Applications the capability layer exposes. Commands are spawned directly
-/// as argv vectors (never through a shell); `sleep` placeholders stand in
-/// for real graphical apps in this phase.
-const SEED_APPS: &[(&str, &str, &str)] = &[
-    ("calculator", "Calculator", "/bin/sleep 3600"),
-    ("notes", "Notes", "/bin/sleep 3601"),
-    ("files", "Files", "/bin/sleep 3602"),
+/// as argv vectors (never through a shell); `aether-calculator` is the real
+/// graphical test app, `sleep` placeholders stand in for the rest.
+const SEED_APPS: &[(&str, &str, &str, &str)] = &[
+    ("calculator", "Calculator", "0.1.0", "/bin/aether-calculator"),
+    ("notes", "Notes", "0.1.0", "/bin/sleep 3601"),
+    ("files", "Files", "0.1.0", "/bin/sleep 3602"),
 ];
 
 fn unix_ms() -> u128 {
@@ -101,13 +101,39 @@ fn dispatch_inner(
 ) -> IpcResponse {
     let mut executor = LocalExecutor::default();
     match req.command.as_str() {
-        "status" | "system.status" => match serde_json::to_value(manager.system_status()) {
-            Ok(result) => IpcResponse::ok(&req.command, result),
-            Err(e) => IpcResponse::err(
-                "status",
+        "status" | "system.status" => {
+            let mut value = match serde_json::to_value(manager.system_status()) {
+                Ok(v) => v,
+                Err(e) => {
+                    return IpcResponse::err(
+                        &req.command,
+                        IpcError {
+                            code: "INTERNAL".to_string(),
+                            message: e.to_string(),
+                        },
+                    )
+                }
+            };
+            // Application runtime summary (installed/running/failed).
+            let (installed, running, failed) = apps.stats();
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert(
+                    "applications".to_string(),
+                    serde_json::json!({ "installed": installed, "running": running, "failed": failed }),
+                );
+            }
+            IpcResponse::ok(&req.command, value)
+        }
+        "app.status" => match req.parameters.get("app").and_then(|v| v.as_str()) {
+            Some(app_id) => {
+                let report = apps.app_state(app_id);
+                IpcResponse::ok("app.status", serde_json::json!({ "report": report }))
+            }
+            None => IpcResponse::err(
+                "app.status",
                 IpcError {
-                    code: "INTERNAL".to_string(),
-                    message: e.to_string(),
+                    code: "INVALID_INPUT".to_string(),
+                    message: "parameter 'app' is required".to_string(),
                 },
             ),
         },
@@ -178,9 +204,14 @@ fn dispatch_inner(
         }
         "app.list" => {
             let apps_list: Vec<serde_json::Value> = apps
-                .list()
+                .discover()
                 .into_iter()
-                .map(|(id, name, _)| serde_json::json!({ "id": id, "name": name }))
+                .map(|d| {
+                    serde_json::json!({
+                        "id": d.id, "name": d.display_name, "version": d.version,
+                        "type": d.app_type.to_string(), "permissions": d.permissions,
+                    })
+                })
                 .collect();
             IpcResponse::ok("app.list", serde_json::json!({ "apps": apps_list }))
         }
@@ -206,25 +237,54 @@ fn dispatch_inner(
                 },
             ),
         },
-        "app.close" => match req.parameters.get("instance").and_then(|v| v.as_u64()) {
-            Some(instance) => match apps.close(instance) {
-                Ok(closed) => IpcResponse::ok("app.close", serde_json::json!({ "closed": closed })),
-                Err(e) => IpcResponse::err(
-                    "app.close",
-                    IpcError {
-                        code: "APP_ERROR".to_string(),
-                        message: e.to_string(),
+        "app.close" => {
+            // Close by application name (closes its RUNNING instance) or by
+            // explicit instance id.
+            if let Some(app_id) = req.parameters.get("app").and_then(|v| v.as_str()) {
+                let target = apps
+                    .running()
+                    .into_iter()
+                    .find(|i| i.app_id == app_id)
+                    .map(|i| i.instance_id);
+                match target {
+                    Some(instance) => match apps.close(instance) {
+                        Ok(closed) => {
+                            IpcResponse::ok("app.close", serde_json::json!({ "closed": closed }))
+                        }
+                        Err(e) => IpcResponse::err(
+                            "app.close",
+                            IpcError { code: "APP_ERROR".to_string(), message: e.to_string() },
+                        ),
                     },
-                ),
-            },
-            None => IpcResponse::err(
-                "app.close",
-                IpcError {
-                    code: "INVALID_INPUT".to_string(),
-                    message: "numeric parameter 'instance' is required".to_string(),
-                },
-            ),
-        },
+                    None => IpcResponse::err(
+                        "app.close",
+                        IpcError {
+                            code: "NOT_RUNNING".to_string(),
+                            message: format!("'{app_id}' has no running instance"),
+                        },
+                    ),
+                }
+            } else {
+                match req.parameters.get("instance").and_then(|v| v.as_u64()) {
+                    Some(instance) => match apps.close(instance) {
+                        Ok(closed) => {
+                            IpcResponse::ok("app.close", serde_json::json!({ "closed": closed }))
+                        }
+                        Err(e) => IpcResponse::err(
+                            "app.close",
+                            IpcError { code: "APP_ERROR".to_string(), message: e.to_string() },
+                        ),
+                    },
+                    None => IpcResponse::err(
+                        "app.close",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "'app' or numeric 'instance' is required".to_string(),
+                        },
+                    ),
+                }
+            }
+        }
         "shutdown" => IpcResponse::ok("shutdown", serde_json::json!({ "state": "SHUTTING_DOWN" })),
         other => IpcResponse::err(
             other,
@@ -275,15 +335,25 @@ fn main() {
     }
 
     let mut apps = ApplicationManager::default();
-    for (id, name, command) in SEED_APPS {
-        if let Err(e) = apps.register_json(id, name, command) {
-            eprintln!("[system-core] seed app '{id}' rejected: {e}");
+    for (id, name, version, command) in SEED_APPS {
+        let def = aether_application_manager::AppDefinition::new(
+            id,
+            name,
+            version,
+            command,
+            &["display"],
+        );
+        match def {
+            Ok(def) => {
+                let _ = apps.register(def);
+            }
+            Err(e) => eprintln!("[system-core] seed app '{id}' rejected: {e}"),
         }
     }
     eprintln!(
-        "[system-core] {} services running; {} app capabilities registered; control plane on 127.0.0.1:{port}",
+        "[system-core] {} services running; {} app capabilities registered; control plane on {bind_addr}:{port}",
         manager.graph().len(),
-        apps.list().len()
+        apps.registered_count()
     );
 
     let listener = match std::net::TcpListener::bind((bind_addr.as_str(), port)) {

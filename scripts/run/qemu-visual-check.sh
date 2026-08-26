@@ -9,10 +9,11 @@ KERNEL="${AETHER_KERNEL:-/home/vikas/aether-vmlinuz}"
 INITRD=build/initramfs.cpio.gz
 LOG=build/qemu-visual.log
 SHOT_BEFORE=/tmp/aether-before.ppm
+SHOT_MID=/tmp/aether-mid.ppm
 SHOT_AFTER=/tmp/aether-after.ppm
 MON=/tmp/aether-monitor.sock
 
-rm -f "$MON" "$SHOT_BEFORE" "$SHOT_AFTER"
+rm -f "$MON" "$SHOT_BEFORE" "$SHOT_MID" "$SHOT_AFTER"
 
 # aether=single: graphical shell owns serial input exclusively
 # (no competing console-session reader on ttyS0).
@@ -25,13 +26,16 @@ APPEND="console=ttyS0 tsc=unstable panic=-1 aether=single"
     sleep 2
     printf 'aetherctl status\n'
     sleep 4
-    # Capability test 1 (UI -> Agent -> app.list -> Control Plane).
-    printf 'Show me the available applications.\r'
+    # Full application lifecycle through the AI UI:
+    printf 'Show my applications.\r'
     sleep 6
-    # Capability test 2 (app.launch).
-    printf 'Open the calculator.\r'
+    printf 'Open Calculator.\r'
     sleep 8
-} | timeout 75 qemu-system-x86_64 \
+    printf 'Is Calculator running?\r'
+    sleep 6
+    printf 'Close Calculator.\r'
+    sleep 6
+} | timeout 95 qemu-system-x86_64 \
     -m 512M -nographic -no-reboot \
     -vga none \
     -device virtio-gpu-pci,xres=1024,yres=768 \
@@ -62,8 +66,11 @@ PY
     # Before any capability message: splash only.
     sleep 20
     screendump "$SHOT_BEFORE"
+    # Mid: after Open Calculator the app owns the surface.
+    sleep 14
+    screendump "$SHOT_MID"
+    # After Close Calculator: shell reclaimed, conversation visible.
     sleep 22
-    # After both capability sentences: list + launch rendered.
     screendump "$SHOT_AFTER"
 ) &
 
@@ -73,7 +80,7 @@ echo "== guest checks =="
 tr -s '\r' '\n' <"$LOG" | grep -E 'GFX_PROC_RUNNING|GFX_PROC_MISSING|overall_health|ai interface ready|agent replied' | head -8
 
 echo "== display check =="
-python3 - "$SHOT_BEFORE" "$SHOT_AFTER" <<'PY'
+python3 - "$SHOT_BEFORE" "$SHOT_MID" "$SHOT_AFTER" <<'PY'
 import sys
 
 def load(path):
@@ -89,31 +96,40 @@ def load(path):
     return parts[3], (w, h)
 
 before, dims_b = load(sys.argv[1])
-after, dims_a = load(sys.argv[2])
+mid, dims_m = load(sys.argv[2])
+after, dims_a = load(sys.argv[3])
 
-if before is None or after is None or dims_b != dims_a:
-    print("VISUAL FAIL: screenshots missing or size mismatch", dims_b, dims_a)
+if before is None or mid is None or after is None or len({dims_b, dims_m, dims_a}) != 1:
+    print("VISUAL FAIL: screenshots missing or size mismatch", dims_b, dims_m, dims_a)
     raise SystemExit(1)
 
 w, h = dims_b
 total = w * h
 bg = bytes((14, 17, 22))
 cyan = bytes((34, 211, 238))
-bg_hits = sum(after[i:i+3] == bg for i in range(0, total * 3, 3))
-def cyan_count(buf):
-    return sum(buf[i:i+3] == cyan for i in range(0, total * 3, 3))
-cyan_before = cyan_count(before)
-cyan_after = cyan_count(after)
-diff = sum(
-    after[i:i+3] != before[i:i+3] for i in range(0, total * 3, 3)
-)
+panel = bytes((28, 34, 44))
 
-print(f"screenshot {w}x{h}; bg coverage {100*bg_hits//total}%; "
-      f"changed px: {diff}; cyan before={cyan_before} after={cyan_after}")
-# Cyan is reserved for the fixed top bar + AI reply lines, so a jump in
-# cyan proves an AI response was rendered (not just echoed user input).
-if bg_hits > total // 2 and diff > 2000 and cyan_after > cyan_before + 300:
-    print("VISUAL PASS: ai reply rendered on screen")
+def count(buf, color):
+    return sum(buf[i:i+3] == color for i in range(0, total * 3, 3))
+
+def changed(a, b):
+    return sum(a[i:i+3] != b[i:i+3] for i in range(0, total * 3, 3))
+
+bg_after = count(after, bg)
+cyan_before, cyan_mid, cyan_after = (count(x, cyan) for x in (before, mid, after))
+panel_mid = count(mid, panel)
+diff_total = changed(before, after)
+
+print(f"screenshot {w}x{h}; bg {100*bg_after//total}%; "
+      f"cyan {cyan_before}->{cyan_mid}->{cyan_after}; "
+      f"panel_px(mid)={panel_mid}; total_changed={diff_total}")
+
+# Criteria:
+# - app surface visible mid-run: large PANEL-colored region on screen
+# - lifecycle closed: final screen differs from pre-message screen
+#   (conversation history) and shell reclaimed (bg back above 50%).
+if panel_mid > total // 10 and bg_after > total // 2 and diff_total > 2000:
+    print("APP RUNTIME PASS: calculator surface rendered and closed cleanly")
 else:
-    print("VISUAL FAIL: no visible conversational change")
+    print("VISUAL FAIL: application runtime did not complete its lifecycle")
 PY

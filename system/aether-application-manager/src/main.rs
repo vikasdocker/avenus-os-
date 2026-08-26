@@ -30,7 +30,10 @@ fn main() {
         }
     }
 
-    eprintln!("[app-manager] ready; {} apps registered", manager.list().len());
+    eprintln!(
+        "[app-manager] ready; {} apps registered",
+        manager.registered_count()
+    );
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -40,15 +43,22 @@ fn main() {
         let response = match (tokens.next(), tokens.next(), tokens.next()) {
             (Some("list"), None, None) => serde_json::json!({
                 "ok": true,
-                "result": manager.list().into_iter().map(|(id, _, _)| id).collect::<Vec<_>>(),
+                "result": manager.discover().into_iter().map(|d| serde_json::json!({
+                    "id": d.id, "name": d.display_name, "version": d.version,
+                    "type": d.app_type.to_string(), "permissions": d.permissions,
+                })).collect::<Vec<_>>(),
             }),
-            (Some("inspect"), Some(id), None) => match manager.list().into_iter().find(|(aid, _, _)| aid == id) {
-                Some((_, name, command)) => serde_json::json!({
-                    "ok": true,
-                    "result": { "id": id, "name": name, "command": command },
-                }),
-                None => serde_json::json!({ "ok": false, "error": format!("unknown app '{id}'") }),
-            },
+            (Some("inspect"), Some(id), None) => {
+                match manager.discover().into_iter().find(|d| d.id == id) {
+                    Some(d) => serde_json::json!({
+                        "ok": true,
+                        "result": { "id": d.id, "name": d.display_name,
+                                    "version": d.version, "command": d.command,
+                                    "permissions": d.permissions },
+                    }),
+                    None => serde_json::json!({ "ok": false, "error": format!("unknown app '{id}'") }),
+                }
+            }
             (Some("launch"), Some(id), None) => match manager.launch(id) {
                 Ok(instance) => serde_json::json!({ "ok": true, "result": instance }),
                 Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "apps/aether-apps",
+  "apps/calculator",
   "core/aether-core",
   "security/aether-security",
   "system/aether-process-manager",

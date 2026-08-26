@@ -40,6 +40,27 @@ const PROMPT_HINT: &str = "TYPE ON THE SERIAL CONSOLE AND PRESS ENTER";
 
 const AGENT_PORT: u16 = 4748;
 const CONTROL_PORT: u16 = 4747;
+/// Exclusive-surface claim file written by graphical applications.
+const SURFACE_HOLDER: &str = "/run/aether/surface-holder";
+
+/// True when the shell may paint: no app holds the surface, or the holder
+/// is stale (its pid is gone). Stale claims are reclaimed automatically.
+fn surface_free() -> bool {
+    match std::fs::read_to_string(SURFACE_HOLDER) {
+        Ok(holder) => {
+            let pid = holder.trim();
+            let alive = std::path::Path::new(&format!("/proc/{pid}")).exists();
+            if alive {
+                false
+            } else {
+                eprintln!("[gfx] reclaiming stale surface holder (pid {pid})");
+                let _ = std::fs::remove_file(SURFACE_HOLDER);
+                true
+            }
+        }
+        Err(_) => true,
+    }
+}
 
 // ------------------------------------------------------------ framebuffer
 
@@ -549,14 +570,18 @@ fn run() -> Result<(), String> {
                     submit(&tx, &ui_arc, prompt);
                 }
                 let ui = lock_ui(&ui_arc);
-                draw(&mut fb, &ui, cursor_on);
-                fb.flush()?;
+                if surface_free() {
+                    draw(&mut fb, &ui, cursor_on);
+                    fb.flush()?;
+                }
             }
             Ok(UiEvent::StatusTick) => {
                 let mut ui = lock_ui(&ui_arc);
                 refresh_status(&mut ui.status);
-                draw(&mut fb, &ui, cursor_on);
-                fb.flush()?;
+                if surface_free() {
+                    draw(&mut fb, &ui, cursor_on);
+                    fb.flush()?;
+                }
             }
             Ok(UiEvent::Reply(result)) => {
                 let mut ui = lock_ui(&ui_arc);
@@ -572,11 +597,13 @@ fn run() -> Result<(), String> {
                         ui.push(ChatEntry::System(format!("AGENT ERROR: {e}")));
                     }
                 }
-                draw(&mut fb, &ui, cursor_on);
-                fb.flush()?;
+                if surface_free() {
+                    draw(&mut fb, &ui, cursor_on);
+                    fb.flush()?;
+                }
             }
             Err(_timeout) => {
-                if timeout {
+                if timeout && surface_free() {
                     let ui = lock_ui(&ui_arc);
                     draw(&mut fb, &ui, cursor_on);
                     fb.flush()?;

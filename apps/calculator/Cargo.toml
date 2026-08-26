@@ -1,0 +1,16 @@
+[package]
+name = "aether-calculator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether Calculator - minimal graphical test application"
+
+[[bin]]
+name = "aether-calculator"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

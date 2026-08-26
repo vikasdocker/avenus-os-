@@ -14,6 +14,7 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityId {
     SystemStatus,
+    AppStatus,
     AppList,
     AppLaunch,
     AppClose,
@@ -23,6 +24,7 @@ impl CapabilityId {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::SystemStatus => "system.status",
+            Self::AppStatus => "app.status",
             Self::AppList => "app.list",
             Self::AppLaunch => "app.launch",
             Self::AppClose => "app.close",
@@ -34,6 +36,9 @@ impl CapabilityId {
         match self {
             Self::SystemStatus => {
                 Capability::new(CapabilityDomain::System, "status", RiskLevel::Low)
+            }
+            Self::AppStatus => {
+                Capability::new(CapabilityDomain::Application, "status", RiskLevel::Low)
             }
             Self::AppList => {
                 Capability::new(CapabilityDomain::Application, "list", RiskLevel::Low)
@@ -58,6 +63,7 @@ impl CapabilityId {
     pub fn from_str(raw: &str) -> Option<Self> {
         match raw {
             "system.status" => Some(Self::SystemStatus),
+            "app.status" => Some(Self::AppStatus),
             "app.list" => Some(Self::AppList),
             "app.launch" => Some(Self::AppLaunch),
             "app.close" => Some(Self::AppClose),
@@ -90,6 +96,24 @@ pub fn parse_intent(text: &str) -> Option<Intent> {
     let upper = text.to_uppercase();
     let words: Vec<&str> = upper.split_whitespace().collect();
 
+    // app.close: CLOSE <target>
+    for (idx, verb) in words.iter().enumerate() {
+        if *verb == "CLOSE" {
+            let target = words[idx + 1..]
+                .iter()
+                .find(|w| !matches!(**w, "THE" | "MY"))
+                .map(|w| {
+                    w.trim_end_matches(|c: char| !c.is_ascii_alphanumeric())
+                        .to_ascii_lowercase()
+                })
+                .and_then(|w| w.non_empty());
+            return Some(Intent {
+                capability: CapabilityId::AppClose,
+                arguments: serde_json::json!({ "app": target }),
+            });
+        }
+    }
+
     // app.launch: OPEN/LAUNCH/START <target>
     for (idx, verb) in words.iter().enumerate() {
         if matches!(*verb, "OPEN" | "LAUNCH" | "START") {
@@ -114,6 +138,27 @@ pub fn parse_intent(text: &str) -> Option<Intent> {
         return Some(Intent {
             capability: CapabilityId::AppList,
             arguments: serde_json::json!({}),
+        });
+    }
+
+    // app.status: "<APP> RUNNING?" / "IS <APP> RUNNING"
+    if upper.contains("RUNNING") {
+        // Walk backwards from the word RUNNING to the app name.
+        let running_idx = words.iter().position(|w| w.contains("RUNNING"));
+        let target = running_idx.and_then(|ri| {
+            words[..ri]
+                .iter()
+                .rev()
+                .find(|w| !matches!(**w, "IS" | "THE" | "MY" | "STILL"))
+                .map(|w| {
+                    w.trim_end_matches(|c: char| !c.is_ascii_alphanumeric())
+                        .to_ascii_lowercase()
+                })
+                .and_then(|w| w.non_empty())
+        });
+        return Some(Intent {
+            capability: CapabilityId::AppStatus,
+            arguments: serde_json::json!({ "app": target }),
         });
     }
 
@@ -148,7 +193,7 @@ pub fn validate(intent: &Intent) -> Result<(), Rejection> {
 
     let needs_target = matches!(
         intent.capability,
-        CapabilityId::AppLaunch | CapabilityId::AppClose
+        CapabilityId::AppLaunch | CapabilityId::AppClose | CapabilityId::AppStatus
     );
 
     if needs_target {
@@ -179,6 +224,11 @@ pub fn validate(intent: &Intent) -> Result<(), Rejection> {
 pub fn execute(intent: &Intent, client: &aether_sdk::AetherClient) -> Result<Value, String> {
     let response = match intent.capability {
         CapabilityId::SystemStatus => client.status()?,
+        CapabilityId::AppStatus => client.request(&aether_sdk::IpcRequest {
+            service_id: "aether-system-core".to_string(),
+            command: "app.status".to_string(),
+            parameters: serde_json::json!({ "app": intent.arguments["app"] }),
+        })?,
         CapabilityId::AppList => client.request(&aether_sdk::IpcRequest {
             service_id: "aether-system-core".to_string(),
             command: "app.list".to_string(),
@@ -189,14 +239,11 @@ pub fn execute(intent: &Intent, client: &aether_sdk::AetherClient) -> Result<Val
             command: "app.launch".to_string(),
             parameters: serde_json::json!({ "app": intent.arguments["app"] }),
         })?,
-        CapabilityId::AppClose => {
-            let instance = intent.arguments["instance"].as_u64().unwrap_or_default();
-            client.request(&aether_sdk::IpcRequest {
-                service_id: "aether-system-core".to_string(),
-                command: "app.close".to_string(),
-                parameters: serde_json::json!({ "instance": instance }),
-            })?
-        }
+        CapabilityId::AppClose => client.request(&aether_sdk::IpcRequest {
+            service_id: "aether-system-core".to_string(),
+            command: "app.close".to_string(),
+            parameters: serde_json::json!({ "app": intent.arguments["app"] }),
+        })?,
     };
 
     if response.ok {
@@ -246,6 +293,11 @@ pub fn format_result(capability: CapabilityId, result: &Value) -> String {
             }
         }
         CapabilityId::AppClose => "APPLICATION CLOSED".to_string(),
+        CapabilityId::AppStatus => {
+            let app = result["report"]["app"].as_str().unwrap_or("APP").to_uppercase();
+            let state = result["report"]["state"].as_str().unwrap_or("UNKNOWN");
+            format!("{app} STATE: {state}")
+        }
     }
 }
 
@@ -299,6 +351,23 @@ mod tests {
     fn validate_accepts_wellformed_launch() {
         let intent =
             parse_intent("open calculator").unwrap_or_else(|| panic!("expected intent"));
+        assert!(validate(&intent).is_ok());
+    }
+
+    #[test]
+    fn close_sentence_maps_to_app_close() {
+        let intent =
+            parse_intent("Close Calculator.").unwrap_or_else(|| panic!("expected close intent"));
+        assert_eq!(intent.capability, CapabilityId::AppClose);
+        assert_eq!(intent.arguments["app"], "calculator");
+    }
+
+    #[test]
+    fn running_question_maps_to_app_status() {
+        let intent = parse_intent("Is Calculator running?")
+            .unwrap_or_else(|| panic!("expected status intent"));
+        assert_eq!(intent.capability, CapabilityId::AppStatus);
+        assert_eq!(intent.arguments["app"], "calculator");
         assert!(validate(&intent).is_ok());
     }
 

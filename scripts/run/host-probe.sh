@@ -4,6 +4,10 @@
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 
+# Kill any leftover VM holding the forwarded ports.
+pkill -f qemu-system 2>/dev/null || true
+sleep 1
+
 bash scripts/run/qemu-visual-check.sh >build/qemu-visual-run.log 2>&1 &
 CHECK_PID=$!
 
@@ -34,11 +38,32 @@ print("CAP system.status  :", call(14747, {"service_id": "ai", "command": "syste
 print("CAP app.list       :", call(14747, {"service_id": "ai", "command": "app.list", "parameters": {}}))
 launch = call(14747, {"service_id": "ai", "command": "app.launch", "parameters": {"app": "calculator"}})
 print("CAP app.launch     :", launch)
+
+def running_instance():
+    st = call(14747, {"service_id": "ai", "command": "app.status", "parameters": {"app": "calculator"}})
+    try:
+        report = json.loads(st)["result"]["report"]
+        for inst in report.get("instances", []):
+            if inst["state"] == "RUNNING":
+                return inst["instance_id"]
+    except (json.JSONDecodeError, KeyError):
+        pass
+    return None
+
 try:
-    instance = json.loads(launch)["result"]["instance"]["instance_id"]
-    print("CAP app.close      :", call(14747, {"service_id": "ai", "command": "app.close", "parameters": {"instance": instance}}))
+    data = json.loads(launch)
+    instance = data["result"]["instance"]["instance_id"]
 except (json.JSONDecodeError, KeyError):
-    print("CAP app.close      : skipped (launch failed)")
+    # Single-instance policy may have refused a duplicate launch; the app
+    # can still be tracked and closed through its existing instance.
+    instance = running_instance()
+
+print("CAP app.status     :", call(14747, {"service_id": "ai", "command": "app.status", "parameters": {"app": "calculator"}}))
+if instance is not None:
+    print("CAP app.close      :", call(14747, {"service_id": "ai", "command": "app.close", "parameters": {"instance": instance}}))
+    print("CAP app.status x2  :", call(14747, {"service_id": "ai", "command": "app.status", "parameters": {"app": "calculator"}}))
+else:
+    print("CAP app.close      : skipped (no runnable instance)")
 print("CONTROL PLANE      :", call(14747, {"service_id": "aether-system-core", "command": "status", "parameters": {}})[:120])
 PY
 
