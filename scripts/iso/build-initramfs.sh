@@ -29,7 +29,8 @@ STAGE="$WORK/root"
 mkdir -p "$STAGE"/{bin,sbin,usr/bin,proc,sys,dev,run,etc/aether/services.d,root}
 
 # 1. Aether binaries.
-cargo build --release $TARGET_ARGS -p aether-init -p aether-system-core -p aetherctl -p aether-shell
+cargo build --release $TARGET_ARGS -p aether-init -p aether-system-core \
+    -p aetherctl -p aether-shell -p aether-graphical-shell
 
 copy_binary() {
     local src="$1" dst="$2" tries=0
@@ -47,6 +48,7 @@ copy_binary "$BIN_DIR/aether-init"        "$STAGE/init"
 copy_binary "$BIN_DIR/aether-system-core" "$STAGE/sbin/"
 copy_binary "$BIN_DIR/aethersh"           "$STAGE/bin/"
 copy_binary "$BIN_DIR/aetherctl"          "$STAGE/usr/bin/"
+copy_binary "$BIN_DIR/aether-graphical-shell" "$STAGE/bin/"
 
 # Fail loudly if a dynamic binary slipped through: the initramfs has no loader.
 if file "$STAGE/init" | grep -q "dynamically linked"; then

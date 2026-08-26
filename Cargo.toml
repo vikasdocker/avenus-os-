@@ -13,6 +13,7 @@ members = [
   "voice/aether-voice",
   "shell/aether-shell",
   "graphics/libaether-graphics",
+  "graphics/aether-graphical-shell",
   "sdk/rust/aether-sdk",
   "tools/aetherctl"
 ]

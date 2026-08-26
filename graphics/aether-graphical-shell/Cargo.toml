@@ -1,0 +1,16 @@
+[package]
+name = "aether-graphical-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether Graphical Shell - minimal DRM/fbdev startup screen"
+
+[[bin]]
+name = "aether-graphical-shell"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -27,7 +27,7 @@ fi
 exec qemu-system-x86_64 \
     -m 512M \
     -display gtk,gl=off,zoom-to-fit=on \
-    -vga std \
+    -vga none \
     -device virtio-gpu-pci,xres=1024,yres=768 \
     -no-reboot \
     -kernel "$KERNEL" -initrd "$INITRD" \

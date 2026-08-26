@@ -153,6 +153,27 @@ fn spawn_system_core(cfg: &aether_init::BootConfig) -> Result<Child, std::io::Er
         .spawn()
 }
 
+/// Best-effort launch of the graphical startup screen. The service manager
+/// does not spawn processes yet, so PID1 starts it directly (like getty).
+#[cfg(target_os = "linux")]
+fn spawn_graphical_shell() -> Option<Child> {
+    match Command::new("/bin/aether-graphical-shell").spawn() {
+        Ok(child) => {
+            log("ready", "graphical shell started");
+            Some(child)
+        }
+        Err(e) => {
+            log_warn("ready", &format!("graphical shell not started: {e}"));
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn spawn_graphical_shell() -> Option<Child> {
+    None
+}
+
 /// Reaps any finished children; returns true when the system-core child exited.
 fn reap(core_child: Option<&mut Child>) -> bool {
     if let Some(child) = core_child {
@@ -227,8 +248,8 @@ fn main() {
 
     stage = stage.next().unwrap_or(stage);
 
-    // Interactive console session unless the cmdline asked for single-user
-    // maintenance mode (services only, no shell).
+    // Graphical startup screen (best-effort), then interactive console.
+    let mut gfx = spawn_graphical_shell();
     let mut console_session: Option<Child> = None;
     if !cfg.single_user {
         ensure_console_session(&mut console_session);
@@ -244,6 +265,12 @@ fn main() {
     loop {
         if reap(core.as_mut()) {
             break;
+        }
+        if let Some(child) = gfx.as_mut() {
+            if let Ok(Some(status)) = child.try_wait() {
+                log_warn("ready", &format!("graphical shell exited: {status}"));
+                gfx = None;
+            }
         }
         if !cfg.single_user {
             ensure_console_session(&mut console_session);
