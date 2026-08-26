@@ -11,6 +11,9 @@ cd "$(dirname "$0")/../.."
 KERNEL="${AETHER_KERNEL:-/boot/vmlinuz}"
 INITRD=build/initramfs.cpio.gz
 APPEND="${AETHER_APPEND:-console=ttyS0 panic=-1}"
+# Virtual GPU: virtio-gpu-pci is the diagnosed KMS device; works headless too
+# and gives the guest /dev/dri/card0 + /dev/fb0 once PID1 loads virtio_gpu.
+GPU_ARGS="${AETHER_GPU_ARGS:--device virtio-gpu-pci,xres=1024,yres=768}"
 
 if [[ ! -f "$INITRD" ]]; then
     echo "no $INITRD; run scripts/iso/build-initramfs.sh first" >&2
@@ -22,6 +25,7 @@ if [[ "${1:-}" == "--smoke" ]]; then
     LOG="$(pwd)/build/qemu-smoke.log"
     timeout "$SECS" qemu-system-x86_64 \
         -m 512M -nographic -no-reboot \
+        $GPU_ARGS \
         -kernel "$KERNEL" -initrd "$INITRD" \
         -append "$APPEND" >"$LOG" 2>&1 || true
     if grep -q "services running; control plane" "$LOG"; then
@@ -37,5 +41,6 @@ fi
 
 exec qemu-system-x86_64 \
     -m 512M -nographic -no-reboot \
+    $GPU_ARGS \
     -kernel "$KERNEL" -initrd "$INITRD" \
     -append "$APPEND"
