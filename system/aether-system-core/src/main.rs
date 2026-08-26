@@ -142,6 +142,10 @@ fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(4747);
+    // Loopback by default; guest images override to expose the plane to
+    // the isolated QEMU user network.
+    let bind_addr =
+        std::env::var("AETHER_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
 
     eprintln!("[system-core] loading manifests from {manifests_dir}");
     let manifests = match load_manifests_from_dir(&PathBuf::from(&manifests_dir)) {
@@ -170,7 +174,7 @@ fn main() {
         manager.graph().len()
     );
 
-    let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
+    let listener = match std::net::TcpListener::bind((bind_addr.as_str(), port)) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("[system-core] fatal: cannot bind control port: {e}");

@@ -26,11 +26,12 @@ fi
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/aether-initramfs.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 STAGE="$WORK/root"
-mkdir -p "$STAGE"/{bin,sbin,usr/bin,proc,sys,dev,run,etc/aether/services.d,root}
+mkdir -p "$STAGE"/{bin,sbin,usr/bin,proc,sys,dev,run,tmp,root,etc/aether/services.d}
+chmod 1777 "$STAGE/tmp"
 
 # 1. Aether binaries.
 cargo build --release $TARGET_ARGS -p aether-init -p aether-system-core \
-    -p aetherctl -p aether-shell -p aether-graphical-shell
+    -p aetherctl -p aether-shell -p aether-graphical-shell -p aether-agentd
 
 copy_binary() {
     local src="$1" dst="$2" tries=0
@@ -49,6 +50,7 @@ copy_binary "$BIN_DIR/aether-system-core" "$STAGE/sbin/"
 copy_binary "$BIN_DIR/aethersh"           "$STAGE/bin/"
 copy_binary "$BIN_DIR/aetherctl"          "$STAGE/usr/bin/"
 copy_binary "$BIN_DIR/aether-graphical-shell" "$STAGE/bin/"
+copy_binary "$BIN_DIR/aether-agentd"      "$STAGE/sbin/"
 
 # Fail loudly if a dynamic binary slipped through: the initramfs has no loader.
 if file "$STAGE/init" | grep -q "dynamically linked"; then
@@ -64,17 +66,35 @@ BUSYBOX="$(command -v busybox)"
 cp "$BUSYBOX" "$STAGE/bin/busybox"
 for applet in sh mount umount sleep cat ls ps echo hostname poweroff reboot \
               mdev mkdir ln rm cp date grep head tail clear uname ip ifconfig \
-              modprobe; do
+              modprobe stty udhcpc route; do
     ln -sf busybox "$STAGE/bin/$applet"
 done
+ln -sf ../bin/stty "$STAGE/sbin/stty" 2>/dev/null || true
 
-# 4. GPU/DRM modules: stage only virtio_gpu and its dependency chain so the
-#    guest can bind the QEMU virtio-gpu-pci device (kernel drivers are =m).
+# 3b. udhcpc hook: applies the DHCP lease to eth0.
+DHCP_SCRIPT="$STAGE/usr/share/udhcpc/default.script"
+mkdir -p "$(dirname "$DHCP_SCRIPT")"
+cat >"$DHCP_SCRIPT" <<'EOF'
+#!/bin/sh
+case "$1" in
+    bound | renew)
+        ifconfig "$interface" "$ip" netmask "${subnet:-255.255.255.0}"
+        [ -n "$router" ] && route add default gw "$router" "$interface" 2>/dev/null
+        ;;
+esac
+exit 0
+EOF
+chmod +x "$DHCP_SCRIPT"
+
+# 4. GPU/DRM + NIC modules: stage virtio_gpu and virtio_net dependency chains.
 REL="${AETHER_KERNEL_RELEASE:-6.8.0-138-generic}"
 MODDIR="/lib/modules/$REL"
 if [[ -d "$MODDIR" ]]; then
-    DEPS_LIST="$WORK/virtio-gpu-deps.txt"
-    modprobe --set-version="$REL" --show-depends virtio_gpu >"$DEPS_LIST" 2>/dev/null || true
+    DEPS_LIST="$WORK/module-deps.txt"
+    {
+        modprobe --set-version="$REL" --show-depends virtio_gpu 2>/dev/null || true
+        modprobe --set-version="$REL" --show-depends virtio_net 2>/dev/null || true
+    } >"$DEPS_LIST"
     staged=0
     while read -r line; do
         case "$line" in

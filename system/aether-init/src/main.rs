@@ -123,6 +123,45 @@ fn loopback_up() {
 #[cfg(not(target_os = "linux"))]
 fn loopback_up() {}
 
+/// Brings up the virtio NIC via DHCP so the guest is reachable from the
+/// host (QEMU user networking) and can reach host-side AI providers.
+#[cfg(target_os = "linux")]
+fn net_up() {
+    let modprobe = Command::new("modprobe").arg("virtio_net").status();
+    match modprobe {
+        Ok(s) if s.success() => log("early-mounts", "virtio_net loaded"),
+        _ => {
+            // Built-in kernels have no module entry; the driver may already
+            // be active, which is fine.
+            log_warn("early-mounts", "virtio_net modprobe skipped (builtin?)");
+        }
+    }
+    // udhcpc requires the interface administratively UP.
+    let _ = Command::new("/bin/ifconfig").args(["eth0", "up"]).status();
+    // Built-in kernels have no module entry; driver may already be active.
+    let _ = Command::new("modprobe").arg("virtio_net").status();
+
+    // QEMU user networking is deterministic: guest is always 10.0.2.15.
+    let _ = Command::new("/bin/ifconfig").args(["eth0", "up"]).status();
+    let cfg = Command::new("/bin/ifconfig")
+        .args(["eth0", "10.0.2.15", "netmask", "255.255.255.0"])
+        .status();
+    match cfg {
+        Ok(s) if s.success() => {
+            log("early-mounts", "eth0 = 10.0.2.15");
+            let _ = Command::new("/bin/route")
+                .args(["add", "default", "gw", "10.0.2.2"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+        _ => log_warn("early-mounts", "no eth0; loopback-only operation"),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn net_up() {}
+
 /// Best-effort KMS driver load so /dev/dri/* and a real framebuffer appear.
 /// Failures are silent: the guest simply keeps the legacy console.
 #[cfg(target_os = "linux")]
@@ -148,16 +187,46 @@ fn spawn_system_core(cfg: &aether_init::BootConfig) -> Result<Child, std::io::Er
     Command::new(exe)
         .arg(&cfg.manifest_dir)
         .env("AETHER_CONTROL_PORT", cfg.control_port.to_string())
+        .env("AETHER_BIND", "0.0.0.0")
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
 }
 
-/// Best-effort launch of the graphical startup screen. The service manager
-/// does not spawn processes yet, so PID1 starts it directly (like getty).
+/// Best-effort launch of the agent daemon (AI provider bridge). The service
+/// manager does not spawn processes yet, so PID1 starts it directly.
 #[cfg(target_os = "linux")]
-fn spawn_graphical_shell() -> Option<Child> {
-    match Command::new("/bin/aether-graphical-shell").spawn() {
+fn spawn_agentd() -> Option<Child> {
+    match Command::new("/sbin/aether-agentd")
+        .env("AETHER_BIND", "0.0.0.0")
+        .spawn()
+    {
+        Ok(child) => {
+            log("services", "agent daemon started");
+            Some(child)
+        }
+        Err(e) => {
+            log_warn("services", &format!("agent daemon not started: {e}"));
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn spawn_agentd() -> Option<Child> {
+    None
+}
+
+/// Best-effort launch of the graphical AI shell. When `exclusive_input` is
+/// set (kernel cmdline `aether=single`) the shell owns the serial console
+/// as its keyboard; otherwise the console stays with the interactive shell.
+#[cfg(target_os = "linux")]
+fn spawn_graphical_shell(exclusive_input: bool) -> Option<Child> {
+    let mut cmd = Command::new("/bin/aether-graphical-shell");
+    if exclusive_input {
+        cmd.env("AETHER_GFX_INPUT", "1");
+    }
+    match cmd.spawn() {
         Ok(child) => {
             log("ready", "graphical shell started");
             Some(child)
@@ -170,7 +239,7 @@ fn spawn_graphical_shell() -> Option<Child> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn spawn_graphical_shell() -> Option<Child> {
+fn spawn_graphical_shell(_exclusive_input: bool) -> Option<Child> {
     None
 }
 
@@ -220,6 +289,7 @@ fn main() {
     log(stage.label(), "Aether OS boot beginning");
     early_mounts();
     loopback_up();
+    net_up();
     gpu_drivers();
 
     stage = stage.next().unwrap_or(stage);
@@ -248,8 +318,10 @@ fn main() {
 
     stage = stage.next().unwrap_or(stage);
 
-    // Graphical startup screen (best-effort), then interactive console.
-    let mut gfx = spawn_graphical_shell();
+    // Agent daemon first (UI talks to it), then graphical AI shell,
+    // then the interactive console.
+    let mut agentd = spawn_agentd();
+    let mut gfx = spawn_graphical_shell(cfg.single_user);
     let mut console_session: Option<Child> = None;
     if !cfg.single_user {
         ensure_console_session(&mut console_session);
@@ -270,6 +342,12 @@ fn main() {
             if let Ok(Some(status)) = child.try_wait() {
                 log_warn("ready", &format!("graphical shell exited: {status}"));
                 gfx = None;
+            }
+        }
+        if let Some(child) = agentd.as_mut() {
+            if let Ok(Some(status)) = child.try_wait() {
+                log_warn("ready", &format!("agent daemon exited: {status}"));
+                agentd = None;
             }
         }
         if !cfg.single_user {
