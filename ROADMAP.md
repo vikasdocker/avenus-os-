@@ -885,18 +885,20 @@ schema-enforced; runtime is not embedded inside `aether-agentd`.
 
 **Acceptance criteria (Phase 2 closure):**
 
-- [ ] `aether-agentd` uses `aether-agent-runtime` for session / intent / plan /
-      executor / observation.
-- [ ] At least one real LLM provider (Ollama or OpenAI-compatible) is wired.
+- [x] `aether-agentd` uses `aether-agent-runtime` for session / intent / plan /
+      executor / observation. ← **DONE in 2.4**
+- [x] At least one real LLM provider (Ollama or OpenAI-compatible) is wired. ←
+      **DONE in 2.5**
 - [x] Structured-output schema validation is enforced. ← **DONE in 2.6**
 - [x] Bounded recovery semantics are enforced (Phase 2.7). The runtime
       exposes `RecoveryPolicy`, `FailureKind`, `decide_recovery`,
       and the daemon's planner uses the same source of truth.
 - [ ] Memory persists across session restart.
-- [ ] End-to-end demo: user text → agentd → intent → plan → action via IPC →
-      service → observation → agentd → response → UI.
-- [ ] All agent tests pass (`cargo test -p aether-agent-runtime`,
-      `cargo test -p aether-agentd`).
+- [x] End-to-end demo: user text → agentd → intent → plan → action via IPC →
+      service → observation → agentd → response → UI. ←
+      **DONE in 2.4** (`e2e_open_test_application_through_runtime`)
+- [x] All agent tests pass (`cargo test -p aether-agent-runtime`,
+      `cargo test -p aether-agentd`). ← 71 + 124 = 195 tests passing.
 
 ---
 
