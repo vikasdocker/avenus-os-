@@ -5,8 +5,11 @@
 // newline-delimited JSON requests/responses over TCP loopback.
 
 use aether_application_manager::ApplicationManager;
+use aether_core::error::ErrorKind;
 use aether_core::ipc::{IpcError, IpcRequest, IpcResponse};
 use aether_core::types::ServiceStatus;
+use aether_storage::{FileManager, WorkspaceConfig};
+use aether_storage::system_info;
 use aether_system_core::{
     build_manager, load_manifests_from_dir, ServiceExecutor, ServiceHandle,
 };
@@ -73,20 +76,135 @@ impl ServiceExecutor for LocalExecutor {
     }
 }
 
+fn surface_port() -> u16 {
+    std::env::var("AETHER_SURFACE_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(4750)
+}
+
+fn surface_call(req: serde_json::Value) -> Result<serde_json::Value, String> {
+    use std::io::{BufRead, BufReader, Write};
+    let port = surface_port();
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port))
+        .map_err(|e| format!("surface :{port} {e}"))?;
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+    let payload = serde_json::to_string(&req).map_err(|e| format!("encode {e}"))?;
+    stream
+        .write_all(format!("{payload}\n").as_bytes())
+        .map_err(|e| format!("send {e}"))?;
+    let mut line = String::new();
+    BufReader::new(stream)
+        .read_line(&mut line)
+        .map_err(|e| format!("recv {e}"))?;
+    if line.trim().is_empty() {
+        return Err("empty surface response".to_string());
+    }
+    let v: serde_json::Value =
+        serde_json::from_str(line.trim()).map_err(|e| format!("decode {e}"))?;
+    if v["ok"].as_bool().unwrap_or(false) {
+        Ok(v)
+    } else {
+        Err(v["error"].as_str().unwrap_or("surface error").to_string())
+    }
+}
+
+fn build_context_snapshot(
+    manager: &mut aether_system_core::manager::ServiceManager,
+    apps: &mut ApplicationManager,
+) -> serde_json::Value {
+    let status_val = serde_json::to_value(manager.system_status()).unwrap_or(serde_json::json!({}));
+    let services = status_val["services"].clone();
+    let overall_health = status_val["overall_health"].as_str().unwrap_or("UNKNOWN").to_string();
+
+    // Apps
+    let installed: Vec<String> = apps.discover().iter().map(|d| d.id.clone()).collect();
+    let mut app_states = serde_json::Map::new();
+    let mut running_apps: Vec<String> = Vec::new();
+    for id in &installed {
+        let report = apps.app_state(id);
+        app_states.insert(id.clone(), serde_json::json!(report.state));
+        if report.state == "RUNNING" {
+            running_apps.push(id.clone());
+        }
+    }
+
+    // Windows via surface
+    let windows_val = surface_call(serde_json::json!({ "op": "window.list" }))
+        .ok()
+        .and_then(|v| v["windows"].as_array().cloned())
+        .unwrap_or_default();
+    let mut windows = Vec::new();
+    let mut minimized = Vec::new();
+    let mut active_window: Option<String> = None;
+    let mut focused_id: Option<u64> = None;
+    for w in &windows_val {
+        let state = w["state"].as_str().unwrap_or("normal").to_string();
+        let title = w["title"].as_str().unwrap_or("?").to_string();
+        let focused = w["focused"].as_bool().unwrap_or(false);
+        if focused {
+            active_window = Some(title.clone());
+            focused_id = w["id"].as_u64();
+        }
+        if state == "minimized" {
+            minimized.push(title.clone());
+        }
+        windows.push(serde_json::json!({
+            "id": w["id"],
+            "app": w["app"],
+            "title": title,
+            "state": state,
+            "focused": focused,
+        }));
+    }
+    // If running_apps empty from app states but windows show apps, union
+    for w in &windows {
+        if let Some(app) = w["app"].as_str() {
+            if !running_apps.contains(&app.to_string()) {
+                running_apps.push(app.to_string());
+            }
+        }
+    }
+
+    serde_json::json!({
+        "active_window": active_window,
+        "focused_window_id": focused_id,
+        "windows": windows,
+        "minimized_windows": minimized,
+        "running_apps": running_apps,
+        "installed_apps": installed,
+        "app_states": app_states,
+        "overall_health": overall_health,
+        "services": services,
+    })
+}
+
 fn dispatch(
     manager: &mut aether_system_core::manager::ServiceManager,
     apps: &mut ApplicationManager,
+    files: &mut FileManager,
+    started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
-    // Capability requests (app.*) are audited with their arguments; service
-    // lifecycle commands keep the generic audit line.
-    let is_capability = req.command.starts_with("app.") || req.command == "system.status";
+    // Capability requests are audited with their arguments (never log file content)
+    let is_capability = req.command.starts_with("app.")
+        || req.command.starts_with("window.")
+        || req.command.starts_with("file.")
+        || req.command.starts_with("system.")
+        || req.command == "context.get";
     let started_ok = true;
-    let response = dispatch_inner(manager, apps, req);
+    let response = dispatch_inner(manager, apps, files, started_at, req);
     if is_capability {
+        // For file capabilities, sanitize args to avoid logging content
+        let mut sanitized = req.parameters.clone();
+        if let Some(obj) = sanitized.as_object_mut() {
+            if obj.contains_key("content") {
+                obj.insert("content".to_string(), serde_json::json!("[REDACTED]"));
+            }
+        }
         audit(
             &req.command,
-            &req.parameters,
+            &sanitized,
             &req.service_id,
             started_ok && response.ok,
         );
@@ -97,6 +215,8 @@ fn dispatch(
 fn dispatch_inner(
     manager: &mut aether_system_core::manager::ServiceManager,
     apps: &mut ApplicationManager,
+    files: &mut FileManager,
+    started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
     let mut executor = LocalExecutor::default();
@@ -285,6 +405,385 @@ fn dispatch_inner(
                 }
             }
         }
+        "context.get" => {
+            let ctx = build_context_snapshot(manager, apps);
+            IpcResponse::ok("context.get", ctx)
+        }
+        "window.list" => {
+            match surface_call(serde_json::json!({ "op": "window.list" })) {
+                Ok(v) => IpcResponse::ok("window.list", v),
+                Err(e) => IpcResponse::err(
+                    "window.list",
+                    IpcError {
+                        code: "SURFACE_UNAVAILABLE".to_string(),
+                        message: e,
+                    },
+                ),
+            }
+        }
+        "window.focus" => {
+            let app = req.parameters.get("app").and_then(|v| v.as_str());
+            let wid = req.parameters.get("window_id").and_then(|v| v.as_u64());
+            let target = if let Some(id) = wid {
+                serde_json::json!({ "op": "window.focus", "window_id": id })
+            } else if let Some(app_id) = app {
+                // Resolve via window.list first to get id
+                let list = surface_call(serde_json::json!({ "op": "window.list" }));
+                if let Ok(v) = list {
+                    if let Some(arr) = v["windows"].as_array() {
+                        let mut found: Option<u64> = None;
+                        for w in arr {
+                            let a = w["app"].as_str().unwrap_or("").to_ascii_lowercase();
+                            let t = w["title"].as_str().unwrap_or("").to_ascii_lowercase();
+                            if a == app_id.to_ascii_lowercase() || t == app_id.to_ascii_lowercase() {
+                                found = w["id"].as_u64();
+                                break;
+                            }
+                        }
+                        if let Some(id) = found {
+                            serde_json::json!({ "op": "window.focus", "window_id": id })
+                        } else {
+                            return IpcResponse::err(
+                                "window.focus",
+                                IpcError {
+                                    code: "NOT_FOUND".to_string(),
+                                    message: format!("no window for '{app_id}'"),
+                                },
+                            );
+                        }
+                    } else {
+                        return IpcResponse::err(
+                            "window.focus",
+                            IpcError {
+                                code: "INTERNAL".to_string(),
+                                message: "bad window.list shape".to_string(),
+                            },
+                        );
+                    }
+                } else {
+                    return IpcResponse::err(
+                        "window.focus",
+                        IpcError {
+                            code: "SURFACE_UNAVAILABLE".to_string(),
+                            message: "surface unavailable".to_string(),
+                        },
+                    );
+                }
+            } else {
+                return IpcResponse::err(
+                    "window.focus",
+                    IpcError {
+                        code: "INVALID_INPUT".to_string(),
+                        message: "'app' or 'window_id' required".to_string(),
+                    },
+                );
+            };
+            match surface_call(target) {
+                Ok(v) => IpcResponse::ok("window.focus", v),
+                Err(e) => IpcResponse::err(
+                    "window.focus",
+                    IpcError {
+                        code: "SURFACE_ERROR".to_string(),
+                        message: e,
+                    },
+                ),
+            }
+        }
+        "window.minimize" => {
+            let app = req.parameters.get("app").and_then(|v| v.as_str());
+            let wid = req.parameters.get("window_id").and_then(|v| v.as_u64());
+            let payload = if let Some(id) = wid {
+                serde_json::json!({ "op": "window.minimize", "window_id": id })
+            } else if let Some(app_id) = app {
+                // resolve
+                let list = surface_call(serde_json::json!({ "op": "window.list" }));
+                if let Ok(v) = list {
+                    let mut found: Option<u64> = None;
+                    if let Some(arr) = v["windows"].as_array() {
+                        for w in arr {
+                            let a = w["app"].as_str().unwrap_or("").to_ascii_lowercase();
+                            let t = w["title"].as_str().unwrap_or("").to_ascii_lowercase();
+                            if a == app_id.to_ascii_lowercase() || t == app_id.to_ascii_lowercase() {
+                                found = w["id"].as_u64();
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(id) = found {
+                        serde_json::json!({ "op": "window.minimize", "window_id": id })
+                    } else {
+                        return IpcResponse::err(
+                            "window.minimize",
+                            IpcError {
+                                code: "NOT_FOUND".to_string(),
+                                message: format!("no window for '{app_id}'"),
+                            },
+                        );
+                    }
+                } else {
+                    return IpcResponse::err(
+                        "window.minimize",
+                        IpcError {
+                            code: "SURFACE_UNAVAILABLE".to_string(),
+                            message: "surface unavailable".to_string(),
+                        },
+                    );
+                }
+            } else {
+                return IpcResponse::err(
+                    "window.minimize",
+                    IpcError {
+                        code: "INVALID_INPUT".to_string(),
+                        message: "'app' or 'window_id' required".to_string(),
+                    },
+                );
+            };
+            match surface_call(payload) {
+                Ok(v) => IpcResponse::ok("window.minimize", v),
+                Err(e) => IpcResponse::err(
+                    "window.minimize",
+                    IpcError {
+                        code: "SURFACE_ERROR".to_string(),
+                        message: e,
+                    },
+                ),
+            }
+        }
+        "window.maximize" => {
+            let app = req.parameters.get("app").and_then(|v| v.as_str());
+            let wid = req.parameters.get("window_id").and_then(|v| v.as_u64());
+            let payload = if let Some(id) = wid {
+                serde_json::json!({ "op": "window.maximize", "window_id": id })
+            } else if let Some(app_id) = app {
+                let list = surface_call(serde_json::json!({ "op": "window.list" }));
+                if let Ok(v) = list {
+                    let mut found: Option<u64> = None;
+                    if let Some(arr) = v["windows"].as_array() {
+                        for w in arr {
+                            let a = w["app"].as_str().unwrap_or("").to_ascii_lowercase();
+                            let t = w["title"].as_str().unwrap_or("").to_ascii_lowercase();
+                            if a == app_id.to_ascii_lowercase() || t == app_id.to_ascii_lowercase() {
+                                found = w["id"].as_u64();
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(id) = found {
+                        serde_json::json!({ "op": "window.maximize", "window_id": id })
+                    } else {
+                        return IpcResponse::err(
+                            "window.maximize",
+                            IpcError {
+                                code: "NOT_FOUND".to_string(),
+                                message: format!("no window for '{app_id}'"),
+                            },
+                        );
+                    }
+                } else {
+                    return IpcResponse::err(
+                        "window.maximize",
+                        IpcError {
+                            code: "SURFACE_UNAVAILABLE".to_string(),
+                            message: "surface unavailable".to_string(),
+                        },
+                    );
+                }
+            } else {
+                return IpcResponse::err(
+                    "window.maximize",
+                    IpcError {
+                        code: "INVALID_INPUT".to_string(),
+                        message: "'app' or 'window_id' required".to_string(),
+                    },
+                );
+            };
+            match surface_call(payload) {
+                Ok(v) => IpcResponse::ok("window.maximize", v),
+                Err(e) => IpcResponse::err(
+                    "window.maximize",
+                    IpcError {
+                        code: "SURFACE_ERROR".to_string(),
+                        message: e,
+                    },
+                ),
+            }
+        }
+        "window.close" => {
+            let app = req.parameters.get("app").and_then(|v| v.as_str());
+            let wid = req.parameters.get("window_id").and_then(|v| v.as_u64());
+            let payload = if let Some(id) = wid {
+                serde_json::json!({ "op": "window.close", "window_id": id })
+            } else if let Some(app_id) = app {
+                serde_json::json!({ "op": "window.close", "app_id": app_id })
+            } else {
+                return IpcResponse::err(
+                    "window.close",
+                    IpcError {
+                        code: "INVALID_INPUT".to_string(),
+                        message: "'app' or 'window_id' required".to_string(),
+                    },
+                );
+            };
+            match surface_call(payload) {
+                Ok(v) => IpcResponse::ok("window.close", v),
+                Err(e) => IpcResponse::err(
+                    "window.close",
+                    IpcError {
+                        code: "SURFACE_ERROR".to_string(),
+                        message: e,
+                    },
+                ),
+            }
+        }
+        "window.restore" => {
+            // Restore is focus (which un-minimizes)
+            let app = req.parameters.get("app").and_then(|v| v.as_str()).unwrap_or("");
+            let wid = req.parameters.get("window_id").and_then(|v| v.as_u64());
+            let payload = if let Some(id) = wid {
+                serde_json::json!({ "op": "window.focus", "window_id": id })
+            } else {
+                let list = surface_call(serde_json::json!({ "op": "window.list" }));
+                if let Ok(v) = list {
+                    let mut found: Option<u64> = None;
+                    if let Some(arr) = v["windows"].as_array() {
+                        for w in arr {
+                            let a = w["app"].as_str().unwrap_or("").to_ascii_lowercase();
+                            let t = w["title"].as_str().unwrap_or("").to_ascii_lowercase();
+                            if a == app.to_ascii_lowercase() || t == app.to_ascii_lowercase() {
+                                found = w["id"].as_u64();
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(id) = found {
+                        serde_json::json!({ "op": "window.focus", "window_id": id })
+                    } else {
+                        return IpcResponse::err(
+                            "window.restore",
+                            IpcError {
+                                code: "NOT_FOUND".to_string(),
+                                message: format!("no window for '{app}'"),
+                            },
+                        );
+                    }
+                } else {
+                    return IpcResponse::err(
+                        "window.restore",
+                        IpcError {
+                            code: "SURFACE_UNAVAILABLE".to_string(),
+                            message: "surface unavailable".to_string(),
+                        },
+                    );
+                }
+            };
+            match surface_call(payload) {
+                Ok(v) => IpcResponse::ok("window.restore", v),
+                Err(e) => IpcResponse::err(
+                    "window.restore",
+                    IpcError {
+                        code: "SURFACE_ERROR".to_string(),
+                        message: e,
+                    },
+                ),
+            }
+        }
+        "file.list" => {
+            let path = req.parameters.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            // Check for confirmation if bulk? For now auto; path validation inside FileManager will handle
+            match files.list(path) {
+                Ok(entries) => {
+                    // Return structured metadata limited to useful fields
+                    IpcResponse::ok("file.list", serde_json::json!({ "path": path, "files": entries }))
+                }
+                Err(e) => IpcResponse::err("file.list", IpcError { code: e.code.to_string(), message: e.message }),
+            }
+        }
+        "file.search" => {
+            let query = req.parameters.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            match files.search(query) {
+                Ok(results) => IpcResponse::ok("file.search", serde_json::json!({ "query": query, "results": results })),
+                Err(e) => IpcResponse::err("file.search", IpcError { code: e.code.to_string(), message: e.message }),
+            }
+        }
+        "file.read" => {
+            let path = req.parameters.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            match files.read(path) {
+                Ok(content) => {
+                    let size = content.len() as u64;
+                    IpcResponse::ok("file.read", serde_json::json!({ "path": path, "content": content, "size": size }))
+                }
+                Err(e) => IpcResponse::err("file.read", IpcError { code: e.code.to_string(), message: e.message }),
+            }
+        }
+        "file.create" => {
+            let path = req.parameters.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let content = req.parameters.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            match files.create(path, content) {
+                Ok((rel, bytes)) => IpcResponse::ok("file.create", serde_json::json!({ "path": rel, "bytes_written": bytes })),
+                Err(e) => {
+                    // Map already exists to requires confirmation for overwrite scenario
+                    if e.code == ErrorKind::InvalidInput && e.message.contains("already exists") {
+                        IpcResponse::err("file.create", IpcError { code: "REQUIRES_CONFIRMATION".to_string(), message: format!("{} already exists; overwrite requires confirmation", path) })
+                    } else {
+                        IpcResponse::err("file.create", IpcError { code: e.code.to_string(), message: e.message })
+                    }
+                }
+            }
+        }
+        "file.write" => {
+            let path = req.parameters.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let content = req.parameters.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            // For this phase, writing to existing file auto-executes; future could require confirmation
+            match files.write(path, content) {
+                Ok((rel, bytes)) => IpcResponse::ok("file.write", serde_json::json!({ "path": rel, "bytes_written": bytes })),
+                Err(e) => IpcResponse::err("file.write", IpcError { code: e.code.to_string(), message: e.message }),
+            }
+        }
+        "file.rename" => {
+            let from = req.parameters.get("from").and_then(|v| v.as_str()).unwrap_or("");
+            let to = req.parameters.get("to").and_then(|v| v.as_str()).unwrap_or("");
+            match files.rename(from, to) {
+                Ok(rel) => IpcResponse::ok("file.rename", serde_json::json!({ "from": from, "to": rel })),
+                Err(e) => {
+                    if e.code == ErrorKind::InvalidInput && e.message.contains("already exists") {
+                        IpcResponse::err("file.rename", IpcError { code: "REQUIRES_CONFIRMATION".to_string(), message: e.message })
+                    } else {
+                        IpcResponse::err("file.rename", IpcError { code: e.code.to_string(), message: e.message })
+                    }
+                }
+            }
+        }
+        "file.move" => {
+            let from = req.parameters.get("from").and_then(|v| v.as_str()).unwrap_or("");
+            let to = req.parameters.get("to").and_then(|v| v.as_str()).unwrap_or("");
+            match files.move_file(from, to) {
+                Ok(rel) => IpcResponse::ok("file.move", serde_json::json!({ "from": from, "to": rel })),
+                Err(e) => {
+                    if e.code == ErrorKind::InvalidInput && e.message.contains("already exists") {
+                        IpcResponse::err("file.move", IpcError { code: "REQUIRES_CONFIRMATION".to_string(), message: e.message })
+                    } else {
+                        IpcResponse::err("file.move", IpcError { code: e.code.to_string(), message: e.message })
+                    }
+                }
+            }
+        }
+        "file.delete" => {
+            // Not implemented unrestricted; require confirmation
+            IpcResponse::err("file.delete", IpcError { code: "REQUIRES_CONFIRMATION".to_string(), message: "delete requires explicit user confirmation".to_string() })
+        }
+        "system.info" => {
+            let services_val = serde_json::to_value(manager.system_status()).ok().and_then(|v| v.get("services").cloned());
+            let info = system_info::system_info(services_val);
+            IpcResponse::ok("system.info", info)
+        }
+        "system.resources" => {
+            let res = system_info::system_resources(Some(files.workspace_root()));
+            IpcResponse::ok("system.resources", res)
+        }
+        "system.uptime" => {
+            let up = system_info::system_uptime(Some(started_at));
+            IpcResponse::ok("system.uptime", up)
+        }
         "shutdown" => IpcResponse::ok("shutdown", serde_json::json!({ "state": "SHUTTING_DOWN" })),
         other => IpcResponse::err(
             other,
@@ -350,10 +849,19 @@ fn main() {
             Err(e) => eprintln!("[system-core] seed app '{id}' rejected: {e}"),
         }
     }
+    let mut files = match FileManager::new(WorkspaceConfig::from_env_or_default()) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("[system-core] workspace init failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    let started_at = SystemTime::now();
     eprintln!(
-        "[system-core] {} services running; {} app capabilities registered; control plane on {bind_addr}:{port}",
+        "[system-core] {} services running; {} app capabilities registered; workspace at {}; control plane on {bind_addr}:{port}",
         manager.graph().len(),
-        apps.registered_count()
+        apps.registered_count(),
+        files.workspace_root().display()
     );
 
     let listener = match std::net::TcpListener::bind((bind_addr.as_str(), port)) {
@@ -392,7 +900,7 @@ fn main() {
                     if req.command == "shutdown" {
                         stop_requested = true;
                     }
-                    dispatch(&mut manager, &mut apps, &req)
+                    dispatch(&mut manager, &mut apps, &mut files, started_at, &req)
                 }
                 Err(e) => IpcResponse::err(
                     "?",

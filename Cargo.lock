@@ -3,6 +3,18 @@
 version = 4
 
 [[package]]
+name = "aether-agent-runtime"
+version = "0.1.0"
+dependencies = [
+ "aether-core",
+ "aether-sdk",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "aether-agentd"
 version = "0.1.0"
 dependencies = [
@@ -117,6 +129,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-storage"
+version = "0.1.0"
+dependencies = [
+ "aether-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "aether-supervisor"
 version = "0.1.0"
 dependencies = [
@@ -140,6 +162,7 @@ version = "0.1.0"
 dependencies = [
  "aether-application-manager",
  "aether-core",
+ "aether-storage",
  "serde",
  "serde_json",
  "tempfile",

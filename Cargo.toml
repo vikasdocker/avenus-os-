@@ -7,6 +7,7 @@ members = [
   "apps/notes",
   "core/aether-core",
   "security/aether-security",
+  "storage/aether-storage",
   "system/aether-process-manager",
   "system/aether-init",
   "system/aether-system-core",
@@ -19,7 +20,8 @@ members = [
   "graphics/aether-graphical-shell",
   "graphics/aether-wm",
   "sdk/rust/aether-sdk",
-  "tools/aetherctl"
+  "tools/aetherctl",
+  "agent/aether-agent-runtime"
 ]
 
 [workspace.package]
