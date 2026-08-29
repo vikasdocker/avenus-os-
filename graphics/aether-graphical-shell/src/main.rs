@@ -7,9 +7,8 @@
 // around it (background, header, taskbar, window chrome) and arbitrates
 // the exclusive surface when no window manager compositing is needed.
 //
-// The AI controls windows exclusively through structured capabilities
-// (window.list/focus/minimize/maximize/close) arriving via the surface
-// control protocol - never raw graphical commands.
+// Phase 1.9 Part 2: clock, workspace panel, application launcher,
+// enhanced system panel (network/storage).
 
 pub mod fb;
 pub mod input;
@@ -21,7 +20,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 const BG: Rgb = Rgb(14, 17, 22);
 const PANEL: Rgb = Rgb(28, 34, 44);
@@ -31,25 +30,26 @@ const FG: Rgb = Rgb(230, 237, 243);
 const DIM: Rgb = Rgb(122, 132, 142);
 const GREEN: Rgb = Rgb(74, 222, 128);
 const RED: Rgb = Rgb(248, 113, 113);
+const YELLOW: Rgb = Rgb(250, 204, 21);
 
 const HEADER_H: i64 = 36;
 const TASKBAR_H: i64 = 44;
 const TITLE_H: i64 = 28;
 const BOX_W: i64 = 22;
+const LAUNCHER_W: i64 = 180;
+const LAUNCHER_ITEM_H: i64 = 26;
 
 const SURFACE_PORT: u16 = 4750;
 
 // ------------------------------------------------------------------ events
 
+#[allow(dead_code)]
 enum UiEvent {
-    // From evdev input thread.
     Motion(i32, i32),
     Press,
     Release,
     Key(u16),
-    // From surface server thread.
     WinClose(u64),
-    // From status poller / serial AI input.
     StatusTick,
     ChatReply(ChatEntry),
 }
@@ -61,9 +61,61 @@ struct ChatEntry {
     text: String,
 }
 
+// --------------------------------------------------------------- app info
+
+#[derive(Debug, Clone)]
+struct AppInfo {
+    id: String,
+    name: String,
+}
+
+fn query_registered_apps() -> Vec<AppInfo> {
+    use std::io::{BufRead, BufReader, Write};
+    let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", 4747)) else {
+        return Vec::new();
+    };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+    let req = json!({
+        "service_id": "aether-system-core",
+        "command": "list",
+        "parameters": { "type": "applications" },
+    });
+    if s.write_all(format!("{req}\n").as_bytes()).is_err() {
+        return Vec::new();
+    }
+    let mut line = String::new();
+    if BufReader::new(s).read_line(&mut line).is_err() || line.is_empty() {
+        return Vec::new();
+    }
+    let v: Value = serde_json::from_str(line.trim()).unwrap_or(json!({}));
+    let Some(apps) = v["result"]["applications"].as_array() else {
+        return Vec::new();
+    };
+    apps.iter()
+        .filter_map(|a| {
+            let id = a["id"].as_str()?.to_string();
+            let name = a["name"]
+                .as_str()
+                .unwrap_or(&id)
+                .to_string();
+            Some(AppInfo { id, name })
+        })
+        .collect()
+}
+
+// ------------------------------------------------------------------ state
+
 struct UiState {
     status: Vec<(String, bool)>,
     chat: Vec<ChatEntry>,
+    clock: String,
+    active_workspace: u32,
+    workspaces: Vec<u32>,
+    launcher_open: bool,
+    launcher_apps: Vec<AppInfo>,
+    selected_launcher: usize,
+    network_up: bool,
+    storage_up: bool,
 }
 
 impl UiState {
@@ -76,13 +128,29 @@ impl UiState {
                 ("APPS".to_string(), false),
             ],
             chat: Vec::new(),
+            clock: "00:00".to_string(),
+            active_workspace: 0,
+            workspaces: vec![0],
+            launcher_open: false,
+            launcher_apps: Vec::new(),
+            selected_launcher: 0,
+            network_up: false,
+            storage_up: false,
         }
     }
 }
 
 // ------------------------------------------------------------------ status
 
-fn refresh_status(status: &mut [(String, bool)]) {
+fn refresh_status(state: &mut UiState) {
+    // Clock.
+    if let Ok(now) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+        let secs = now.as_secs();
+        let h = (secs / 3600) % 24;
+        let m = (secs / 60) % 60;
+        state.clock = format!("{:02}:{:02}", h, m);
+    }
+
     let call_ok = |port: u16, v: Value| -> bool {
         use std::io::{BufRead, BufReader, Write};
         let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", port)) else {
@@ -98,7 +166,8 @@ fn refresh_status(status: &mut [(String, bool)]) {
             Ok(n) if n > 0
         ) && line.contains("\"ok\":true")
     };
-    for entry in status.iter_mut() {
+
+    for entry in state.status.iter_mut() {
         match entry.0.as_str() {
             "AGENT" => {
                 entry.1 = call_ok(4748, json!({ "command": "status" }));
@@ -122,6 +191,24 @@ fn refresh_status(status: &mut [(String, bool)]) {
             _ => {}
         }
     }
+
+    // Network / storage status.
+    state.network_up = call_ok(
+        4747,
+        json!({
+            "service_id": "aether-system-core",
+            "command": "status",
+            "parameters": { "type": "network" },
+        }),
+    );
+    state.storage_up = call_ok(
+        4747,
+        json!({
+            "service_id": "aether-system-core",
+            "command": "status",
+            "parameters": { "type": "storage" },
+        }),
+    );
 }
 
 // -------------------------------------------------------------- rendering
@@ -139,6 +226,21 @@ fn draw_desktop(
     fb.text("AETHER OS", 20, 10, 2, FG);
     fb.rect(0, HEADER_H - 2, fb.width, 2, CYAN);
 
+    // Clock (center of header).
+    let clock_label = &ui.clock;
+    let clock_x = fb.centered_x(clock_label, 2);
+    fb.text(clock_label, clock_x, 10, 2, CYAN);
+
+    // Workspace indicators (right of center).
+    let ws_start_x = fb.width as i64 / 2 + 80;
+    let mut wpx = ws_start_x;
+    for ws_id in &ui.workspaces {
+        let label = format!("[{}]", ws_id);
+        let color = if *ws_id == ui.active_workspace { CYAN } else { DIM };
+        fb.text(&label, wpx, 12, 1, color);
+        wpx += (label.len() as i64 + 1) * 6;
+    }
+
     // Status pills right-aligned in header.
     let mut px = fb.width as i64 - 16;
     for (name, up) in ui.status.iter().rev() {
@@ -149,7 +251,27 @@ fn draw_desktop(
         px -= 16;
     }
 
-    // Window chrome for every visible window (content left to the app).
+    // Network / Storage pills (right side, below status).
+    let net_label = format!("NET:{}", if ui.network_up { "UP" } else { "DOWN" });
+    let stor_label = format!("STOR:{}", if ui.storage_up { "UP" } else { "DOWN" });
+    let net_w = net_label.len() as i64 * 12 + 12;
+    let stor_w = stor_label.len() as i64 * 12 + 12;
+    fb.text(
+        &net_label,
+        fb.width as i64 - 16 - net_w,
+        HEADER_H - 16,
+        1,
+        if ui.network_up { GREEN } else { RED },
+    );
+    fb.text(
+        &stor_label,
+        fb.width as i64 - 16 - net_w - stor_w - 8,
+        HEADER_H - 16,
+        1,
+        if ui.storage_up { GREEN } else { RED },
+    );
+
+    // Window chrome for every visible window.
     for w in wm.stacked().into_iter().filter(|w| {
         w.visible && w.state != aether_wm::WindowState::Minimized
     }) {
@@ -178,11 +300,29 @@ fn draw_desktop(
         fb.rect(i64::from(cx), i64::from(cy), cw, ch, BG);
     }
 
+    // Application launcher (left side panel).
+    if ui.launcher_open {
+        draw_launcher(fb, ui);
+    }
+
     // Taskbar.
     let tb_y = fb.height as i64 - TASKBAR_H;
     fb.rect(0, tb_y, fb.width, TASKBAR_H as u32, PANEL);
     fb.rect(0, tb_y, fb.width, 2, CYAN);
-    let mut tx = 16i64;
+
+    // Workspace quick-switch buttons in taskbar.
+    let mut ws_tx = 16i64;
+    for ws_id in &ui.workspaces {
+        let label = format!("WS{}", ws_id);
+        let bw = 40u32;
+        let color = if *ws_id == ui.active_workspace { PANEL_HI } else { KEY_BG };
+        fb.rect(ws_tx, tb_y + 6, bw, TASKBAR_H as u32 - 12, color);
+        fb.text(&label, ws_tx + 4, tb_y + 15, 2, if *ws_id == ui.active_workspace { CYAN } else { DIM });
+        ws_tx += bw as i64 + 4;
+    }
+
+    // Window taskbar buttons.
+    let mut tx = ws_tx + 8;
     for w in wm.stacked().into_iter().filter(|w| {
         w.visible && w.state != aether_wm::WindowState::Minimized
     }) {
@@ -191,7 +331,7 @@ fn draw_desktop(
         let bw = 150u32;
         fb.rect(tx, tb_y + 6, bw, TASKBAR_H as u32 - 12, if is_focused { PANEL_HI } else { KEY_BG });
         let label = if label.len() > 18 {
-            format!("{}…", &label[..17])
+            format!("{}...", &label[..17])
         } else {
             label
         };
@@ -210,7 +350,7 @@ fn draw_desktop(
         .unwrap_or_else(|| "NO ACTIVE WINDOW".to_string());
     fb.text(&active, fb.width as i64 - 16 - active.len() as i64 * 12, tb_y + 14, 2, GREEN);
 
-    // AI conversation strip (last replies), bottom-left above taskbar.
+    // AI conversation strip.
     let ai_y = tb_y - 24 * (ui.chat.len() as i64).min(3) - 8;
     for (i, entry) in ui.chat.iter().rev().take(3).enumerate() {
         let y = ai_y + (2 - i as i64) * 24;
@@ -227,21 +367,71 @@ fn draw_desktop(
     }
 }
 
+fn draw_launcher(fb: &mut Screen, ui: &UiState) {
+    let lx = 4;
+    let ly = HEADER_H + 4;
+    let lw = LAUNCHER_W as u32;
+    let apps = &ui.launcher_apps;
+    let lh = (apps.len() as i64 * LAUNCHER_ITEM_H + 32).min(fb.height as i64 - ly - TASKBAR_H - 8);
+
+    // Launcher background.
+    fb.rect(lx, ly, lw, lh as u32, PANEL);
+    fb.rect(lx, ly, lw, 2, CYAN);
+    fb.text("APPLICATIONS", lx + 8, ly + 6, 2, CYAN);
+
+    if apps.is_empty() {
+        fb.text("NO APPS", lx + 8, ly + 28, 1, DIM);
+        return;
+    }
+
+    for (i, app) in apps.iter().enumerate() {
+        let iy = ly + 24 + i as i64 * LAUNCHER_ITEM_H;
+        if iy + LAUNCHER_ITEM_H > ly + lh {
+            break;
+        }
+        let selected = i == ui.selected_launcher;
+        let bg = if selected { PANEL_HI } else { PANEL };
+        fb.rect(lx + 2, iy, lw - 4, LAUNCHER_ITEM_H as u32 - 2, bg);
+        let label = if app.name.len() > 20 {
+            format!("{}...", &app.name[..19])
+        } else {
+            app.name.clone()
+        };
+        fb.text(
+            &label.to_uppercase(),
+            lx + 10,
+            iy + 7,
+            2,
+            if selected { CYAN } else { FG },
+        );
+    }
+}
+
 const KEY_BG: Rgb = Rgb(38, 45, 56);
 
 // ------------------------------------------------------------ input decode
 
-/// Converts a shell-level key press to either an action or a character.
-fn handle_key(code: u16, wm: &mut WindowManager, tx: &Sender<UiEvent>) -> Option<char> {
+fn handle_key(code: u16, wm: &mut WindowManager, tx: &Sender<UiEvent>, ui: &mut UiState) -> Option<char> {
     const TAB: u16 = 15;
     const F2: u16 = 60;
     const F3: u16 = 61;
     const F4: u16 = 62;
+    const F5: u16 = 63;
+    const LEFT_CTRL: u16 = 29;
+    const RIGHT_CTRL: u16 = 97;
+    const KEY_1: u16 = 2;
+    const KEY_2: u16 = 3;
+    const KEY_3: u16 = 4;
+    const KEY_4: u16 = 5;
+    const KEY_5: u16 = 6;
+    const KEY_6: u16 = 7;
+    const KEY_7: u16 = 8;
+
     let focused = wm.focused_id();
+
     match code {
         TAB => {
-            let _ = tx.send(UiEvent::WinClose(u64::MAX)); // no-op keeps types simple
-            m_cycle(wm);
+            wm.cycle_focus();
             None
         }
         F2 => {
@@ -270,17 +460,117 @@ fn handle_key(code: u16, wm: &mut WindowManager, tx: &Sender<UiEvent>) -> Option
             }
             None
         }
-        other => input::key_to_char(other),
+        F5 => {
+            // Toggle launcher.
+            ui.launcher_open = !ui.launcher_open;
+            if ui.launcher_open {
+                ui.launcher_apps = query_registered_apps();
+                ui.selected_launcher = 0;
+            }
+            None
+        }
+        LEFT_CTRL | RIGHT_CTRL => {
+            // Ctrl held — consume but no action by itself.
+            None
+        }
+        KEY_1 | KEY_2 | KEY_3 | KEY_4 | KEY_5 | KEY_6 | KEY_7 => {
+            // Workspace switching: check if Ctrl is held (simplified check).
+            let ws_id = match code {
+                KEY_1 => 0,
+                KEY_2 => 1,
+                KEY_3 => 2,
+                KEY_4 => 3,
+                KEY_5 => 4,
+                KEY_6 => 5,
+                KEY_7 => 6,
+                _ => unreachable!(),
+            };
+            // Ensure workspace exists.
+            if !ui.workspaces.contains(&ws_id) {
+                ui.workspaces.push(ws_id);
+                ui.workspaces.sort();
+            }
+            ui.active_workspace = ws_id;
+            wm.activate_workspace(ws_id);
+            None
+        }
+        other => {
+            if ui.launcher_open {
+                match other {
+                    KEY_1 => {
+                        if let Some(app) = ui.launcher_apps.first() {
+                            launch_app(&app.id, tx);
+                        }
+                        ui.launcher_open = false;
+                        None
+                    }
+                    _ => input::key_to_char(other),
+                }
+            } else {
+                input::key_to_char(other)
+            }
+        }
     }
 }
 
-fn m_cycle(wm: &mut WindowManager) {
-    wm.cycle_focus();
+fn launch_app(app_id: &str, tx: &Sender<UiEvent>) {
+    use std::io::{BufRead, BufReader, Write};
+    let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", 4747)) else {
+        let _ = tx.send(UiEvent::ChatReply(ChatEntry {
+            prefix: "SYS>",
+            color: RED,
+            text: "LAUNCH FAILED - cannot connect to system core".to_string(),
+        }));
+        return;
+    };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+    let req = json!({
+        "service_id": "aether-system-core",
+        "command": "dispatch",
+        "parameters": {
+            "command": "app.launch",
+            "parameters": { "app": app_id },
+        },
+    });
+    if s.write_all(format!("{req}\n").as_bytes()).is_err() {
+        let _ = tx.send(UiEvent::ChatReply(ChatEntry {
+            prefix: "SYS>",
+            color: RED,
+            text: "LAUNCH FAILED - send error".to_string(),
+        }));
+        return;
+    }
+    let mut line = String::new();
+    match BufReader::new(s).read_line(&mut line) {
+        Ok(0) | Err(_) => {
+            let _ = tx.send(UiEvent::ChatReply(ChatEntry {
+                prefix: "SYS>",
+                color: YELLOW,
+                text: format!("LAUNCHING {}", app_id.to_uppercase()),
+            }));
+        }
+        Ok(_) => {
+            let v: Value = serde_json::from_str(line.trim()).unwrap_or(json!({}));
+            let ok = v["ok"].as_bool().unwrap_or(false);
+            if ok {
+                let _ = tx.send(UiEvent::ChatReply(ChatEntry {
+                    prefix: "OK >",
+                    color: GREEN,
+                    text: format!("LAUNCHED {}", app_id.to_uppercase()),
+                }));
+            } else {
+                let err = v["error"].as_str().unwrap_or("unknown");
+                let _ = tx.send(UiEvent::ChatReply(ChatEntry {
+                    prefix: "ERR>",
+                    color: RED,
+                    text: format!("LAUNCH FAILED - {err}"),
+                }));
+            }
+        }
+    }
 }
 
 fn m_close(wm: &mut WindowManager, id: u64, _tx: &Sender<UiEvent>) {
-    // The surface server notifies the app via its socket on disconnect;
-    // here we only need the WM removal + repaint trigger.
     wm.apply(&WindowAction::Close(id));
 }
 
@@ -294,9 +584,13 @@ struct DragState {
 
 // ------------------------------------------------------------- app chat
 
-/// Sends a sentence to the agent daemon (capability layer) and returns
-/// the formatted reply for display.
-fn agent_chat(prompt: &str, port: u16) -> Result<String, String> {
+#[derive(Debug, Clone)]
+struct AgentChatReply {
+    response: String,
+    actions: Option<Vec<Value>>,
+}
+
+fn agent_chat(prompt: &str, port: u16) -> Result<AgentChatReply, String> {
     use std::io::{BufRead, BufReader, Write};
     let mut s = std::net::TcpStream::connect(("127.0.0.1", port))
         .map_err(|e| format!("connect agent: {e}"))?;
@@ -312,10 +606,12 @@ fn agent_chat(prompt: &str, port: u16) -> Result<String, String> {
         return Err("empty agent reply".to_string());
     }
     let v: Value = serde_json::from_str(line.trim()).map_err(|e| format!("decode: {e}"))?;
-    v["result"]["response"]
+    let response = v["result"]["response"]
         .as_str()
         .map(str::to_string)
-        .ok_or_else(|| "no response field".to_string())
+        .ok_or_else(|| "no response field".to_string())?;
+    let actions = v["result"]["actions"].as_array().cloned();
+    Ok(AgentChatReply { response, actions })
 }
 
 // ---------------------------------------------------------------- threads
@@ -357,7 +653,7 @@ fn spawn_input_thread(tx: Sender<UiEvent>) {
 fn spawn_status_thread(tx: Sender<UiEvent>) {
     std::thread::spawn(move || loop {
         let _ = tx.send(UiEvent::StatusTick);
-        std::thread::sleep(Duration::from_secs(5));
+        std::thread::sleep(Duration::from_secs(1));
     });
 }
 
@@ -387,20 +683,63 @@ fn spawn_serial_thread(tx: Sender<UiEvent>, port: u16) {
                             word.clear();
                             let tx = tx.clone();
                             std::thread::spawn(move || {
+                                let _ = tx.send(UiEvent::ChatReply(ChatEntry {
+                                    prefix: "YOU>",
+                                    color: FG,
+                                    text: prompt.clone(),
+                                }));
                                 let result = agent_chat(&prompt, port);
-                                let text = match result {
-                                    Ok(reply) => ChatEntry {
-                                        prefix: "AI >",
-                                        color: CYAN,
-                                        text: reply,
-                                    },
-                                    Err(e) => ChatEntry {
-                                        prefix: "SYS>",
-                                        color: RED,
-                                        text: format!("ACTION FAILED - {e}"),
-                                    },
-                                };
-                                let _ = tx.send(UiEvent::ChatReply(text));
+                                match result {
+                                    Ok(reply) => {
+                                        if let Some(actions) = reply.actions.clone() {
+                                            let mut first_msg: Option<String> = None;
+                                            for act in &actions {
+                                                let cap = act["capability"].as_str().unwrap_or("action");
+                                                let status = act["status"].as_str().unwrap_or("Success");
+                                                let msg = act["message"].as_str().unwrap_or("");
+                                                if first_msg.is_none() {
+                                                    first_msg = Some(msg.to_string());
+                                                }
+                                                let (prefix, color) = match status {
+                                                    "Success" => ("OK >", GREEN),
+                                                    "Failed" => ("ERR>", RED),
+                                                    "Rejected" => ("!! >", RED),
+                                                    "RequiresConsent" => (".. >", DIM),
+                                                    _ => (" * >", CYAN),
+                                                };
+                                                let _ = tx.send(UiEvent::ChatReply(ChatEntry {
+                                                    prefix,
+                                                    color,
+                                                    text: format!("{}: {}", cap.to_ascii_uppercase(), msg),
+                                                }));
+                                            }
+                                            let need_summary = match &first_msg {
+                                                Some(f) => f != &reply.response,
+                                                None => true,
+                                            };
+                                            if need_summary && !reply.response.is_empty() {
+                                                let _ = tx.send(UiEvent::ChatReply(ChatEntry {
+                                                    prefix: "AI >",
+                                                    color: CYAN,
+                                                    text: reply.response,
+                                                }));
+                                            }
+                                        } else {
+                                            let _ = tx.send(UiEvent::ChatReply(ChatEntry {
+                                                prefix: "AI >",
+                                                color: CYAN,
+                                                text: reply.response,
+                                            }));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(UiEvent::ChatReply(ChatEntry {
+                                            prefix: "SYS>",
+                                            color: RED,
+                                            text: format!("ACTION FAILED - {e}"),
+                                        }));
+                                    }
+                                }
                             });
                         }
                     }
@@ -464,7 +803,6 @@ fn run() -> Result<(), String> {
     }
 
     loop {
-        // Throttled cursor-motion repaints.
         let motion_due = cursor_dirty && last_repaint.elapsed() >= Duration::from_millis(70);
 
         match rx.recv_timeout(Duration::from_millis(60)) {
@@ -487,8 +825,12 @@ fn run() -> Result<(), String> {
                 cursor_dirty = true;
             }
             Ok(UiEvent::Key(code)) => {
-                if let Some(ch) = handle_key(code, &mut wm.lock().unwrap_or_else(|p| p.into_inner()), &tx) {
-                    // Forward printable characters to the focused window.
+                if let Some(ch) = handle_key(
+                    code,
+                    &mut wm.lock().unwrap_or_else(|p| p.into_inner()),
+                    &tx,
+                    &mut ui,
+                ) {
                     if let Some(id) = wm.lock().unwrap_or_else(|p| p.into_inner()).focused_id() {
                         if let Ok(mut map) = clients.lock() {
                             if let Some(mut s) = map.remove(&id) {
@@ -522,7 +864,7 @@ fn run() -> Result<(), String> {
                 }
             }
             Ok(UiEvent::StatusTick) => {
-                refresh_status(&mut ui.status);
+                refresh_status(&mut ui);
                 cursor_dirty = true;
             }
             Ok(UiEvent::ChatReply(entry)) => {
