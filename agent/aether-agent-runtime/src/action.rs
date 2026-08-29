@@ -39,7 +39,14 @@ pub enum ActionRisk {
 }
 
 /// A structured action the agent wants to execute.
+///
+/// `deny_unknown_fields` is the security boundary: a model-produced
+/// action cannot smuggle `root`, `admin`, `allow`, `skip_policy`,
+/// `trusted`, or any other privilege-escalation field past the
+/// deserializer. Risk is always assigned by `Action::new` via the
+/// trusted `classify_action` table; the LLM cannot override it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Action {
     pub id: ActionId,
     pub session_id: String,

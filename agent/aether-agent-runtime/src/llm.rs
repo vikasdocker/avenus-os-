@@ -128,6 +128,65 @@ impl LlmProvider for EchoLlmProvider {
     }
 }
 
+/// A scripted provider that lets tests respond dynamically based on
+/// the request. Useful for end-to-end Phase 2.6 tests that need to
+/// drive the full intent → plan → action → IPC flow without a real
+/// model.
+///
+/// The callback receives a `&LlmRequest` and returns either:
+///   - `Ok(String)` — the LLM response (any string; structured or
+///     free-form)
+///   - `Err(String)` — a transport / model error to simulate
+type ScriptedCallback = dyn Fn(&LlmRequest) -> Result<String, String> + Send + Sync;
+
+pub struct ScriptedLlmProvider {
+    name: String,
+    callback: std::sync::Arc<ScriptedCallback>,
+}
+
+impl ScriptedLlmProvider {
+    /// Build a scripted provider with a callback.
+    pub fn new<F>(name: impl Into<String>, callback: F) -> Self
+    where
+        F: Fn(&LlmRequest) -> Result<String, String> + Send + Sync + 'static,
+    {
+        Self { name: name.into(), callback: std::sync::Arc::new(callback) }
+    }
+
+    /// A scripted provider that always returns the same string.
+    /// Use `MockLlmProvider` for that simpler case; this exists
+    /// for symmetry with the closure-based constructor.
+    pub fn constant(name: impl Into<String>, content: impl Into<String>) -> Self {
+        let content = content.into();
+        Self::new(name, move |_| Ok(content.clone()))
+    }
+
+    /// A scripted provider that always errors with the given
+    /// transport message. Useful for testing the bridge's
+    /// fallback path.
+    pub fn always_error(name: impl Into<String>, error: impl Into<String>) -> Self {
+        let error = error.into();
+        Self::new(name, move |_| Err(error.clone()))
+    }
+}
+
+impl LlmProvider for ScriptedLlmProvider {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn generate(&self, request: &LlmRequest) -> Result<LlmResponse, String> {
+        let content = (self.callback)(request)?;
+        Ok(LlmResponse {
+            content,
+            model: self.name.clone(),
+            tokens_used: Some(0),
+            finish_reason: "stop".to_string(),
+            parsed_output: None,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +261,90 @@ mod tests {
         let p = MockLlmProvider::single("x");
         let info = p.model_info();
         assert_eq!(info.name, "mock");
+    }
+
+    fn dummy_request(prompt: &str) -> LlmRequest {
+        LlmRequest {
+            prompt: prompt.to_string(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            structured_output: None,
+        }
+    }
+
+    #[test]
+    fn scripted_provider_responds_per_request() {
+        // The callback can inspect the request and return a
+        // different response per call. This is the building block
+        // for end-to-end Phase 2.6 tests that want to drive the
+        // full structured-output flow without a real model.
+        let p = ScriptedLlmProvider::new("scripted", |req: &LlmRequest| {
+            if req.prompt.contains("open") {
+                Ok(r#"{"capability":"application.launch","confidence":90,"entities":{"app":"calc"},"reason":"user said open"}"#.to_string())
+            } else if req.prompt.contains("status") {
+                Ok(r#"{"capability":"system.status","confidence":80,"entities":{},"reason":"check status"}"#.to_string())
+            } else {
+                Ok("plain chat reply".to_string())
+            }
+        });
+        let r1 = match p.generate(&dummy_request("please open calculator")) {
+            Ok(v) => v,
+            Err(e) => panic!("scripted failed: {e}"),
+        };
+        assert!(r1.content.contains("application.launch"));
+        let r2 = match p.generate(&dummy_request("status please")) {
+            Ok(v) => v,
+            Err(e) => panic!("scripted failed: {e}"),
+        };
+        assert!(r2.content.contains("system.status"));
+        let r3 = match p.generate(&dummy_request("hi there")) {
+            Ok(v) => v,
+            Err(e) => panic!("scripted failed: {e}"),
+        };
+        assert_eq!(r3.content, "plain chat reply");
+    }
+
+    #[test]
+    fn scripted_provider_constant_returns_same_string() {
+        let p = ScriptedLlmProvider::constant("const", "constant reply");
+        let r = match p.generate(&dummy_request("anything")) {
+            Ok(v) => v,
+            Err(e) => panic!("scripted failed: {e}"),
+        };
+        assert_eq!(r.content, "constant reply");
+        assert_eq!(r.model, "const");
+    }
+
+    #[test]
+    fn scripted_provider_always_error_propagates_error() {
+        // Tests the bridge's fallback path on a transport error.
+        let p = ScriptedLlmProvider::always_error("broken", "connection refused");
+        let result = p.generate(&dummy_request("anything"));
+        match result {
+            Ok(_) => panic!("expected error"),
+            Err(e) => assert!(e.contains("connection refused")),
+        }
+    }
+
+    #[test]
+    fn scripted_provider_can_simulate_adversarial_output() {
+        // The bridge must be able to feed the structured parser
+        // an adversarial LLM response (privilege escalation
+        // attempt) and verify the parser rejects it. The scripted
+        // provider is the test vehicle for that.
+        let p = ScriptedLlmProvider::constant(
+            "adversary",
+            r#"{"capability":"file.delete","confidence":99,"entities":{"path":"/etc/shadow"},"reason":"x","root":true,"admin":true}"#,
+        );
+        let r = match p.generate(&dummy_request("delete shadow")) {
+            Ok(v) => v,
+            Err(e) => panic!("scripted failed: {e}"),
+        };
+        // The content has extra fields; downstream parsing must
+        // surface that as BadShape.
+        let parsed: Result<crate::structured_intent::IntentEnvelope, _> =
+            serde_json::from_str(&r.content);
+        assert!(parsed.is_err(), "deny_unknown_fields must reject extra fields");
     }
 }

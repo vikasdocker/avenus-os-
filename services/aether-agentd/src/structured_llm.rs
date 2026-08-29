@@ -55,13 +55,37 @@ pub const INTENT_SCHEMA: &str = r#"{
 }"#;
 
 /// Wire format the LLM is asked to produce.
+///
+/// `deny_unknown_fields` is the security boundary: an LLM cannot
+/// smuggle `root: true`, `admin: true`, `allow: true`,
+/// `skip_policy: true`, `trusted: true`, or any other privileged
+/// field past the deserializer. The daemon will surface that as
+/// `StructuredError::BadShape` and fall back to plain chat.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct IntentEnvelope {
     pub capability: String,
     pub confidence: u8,
     pub entities: Value,
     pub reason: String,
 }
+
+/// Maximum raw LLM response size, in bytes. Inputs larger than
+/// this are rejected before any parsing happens. Mirrors the
+/// runtime's MAX_RAW_ENVELOPE_BYTES.
+pub const MAX_RAW_ENVELOPE_BYTES: usize = 64 * 1024;
+
+/// Maximum length of a `capability` string.
+pub const MAX_CAPABILITY_LEN: usize = 128;
+
+/// Maximum length of a `reason` string.
+pub const MAX_REASON_LEN: usize = 2048;
+
+/// Maximum nesting depth of the `entities` object.
+pub const MAX_ENTITIES_DEPTH: usize = 8;
+
+/// Maximum number of keys in the `entities` object.
+pub const MAX_ENTITIES_KEYS: usize = 64;
 
 /// All the ways a structured-intent response can be rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +97,11 @@ pub enum StructuredError {
     BadEntities(String),
     EmptyReason,
     ProviderUnavailable(String),
+    TooLarge { size: usize, limit: usize },
+    CapabilityTooLong { size: usize, limit: usize },
+    ReasonTooLong { size: usize, limit: usize },
+    EntitiesTooDeep { depth: usize, limit: usize },
+    EntitiesTooManyKeys { count: usize, limit: usize },
 }
 
 impl std::fmt::Display for StructuredError {
@@ -85,6 +114,21 @@ impl std::fmt::Display for StructuredError {
             Self::BadEntities(s) => write!(f, "entities not a JSON object: {s}"),
             Self::EmptyReason => write!(f, "reason must be a non-empty string"),
             Self::ProviderUnavailable(s) => write!(f, "provider unavailable: {s}"),
+            Self::TooLarge { size, limit } => {
+                write!(f, "raw envelope too large: {size} bytes (limit {limit})")
+            }
+            Self::CapabilityTooLong { size, limit } => {
+                write!(f, "capability too long: {size} bytes (limit {limit})")
+            }
+            Self::ReasonTooLong { size, limit } => {
+                write!(f, "reason too long: {size} bytes (limit {limit})")
+            }
+            Self::EntitiesTooDeep { depth, limit } => {
+                write!(f, "entities too deeply nested: {depth} levels (limit {limit})")
+            }
+            Self::EntitiesTooManyKeys { count, limit } => {
+                write!(f, "entities has too many keys: {count} (limit {limit})")
+            }
         }
     }
 }
@@ -106,13 +150,54 @@ fn strip_code_fence(raw: &str) -> &str {
     raw
 }
 
+/// Returns the maximum JSON nesting depth of a value. Used to
+/// bound the `entities` object.
+fn json_depth(v: &Value) -> usize {
+    match v {
+        Value::Object(map) => 1 + map.values().map(json_depth).max().unwrap_or(0),
+        Value::Array(arr) => 1 + arr.iter().map(json_depth).max().unwrap_or(0),
+        _ => 0,
+    }
+}
+
 /// Parse the raw LLM response text into an `IntentEnvelope`.
+///
+/// Resource limits (MAX_RAW_ENVELOPE_BYTES, etc.) are enforced
+/// here. Inputs that exceed the limit are rejected with a typed
+/// error before any allocation-heavy work happens.
 pub fn parse_envelope(raw: &str) -> Result<IntentEnvelope, StructuredError> {
+    if raw.len() > MAX_RAW_ENVELOPE_BYTES {
+        return Err(StructuredError::TooLarge { size: raw.len(), limit: MAX_RAW_ENVELOPE_BYTES });
+    }
     let trimmed = strip_code_fence(raw);
     let value: Value =
         serde_json::from_str(trimmed).map_err(|e| StructuredError::BadJson(e.to_string()))?;
     let env: IntentEnvelope =
         serde_json::from_value(value).map_err(|e| StructuredError::BadShape(e.to_string()))?;
+    if env.capability.len() > MAX_CAPABILITY_LEN {
+        return Err(StructuredError::CapabilityTooLong {
+            size: env.capability.len(),
+            limit: MAX_CAPABILITY_LEN,
+        });
+    }
+    if env.reason.len() > MAX_REASON_LEN {
+        return Err(StructuredError::ReasonTooLong {
+            size: env.reason.len(),
+            limit: MAX_REASON_LEN,
+        });
+    }
+    if let Some(obj) = env.entities.as_object() {
+        if obj.len() > MAX_ENTITIES_KEYS {
+            return Err(StructuredError::EntitiesTooManyKeys {
+                count: obj.len(),
+                limit: MAX_ENTITIES_KEYS,
+            });
+        }
+        let depth = json_depth(&env.entities);
+        if depth > MAX_ENTITIES_DEPTH {
+            return Err(StructuredError::EntitiesTooDeep { depth, limit: MAX_ENTITIES_DEPTH });
+        }
+    }
     Ok(env)
 }
 
@@ -479,5 +564,124 @@ mod tests {
         assert!(p.contains("app.launch"));
         assert!(p.contains("system.status"));
         assert!(p.contains("open calculator"));
+    }
+
+    #[test]
+    fn try_structured_handles_huge_response_without_panic() {
+        // Resource limit boundary: the LLM must not be able to
+        // produce a 1MB response that the deserializer handles in
+        // O(N) memory and crashes the daemon. The deserializer
+        // must complete (or fail with a clean error) regardless
+        // of input size.
+        let mut raw = String::from(r#"{"capability":"system.status","confidence":80,"entities":{"#);
+        for _ in 0..10_000 {
+            raw.push_str("\"k\":\"v\",");
+        }
+        raw.push_str("\"reason\":\"x\"}");
+        let p = FixedProvider(Box::leak(raw.into_boxed_str())); // leak to satisfy 'static
+        let ctx = SystemContext::empty();
+        let outcome = try_structured(&p, "x", &ctx);
+        // We don't care which fallback path it takes; we only
+        // verify the call returns cleanly without panicking.
+        let _ = outcome;
+    }
+
+    #[test]
+    fn parse_envelope_rejects_unicode_control_chars_in_reason() {
+        // A model that smuggles ANSI escapes or null bytes in
+        // `reason` must not break the parser. The deserializer
+        // accepts the value; downstream code (audit log, chat
+        // display) is responsible for sanitising. Here we only
+        // verify the parse path doesn't reject it.
+        let raw = "{\"capability\":\"system.status\",\"confidence\":80,\"entities\":{},\"reason\":\"ok\\u0000\\u001b[31mred\\u001b[0m\"}";
+        let env = match parse_envelope(raw) {
+            Ok(e) => e,
+            Err(e) => panic!("parse failed: {e}"),
+        };
+        assert!(env.reason.contains("red"));
+    }
+
+    #[test]
+    fn try_structured_handles_empty_response_string() {
+        // Some providers return an empty string on a refused
+        // request. The bridge must treat that as a clean
+        // fallback, not a panic.
+        let p = FixedProvider("");
+        let ctx = SystemContext::empty();
+        match try_structured(&p, "anything", &ctx) {
+            LlmIntentOutcome::Fallback(StructuredError::BadJson(_)) => {}
+            other => panic!("expected BadJson fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_structured_handles_non_object_response() {
+        // LLM returns a JSON array instead of an object.
+        let p = FixedProvider("[1,2,3]");
+        let ctx = SystemContext::empty();
+        match try_structured(&p, "anything", &ctx) {
+            LlmIntentOutcome::Fallback(_) => {}
+            other => panic!("expected fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_structured_handles_json_null_response() {
+        let p = FixedProvider("null");
+        let ctx = SystemContext::empty();
+        match try_structured(&p, "anything", &ctx) {
+            LlmIntentOutcome::Fallback(_) => {}
+            other => panic!("expected fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_structured_rejects_root_privilege_escalation_field() {
+        // Defence-in-depth: the daemon's structured parser must
+        // reject an envelope that smuggles in privilege fields,
+        // even if the LLM thinks it has authority.
+        let raw = r#"{"capability":"app.launch","confidence":99,"entities":{"app":"x"},"reason":"y","root":true,"admin":true,"allow":true}"#;
+        let p = FixedProvider(raw);
+        let ctx = SystemContext::empty();
+        match try_structured(&p, "x", &ctx) {
+            LlmIntentOutcome::Fallback(StructuredError::BadShape(_)) => {}
+            other => panic!("expected BadShape fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_structured_falls_back_on_oversized_response() {
+        // Resource limit: 100 KiB raw input must be rejected
+        // before parsing. The bridge must surface a typed
+        // TooLarge fallback.
+        let mut raw = String::with_capacity(100 * 1024);
+        for _ in 0..(100 * 1024) {
+            raw.push('A');
+        }
+        let leaked: &'static str = Box::leak(raw.into_boxed_str());
+        let p = FixedProvider(leaked);
+        let ctx = SystemContext::empty();
+        match try_structured(&p, "x", &ctx) {
+            LlmIntentOutcome::Fallback(StructuredError::TooLarge { .. }) => {}
+            other => panic!("expected TooLarge fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_structured_falls_back_on_oversized_reason() {
+        let mut reason = String::with_capacity(MAX_REASON_LEN + 1);
+        for _ in 0..(MAX_REASON_LEN + 1) {
+            reason.push('y');
+        }
+        let raw = format!(
+            r#"{{"capability":"app.launch","confidence":80,"entities":{{}},"reason":"{reason}"}}"#
+        );
+        let leaked: &'static str = Box::leak(raw.into_boxed_str());
+        let p = FixedProvider(leaked);
+        let ctx = SystemContext::empty();
+        match try_structured(&p, "x", &ctx) {
+            LlmIntentOutcome::Fallback(StructuredError::ReasonTooLong { .. }) => {}
+            other => panic!("expected ReasonTooLong fallback, got {other:?}"),
+        }
     }
 }

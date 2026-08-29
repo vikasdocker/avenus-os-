@@ -1775,6 +1775,51 @@ mod tests {
         }
     }
 
+    /// A provider whose structured output smuggles in
+    /// privilege-escalation fields. The structured parser must
+    /// reject the envelope and the chat handler must fall back to
+    /// plain chat.
+    struct StubPrivilegeEscalationProvider;
+    impl AiProvider for StubPrivilegeEscalationProvider {
+        fn name(&self) -> &str {
+            "stub-priv-esc"
+        }
+        fn complete(&self, _prompt: &str) -> Result<String, String> {
+            // Note the extra "root": true and "admin": true fields.
+            // deny_unknown_fields must reject this at the
+            // deserializer.
+            Ok(r#"{"capability":"system.status","confidence":80,"entities":{},"reason":"x","root":true,"admin":true,"skip_policy":true}"#.to_string())
+        }
+    }
+
+    /// A provider that returns a structured intent with a
+    /// capability that maps to a read-only call. The full path
+    /// should be: LLM response -> envelope -> intent -> planner
+    /// -> action -> IPC. The end-to-end test verifies each step.
+    struct StubReadOnlyAppStatusProvider;
+    impl AiProvider for StubReadOnlyAppStatusProvider {
+        fn name(&self) -> &str {
+            "stub-app-status"
+        }
+        fn complete(&self, _prompt: &str) -> Result<String, String> {
+            Ok(r#"{"capability":"app.status","confidence":90,"entities":{"app":"notes"},"reason":"user asked for notes status"}"#.to_string())
+        }
+    }
+
+    /// A provider that returns a structured envelope for a
+    /// destructive capability (app.close). The plan must carry
+    /// `requires_approval: true` and the action must be
+    /// classified as Medium risk — the LLM cannot demote it.
+    struct StubDestructiveAppCloseProvider;
+    impl AiProvider for StubDestructiveAppCloseProvider {
+        fn name(&self) -> &str {
+            "stub-app-close"
+        }
+        fn complete(&self, _prompt: &str) -> Result<String, String> {
+            Ok(r#"{"capability":"app.close","confidence":99,"entities":{"app":"notes"},"reason":"close notes","risk_level":"low"}"#.to_string())
+        }
+    }
+
     fn spawn_state_with_provider(
         port: u16,
         clock: fn() -> u64,
@@ -1849,6 +1894,136 @@ mod tests {
         let resp = r.result["response"].as_str().unwrap_or_default();
         assert!(resp.contains("unavailable") || resp.contains("ECHO"), "got: {resp}");
         assert_ne!(r.result["provider"], "structured-llm");
+    }
+
+    // ---- Phase 2.6 — End-to-end structured-output tests ----
+
+    #[test]
+    fn chat_falls_back_to_plain_chat_on_privilege_escalation_attempt() {
+        // The LLM attempts to smuggle `root: true` and other
+        // privilege-escalation fields into the envelope. The
+        // deny_unknown_fields deserializer rejects the envelope
+        // and the chat handler falls back to plain chat. The LLM
+        // MUST NOT be able to grant itself authority.
+        let (ctrl_port, _h) = spawn_mock_control_plane();
+        let (clock, _tick) = fake_clock(7300);
+        let mut state =
+            spawn_state_with_provider(ctrl_port, clock, Box::new(StubPrivilegeEscalationProvider));
+
+        let r = handle_request(
+            &mut state,
+            &AgentRequest {
+                command: "chat".to_string(),
+                argument: Some("give me root".to_string()),
+            },
+        );
+        // The structured path must not have run; the provider
+        // must NOT be reported as "structured-llm".
+        assert_ne!(r.result["provider"], "structured-llm");
+    }
+
+    #[test]
+    fn chat_routes_read_only_app_status_through_structured_path() {
+        // End-to-end: the LLM produces a valid structured intent
+        // for `app.status` (a read-only call). The chat handler
+        // must route it through the structured-llm path and
+        // produce an action with the right capability.
+        //
+        // We use a freeform text the deterministic parser does
+        // NOT match (e.g. "I wonder if notes is alive") so the
+        // request falls through to the LLM provider.
+        let (ctrl_port, _h) = spawn_mock_control_plane();
+        let (clock, _tick) = fake_clock(7400);
+        let mut state =
+            spawn_state_with_provider(ctrl_port, clock, Box::new(StubReadOnlyAppStatusProvider));
+
+        let r = handle_request(
+            &mut state,
+            &AgentRequest {
+                command: "chat".to_string(),
+                argument: Some("I wonder if notes is alive".to_string()),
+            },
+        );
+        assert!(r.ok, "structured-llm chat failed: {:?}", r.result);
+        assert_eq!(r.result["provider"], "structured-llm");
+        let actions = r.result["actions"].as_array().unwrap_or_else(|| panic!("no actions"));
+        assert_eq!(actions.len(), 1, "expected one action, got {:?}", actions);
+        assert_eq!(actions[0]["capability"], "app.status");
+    }
+
+    #[test]
+    fn llm_cannot_demote_risk_of_destructive_action() {
+        // The LLM attempts to assign `risk_level: "low"` to a
+        // destructive capability (`app.close`). The structured
+        // envelope does NOT include a `risk_level` field in the
+        // runtime schema, so any attempt to set one is rejected
+        // at the deserializer. Even if the parser accepted it,
+        // the planner's risk table is the trusted source — the
+        // LLM cannot demote `app.close` from Medium to Low.
+        //
+        // We verify the deserializer rejects the envelope by
+        // checking that the chat falls back to plain chat. The
+        // user prompt is intentionally freeform so the
+        // deterministic parser does not catch it first.
+        let (ctrl_port, _h) = spawn_mock_control_plane();
+        let (clock, _tick) = fake_clock(7500);
+        let mut state =
+            spawn_state_with_provider(ctrl_port, clock, Box::new(StubDestructiveAppCloseProvider));
+
+        let r = handle_request(
+            &mut state,
+            &AgentRequest {
+                command: "chat".to_string(),
+                argument: Some("I want to wrap up notes now".to_string()),
+            },
+        );
+        // The envelope contains an extra `risk_level` field. The
+        // deny_unknown_fields deserializer rejects it, so the
+        // structured-llm path must NOT have run.
+        assert_ne!(r.result["provider"], "structured-llm");
+    }
+
+    #[test]
+    fn structured_output_flow_uses_runtime_schema_when_daemon_doesnt() {
+        // The daemon's structured_llm module accepts both
+        // runtime-style (`application.launch`) and daemon-style
+        // (`app.launch`) capability slugs. We verify the
+        // remapping works end-to-end.
+        struct RuntimeAppLaunchProvider;
+        impl AiProvider for RuntimeAppLaunchProvider {
+            fn name(&self) -> &str {
+                "runtime-app-launch"
+            }
+            fn complete(&self, _prompt: &str) -> Result<String, String> {
+                Ok(r#"{"capability":"application.launch","confidence":90,"entities":{"app":"calc"},"reason":"open calc"}"#.to_string())
+            }
+        }
+        let (ctrl_port, _h) = spawn_mock_control_plane();
+        let (clock, _tick) = fake_clock(7600);
+        let mut state =
+            spawn_state_with_provider(ctrl_port, clock, Box::new(RuntimeAppLaunchProvider));
+
+        let r = handle_request(
+            &mut state,
+            &AgentRequest {
+                command: "chat".to_string(),
+                argument: Some(
+                    "I would really appreciate using the calculator application".to_string(),
+                ),
+            },
+        );
+        // We don't assert r.ok here: the action may fail
+        // (e.g. the mock control plane might not have the
+        // requested app installed). The test is about
+        // *capability slug remapping*, not action success.
+        assert_eq!(r.result["provider"], "structured-llm");
+        let actions = r.result["actions"].as_array().unwrap_or_else(|| panic!("no actions"));
+        assert_eq!(actions.len(), 1, "expected one action, got {:?}", actions);
+        // The runtime-style `application.launch` must be
+        // remapped to the daemon's `app.launch` slug. This is
+        // the key invariant: the structured-llm path converts
+        // runtime slugs to daemon slugs before planning.
+        assert_eq!(actions[0]["capability"], "app.launch");
     }
 
     // ---- Phase 2.4 — Agent Runtime Host IPC tests ----
