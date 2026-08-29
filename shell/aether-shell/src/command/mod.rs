@@ -13,6 +13,7 @@ pub mod filesystem;
 pub mod process;
 pub mod application;
 pub mod network;
+pub mod agent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandMetadata {
@@ -65,6 +66,9 @@ impl CommandRegistry {
 
         // Network commands
         commands.insert("network".to_string(), Box::new(network::NetworkCommand));
+
+        // Agent commands
+        commands.insert("agent".to_string(), Box::new(agent::AgentCommand));
 
         Self { commands }
     }
