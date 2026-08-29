@@ -79,6 +79,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-network"
+version = "0.1.0"
+dependencies = [
+ "aether-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "aether-notes"
 version = "0.1.0"
 dependencies = [
@@ -116,6 +126,7 @@ name = "aether-shell"
 version = "0.1.0"
 dependencies = [
  "aether-core",
+ "aether-network",
  "anyhow",
  "async-trait",
  "once_cell",

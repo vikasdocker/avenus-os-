@@ -1,0 +1,26 @@
+[package]
+name = "aether-network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether Network - typed network surface, manager, and read-only backend abstraction"
+
+[lib]
+name = "aether_network"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aether-network"
+path = "src/main.rs"
+
+[dependencies]
+aether-core = { path = "../../core/aether-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

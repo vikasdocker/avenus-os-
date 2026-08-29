@@ -262,10 +262,11 @@ storage) is complete. Part G (network) is partial (control-plane commands only, 
 dedicated service). Part I (graphical OS) is in progress — software-framebuffer
 multi-window desktop is working in QEMU; native DRM/KMS backend not yet implemented.
 
-**Next milestone:** **Phase 1.4 / 1.7 / 1.9 closure** — complete remaining Phase 1
-sub-milestones, then transition to Phase 2 (Aether Agent Core) end-to-end wiring
-(embed the agent-runtime inside `aether-agentd` and exercise intent → plan → action
-→ observation against the live system).
+**Next milestone:** **Phase 1.4 / 1.9 closure** — close the remaining Phase 1
+sub-milestones (Phase 1.7 `aether-network` is now complete), then transition to
+Phase 2 (Aether Agent Core) end-to-end wiring (embed the agent-runtime inside
+`aether-agentd` and exercise intent → plan → action → observation against the
+live system).
 
 ---
 
@@ -463,23 +464,55 @@ vectors directly.
 
 #### 1.7 Network + Connectivity
 
-**Status:** `PARTIAL` (control-plane commands only; no dedicated service crate).
+**Status:** `COMPLETE` (dedicated `aether-network` service crate shipped; shell
+`network` subcommands now backed by it).
 
-**Completed:**
+**Completed (this milestone):**
 
-- IPC commands for status, interfaces, connectivity, configuration, events,
-  statistics (`network.status`, `network.interfaces`, …) declared in
-  `system/aether-system-core/src/main.rs` and exposed to shell / agentd / runtime.
+- New crate **`aether-network`** at `network/aether-network/`
+  (`Cargo.toml`, `src/lib.rs`, `src/manager.rs`, `src/proc.rs`, `src/main.rs`).
+- Typed domain models: `Interface`, `InterfaceKind`, `InterfaceState`,
+  `Address` (+ `AddressFamily`), `Route`, `DnsConfig`, `ConnectivityStatus`,
+  `InterfaceStats`, `Event` (all serde-derivable).
+- `NetworkManager` with a single cached snapshot served to all read queries
+  (`status`, `interfaces`, `inspect`, `addresses`, `routes`, `dns`,
+  `connectivity`, `stats`, `events`).
+- `NetworkBackend` trait + `StubBackend` (deterministic seed for QEMU and
+  tests) + `ProcBackend` (real `/proc/net/dev`, `/proc/net/route`,
+  `/proc/net/if_inet6`, `/etc/resolv.conf`).
+- Backend selector: env `AETHER_NET_BACKEND = stub|proc|auto`
+  (default `auto` = proc on Linux when `/proc/net/dev` is readable,
+  else stub).
+- REPL daemon (`aether-network` binary) — newline-delimited JSON,
+  one command per line, matching the `aether-application-manager` pattern.
+- `aether-shell`'s `network` subcommands (status, interfaces, inspect,
+  addresses, routes, dns, connectivity, stats) now call into
+  `aether-network::NetworkManager` and return real, structured data
+  instead of empty stubs. The `network.events` and `network.inspect`
+  paths are also wired.
 
-**Not yet implemented:**
+**Security properties preserved:**
 
-- Dedicated `aether-network` service crate (`network/aether-network/src/` is empty).
-- Real DNS / DHCP / Wi-Fi / Ethernet / Bluetooth / VPN control.
-- Per-application network scopes.
-- Network event subscription.
+- The crate is read-only: no `network.apply`, no DNS/DHCP/interface
+  mutation, no `sh -c`/popen shortcuts. All queries go through a
+  snapshot in the manager.
+- Backend selection and `auto` fallback are explicit — no ambient
+  filesystem probing; the procfs reader is the only thing that opens
+  files, and it surfaces `NetworkError::Io(_)` on missing files
+  rather than panicking.
+- The shell still gates every `network` subcommand behind
+  `Capability::Network.read` (via `required_capability`).
 
-**Acceptance (current):** status + interface queries return values; **the dedicated
-service is a Phase 1.7 follow-up milestone**, not a blocker for the rest of Phase 1.
+**Test coverage:** 55 unit tests in the new crate
+(`aether-network` lib: 41, `aether-network` binary: 14) plus 14
+shell-side wiring tests. All `cargo test --workspace` and
+`cargo clippy --workspace --all-targets` pass.
+
+**Acceptance:** the dedicated `aether-network` service crate exists,
+powers the shell, and the Aether OS does not depend on any stub for
+its network surface. Real DNS / DHCP / Wi-Fi / Bluetooth / VPN
+control and per-application network scopes remain explicitly deferred
+to the future.
 
 #### 1.8 Aether Shell
 
@@ -532,7 +565,6 @@ apps can be launched from the launcher, and `aetherctl window.*` works.
 
 - Real DRM/KMS backend (Part A).
 - Wayland protocol implementation (Part B).
-- Close the dedicated `aether-network` service crate.
 - Wire `aether-agent-runtime` into `aether-agentd` so agent intent → plan → action
   → observation runs end-to-end.
 
@@ -1291,7 +1323,7 @@ must all pass defined acceptance tests.
 | `aether-sdk`                                   | `sdk/rust/aether-sdk`                               | Rust control-plane client        |
 | `aetherctl`                                    | `tools/aetherctl`                                   | CLI control client               |
 | `aether-agent-runtime`                         | `agent/aether-agent-runtime`                        | agent runtime library            |
-| `aether-network` (empty)                       | `network/aether-network`                            | placeholder                      |
+| `aether-network`                               | `network/aether-network`                            | network service (typed surface)   |
 | `aether-vision` (empty)                        | `vision/aether-vision`                              | placeholder                      |
 
 ---
