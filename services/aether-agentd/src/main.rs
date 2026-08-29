@@ -84,9 +84,14 @@ fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(4747);
+    let surface_port = std::env::var("AETHER_SURFACE_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(4750);
     let state = Arc::new(Mutex::new(
         aether_agentd::AgentState::new(aether_agentd::system_time_ms)
-            .with_control_port(control_port),
+            .with_control_port(control_port)
+            .with_surface_port(surface_port),
     ));
 
     if std::env::args().any(|a| a == "--stdio") {
