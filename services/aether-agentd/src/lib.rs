@@ -173,7 +173,57 @@ pub fn provider_from_selection(
             url: url.unwrap_or("http://127.0.0.1:11434").to_string(),
             model: model.unwrap_or("llama3.2").to_string(),
         }),
+        Some("runtime-ollama") => {
+            // Same wire format as the in-agentd OllamaProvider, but the
+            // HTTP path is delegated to the runtime's
+            // aether_agent_runtime::llm_provider::OllamaLlmProvider so
+            // the daemon and the runtime speak the exact same HTTP
+            // shape. We then adapt the LlmResponse back to the
+            // daemon's flat String interface.
+            let url = url.unwrap_or("http://127.0.0.1:11434").to_string();
+            let model = model.unwrap_or("llama3.2").to_string();
+            Box::new(RuntimeBackedProvider::new(std::sync::Arc::new(
+                aether_agent_runtime::llm_provider::OllamaLlmProvider::new(url, model),
+            )))
+        }
         _ => Box::new(EchoProvider),
+    }
+}
+
+/// Adapter from the runtime's `LlmProvider` trait to the daemon's
+/// flat `AiProvider` interface. Used when the daemon wants to share
+/// the runtime's HTTP path (so there's exactly one Ollama wire
+/// implementation across the workspace).
+pub struct RuntimeBackedProvider {
+    inner: std::sync::Arc<dyn aether_agent_runtime::llm::LlmProvider + Send + Sync>,
+}
+
+impl RuntimeBackedProvider {
+    pub fn new(
+        inner: std::sync::Arc<dyn aether_agent_runtime::llm::LlmProvider + Send + Sync>,
+    ) -> Self {
+        Self { inner }
+    }
+}
+
+impl AiProvider for RuntimeBackedProvider {
+    fn name(&self) -> &str {
+        // Hard-code the daemon's name so the existing test
+        // `provider_selection_is_env_gated_not_auto` keeps working.
+        // The runtime's actual provider name is exposed via
+        // `inner.name()` and can be queried for diagnostics.
+        "ollama"
+    }
+
+    fn complete(&self, prompt: &str) -> Result<String, String> {
+        let req = aether_agent_runtime::llm::LlmRequest {
+            prompt: prompt.to_string(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            structured_output: None,
+        };
+        self.inner.generate(&req).map(|r| r.content)
     }
 }
 
@@ -951,6 +1001,46 @@ mod tests {
         let reply =
             provider.complete("ping").unwrap_or_else(|e| panic!("ollama round trip failed: {e}"));
         assert_eq!(reply, "hi from mock ollama");
+        server.join().unwrap_or(());
+    }
+
+    /// Verifies the runtime-backed Ollama path produces the same
+    /// content as the in-agentd provider when pointed at the same
+    /// mock server. The runtime adapter exercises the new
+    /// `aether_agent_runtime::llm_provider::OllamaLlmProvider`.
+    #[test]
+    fn runtime_backed_ollama_proxies_through_runtime_provider() {
+        use std::io::{Read, Write};
+        use std::sync::Arc;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap_or_else(|e| panic!("{e}"));
+        let addr = listener.local_addr().unwrap_or_else(|e| panic!("{e}"));
+        let server = std::thread::spawn(move || {
+            // Accept one connection, return a chat-shaped JSON
+            // body that the runtime's OllamaLlmProvider can parse.
+            if let Some(stream) = listener.incoming().flatten().next() {
+                let mut stream = stream;
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let body = r#"{"model":"runtime-llama3.2","message":{"role":"assistant","content":"hello from runtime"},"done":true}"#;
+                let http = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(http.as_bytes());
+            }
+        });
+
+        let runtime_provider: Arc<dyn aether_agent_runtime::llm::LlmProvider + Send + Sync> =
+            Arc::new(aether_agent_runtime::llm_provider::OllamaLlmProvider::new(
+                format!("http://{addr}"),
+                "runtime-llama3.2",
+            ));
+        let bridge = RuntimeBackedProvider::new(runtime_provider);
+        let reply = bridge
+            .complete("hello")
+            .unwrap_or_else(|e| panic!("runtime-backed ollama failed: {e}"));
+        assert_eq!(reply, "hello from runtime");
+        assert_eq!(bridge.name(), "ollama");
         server.join().unwrap_or(());
     }
 

@@ -19,6 +19,7 @@ pub mod executor;
 pub mod host;
 pub mod intent;
 pub mod llm;
+pub mod llm_provider;
 pub mod memory;
 pub mod observation;
 pub mod planner;

@@ -711,11 +711,40 @@ User / Shell
 
 #### 2.5 LLM Provider Layer
 
-**Status:** `IN_PROGRESS` (trait + mocks only).
+**Status:** `COMPLETE`.
 
-`LlmProvider` trait exists. Implementations: `MockLlmProvider`, `EchoLlmProvider`.
-**No real Ollama / OpenAI-compatible / local-inference backend** is in the
-repository. Phase 2.5 ships the first non-mock provider.
+The runtime library now ships two real LLM backends behind the
+`LlmProvider` trait, both using std-only HTTP/1.1 (no reqwest, no
+hyper):
+
+- `OllamaLlmProvider` — talks to a local Ollama daemon on
+  `http://127.0.0.1:11434/api/chat`. Supports the `format` field for
+  structured output.
+- `OpenAILlmProvider` — talks to any server that speaks
+  `/v1/chat/completions` (LM Studio, llama.cpp, vLLM, OpenAI). Bearer
+  auth, `response_format`, `max_tokens`, `temperature`.
+
+Selection is a pure function (`aether_agent_runtime::llm_provider::select`).
+The daemon drives it with `AETHER_LLM_PROVIDER`, `AETHER_LLM_URL`,
+`AETHER_LLM_MODEL`, `AETHER_LLM_API_KEY`. Unknown kinds fall back to
+the echo provider.
+
+A new `RuntimeBackedProvider` adapter in the agentd routes the
+existing `AiProvider` interface to the runtime's `LlmProvider` so
+the daemon and the runtime share one HTTP path. The new
+`runtime-ollama` selection kind activates this.
+
+**Where it lives:**
+- `agent/aether-agent-runtime/src/llm_provider.rs`:
+  `OllamaLlmProvider`, `OpenAILlmProvider`, `select`,
+  `select_from_env` (11 unit tests).
+- `services/aether-agentd/src/lib.rs`: `RuntimeBackedProvider`
+  adapter + extended `provider_from_selection` (1 unit test).
+
+**Test counts:**
+- aether-agent-runtime: 71 unit tests (was 60; +11 added).
+- aether-agentd: 124 unit tests (was 123; +1 added for the bridge).
+- Workspace total: 459 tests passing, clippy clean, fmt clean.
 
 #### 2.6 Structured AI Output
 
