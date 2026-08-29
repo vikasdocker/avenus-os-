@@ -633,12 +633,41 @@ repository. Phase 2.5 ships the first non-mock provider.
 
 #### 2.6 Structured AI Output
 
-**Status:** `IN_PROGRESS` (intent + plan + action are typed; no schema
-enforcement for LLM output yet).
+**Status:** `COMPLETE`.
 
-The intent and plan types are typed Rust structs with `serde` derive. The
-`LlmProvider::structured_output` method exists but only attempts naive JSON
-parse. The next step is JSON-schema-driven parsing + invalid-output rejection.
+The LLM no longer produces free-form text. It must respond with a JSON
+envelope (`{ capability, confidence, entities, reason }`) that is validated
+against a JSON schema. The LLM can propose an `IntentType` / `CapabilityId`
+and a confidence score; it CANNOT assign risk or authority — that boundary
+remains in trusted planner + capability-policy code.
+
+**Where it lives:**
+- `agent/aether-agent-runtime/src/structured_intent.rs`: canonical
+  `INTENT_SCHEMA`, `IntentEnvelope`, `parse_envelope`, `parse_intent`,
+  `build_intent_prompt` (11 unit tests).
+- `agent/aether-agent-runtime/src/intent.rs`: `IntentType::from_str` and
+  `IntentType::all_slugs` so any consumer can validate LLM-produced slugs.
+- `services/aether-agentd/src/structured_llm.rs`: local mirror of the schema
+  + `try_structured` bridge that wraps the existing `AiProvider`, validates
+  the envelope, maps the proposed capability to the daemon's
+  `CapabilityId` (including `application.*` → `app.*` runtime-slug aliases),
+  and returns `Intent` on success, `Chat` on empty capability, or
+  `Fallback(reason)` otherwise. 17 unit tests.
+- `services/aether-agentd/src/lib.rs`: chat handler now has three paths:
+  (1) deterministic parser, (2) structured LLM, (3) plain chat. The LLM is
+  only consulted when the deterministic parser finds no intent. The risk
+  and confirmation policy is unchanged. 3 wiring tests.
+
+**Security properties preserved:**
+- LLM cannot grant additional authority — only propose a capability,
+  entities, and a reason. The planner still validates against policy,
+  pre-check, and confirmation before any action.
+- Unknown capability strings are rejected and degrade to plain chat.
+- Invalid JSON, non-object entities, out-of-range confidence, and empty
+  reason are all rejected and degrade to plain chat.
+- The schema (`INTENT_SCHEMA`) is embedded into the prompt so any
+  provider — local or cloud, with or without native JSON-schema support —
+  can satisfy it.
 
 #### 2.7 Planning
 
@@ -683,7 +712,7 @@ schema-enforced; runtime is not embedded inside `aether-agentd`.
 - [ ] `aether-agentd` uses `aether-agent-runtime` for session / intent / plan /
       executor / observation.
 - [ ] At least one real LLM provider (Ollama or OpenAI-compatible) is wired.
-- [ ] Structured-output schema validation is enforced.
+- [x] Structured-output schema validation is enforced. ← **DONE in 2.6**
 - [ ] Memory persists across session restart.
 - [ ] End-to-end demo: user text → agentd → intent → plan → action via IPC →
       service → observation → agentd → response → UI.
