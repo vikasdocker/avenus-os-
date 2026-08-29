@@ -79,10 +79,7 @@ pub struct MockLlmProvider {
 
 impl MockLlmProvider {
     pub fn new(responses: Vec<String>) -> Self {
-        Self {
-            responses,
-            index: std::sync::atomic::AtomicUsize::new(0),
-        }
+        Self { responses, index: std::sync::atomic::AtomicUsize::new(0) }
     }
 
     pub fn single(response: &str) -> Self {
@@ -96,14 +93,8 @@ impl LlmProvider for MockLlmProvider {
     }
 
     fn generate(&self, _request: &LlmRequest) -> Result<LlmResponse, String> {
-        let idx = self
-            .index
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let content = self
-            .responses
-            .get(idx % self.responses.len())
-            .cloned()
-            .unwrap_or_default();
+        let idx = self.index.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let content = self.responses.get(idx % self.responses.len()).cloned().unwrap_or_default();
         Ok(LlmResponse {
             content,
             model: "mock".to_string(),

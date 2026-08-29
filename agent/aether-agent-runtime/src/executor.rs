@@ -23,10 +23,7 @@ pub struct ActionExecutor {
 
 impl ActionExecutor {
     pub fn new(control_port: u16, surface_port: u16) -> Self {
-        Self {
-            control_port,
-            surface_port,
-        }
+        Self { control_port, surface_port }
     }
 
     /// Executes an action and returns an observation.
@@ -42,9 +39,7 @@ impl ActionExecutor {
                     "app.launch",
                     serde_json::json!({"app": p.application_id}),
                 )?;
-                ObservationType::ApplicationStarted {
-                    application_id: p.application_id.clone(),
-                }
+                ObservationType::ApplicationStarted { application_id: p.application_id.clone() }
             }
             ActionVariant::ApplicationClose(p) => {
                 self.ipc_request(
@@ -53,17 +48,13 @@ impl ActionExecutor {
                     "app.close",
                     serde_json::json!({"app": p.application_id}),
                 )?;
-                ObservationType::ApplicationClosed {
-                    application_id: p.application_id.clone(),
-                }
+                ObservationType::ApplicationClosed { application_id: p.application_id.clone() }
             }
 
             // Window actions → surface server (port 4750)
             ActionVariant::WindowList => {
                 let resp = self.surface_request(serde_json::json!({"op": "window.list"}))?;
-                ObservationType::WindowList {
-                    windows: resp["windows"].clone(),
-                }
+                ObservationType::WindowList { windows: resp["windows"].clone() }
             }
             ActionVariant::WindowFocus(p) => {
                 let id = p.window_id.unwrap_or(0);
@@ -71,11 +62,15 @@ impl ActionExecutor {
                 ObservationType::WindowFocused { window_id: id }
             }
             ActionVariant::WindowMinimize(p) => {
-                self.surface_request(serde_json::json!({"op": "window.minimize", "window_id": p.window_id}))?;
+                self.surface_request(
+                    serde_json::json!({"op": "window.minimize", "window_id": p.window_id}),
+                )?;
                 ObservationType::WindowMinimized { window_id: p.window_id }
             }
             ActionVariant::WindowMaximize(p) => {
-                self.surface_request(serde_json::json!({"op": "window.maximize", "window_id": p.window_id}))?;
+                self.surface_request(
+                    serde_json::json!({"op": "window.maximize", "window_id": p.window_id}),
+                )?;
                 ObservationType::WindowMaximized { window_id: p.window_id }
             }
             ActionVariant::WindowClose(p) => {
@@ -84,12 +79,12 @@ impl ActionExecutor {
                 } else if let Some(ref app) = p.application_id {
                     serde_json::json!({"op": "window.close", "app_id": app})
                 } else {
-                    return Err(AgentError::Execution("Window close requires ID or app_id".to_string()));
+                    return Err(AgentError::Execution(
+                        "Window close requires ID or app_id".to_string(),
+                    ));
                 };
                 self.surface_request(req)?;
-                ObservationType::WindowClosed {
-                    window_id: p.window_id.unwrap_or(0),
-                }
+                ObservationType::WindowClosed { window_id: p.window_id.unwrap_or(0) }
             }
 
             // Filesystem actions → system core
@@ -100,10 +95,7 @@ impl ActionExecutor {
                     "file.list",
                     serde_json::json!({"path": p.path}),
                 )?;
-                ObservationType::FilesystemResult {
-                    operation: "list".to_string(),
-                    data: resp,
-                }
+                ObservationType::FilesystemResult { operation: "list".to_string(), data: resp }
             }
             ActionVariant::FileRead(p) => {
                 let resp = self.ipc_request(
@@ -112,10 +104,7 @@ impl ActionExecutor {
                     "file.read",
                     serde_json::json!({"path": p.path}),
                 )?;
-                ObservationType::FilesystemResult {
-                    operation: "read".to_string(),
-                    data: resp,
-                }
+                ObservationType::FilesystemResult { operation: "read".to_string(), data: resp }
             }
             ActionVariant::FileCreate(p) => {
                 let resp = self.ipc_request(
@@ -124,10 +113,7 @@ impl ActionExecutor {
                     "file.create",
                     serde_json::json!({"path": p.path, "content": p.content}),
                 )?;
-                ObservationType::FilesystemResult {
-                    operation: "create".to_string(),
-                    data: resp,
-                }
+                ObservationType::FilesystemResult { operation: "create".to_string(), data: resp }
             }
             ActionVariant::FileWrite(p) => {
                 let resp = self.ipc_request(
@@ -136,10 +122,7 @@ impl ActionExecutor {
                     "file.write",
                     serde_json::json!({"path": p.path, "content": p.content}),
                 )?;
-                ObservationType::FilesystemResult {
-                    operation: "write".to_string(),
-                    data: resp,
-                }
+                ObservationType::FilesystemResult { operation: "write".to_string(), data: resp }
             }
             ActionVariant::FileSearch(p) => {
                 let resp = self.ipc_request(
@@ -148,10 +131,7 @@ impl ActionExecutor {
                     "file.search",
                     serde_json::json!({"query": p.query, "path": p.path}),
                 )?;
-                ObservationType::FilesystemResult {
-                    operation: "search".to_string(),
-                    data: resp,
-                }
+                ObservationType::FilesystemResult { operation: "search".to_string(), data: resp }
             }
             ActionVariant::FileRename(p) => {
                 let resp = self.ipc_request(
@@ -160,10 +140,7 @@ impl ActionExecutor {
                     "file.rename",
                     serde_json::json!({"from": p.from, "to": p.to}),
                 )?;
-                ObservationType::FilesystemResult {
-                    operation: "rename".to_string(),
-                    data: resp,
-                }
+                ObservationType::FilesystemResult { operation: "rename".to_string(), data: resp }
             }
             ActionVariant::FileMove(p) => {
                 let resp = self.ipc_request(
@@ -172,10 +149,7 @@ impl ActionExecutor {
                     "file.move",
                     serde_json::json!({"from": p.from, "to": p.to}),
                 )?;
-                ObservationType::FilesystemResult {
-                    operation: "move".to_string(),
-                    data: resp,
-                }
+                ObservationType::FilesystemResult { operation: "move".to_string(), data: resp }
             }
             ActionVariant::FileDelete(p) => {
                 let resp = self.ipc_request(
@@ -184,10 +158,7 @@ impl ActionExecutor {
                     "file.delete",
                     serde_json::json!({"path": p.path}),
                 )?;
-                ObservationType::FilesystemResult {
-                    operation: "delete".to_string(),
-                    data: resp,
-                }
+                ObservationType::FilesystemResult { operation: "delete".to_string(), data: resp }
             }
 
             // Process actions → system core
@@ -198,9 +169,7 @@ impl ActionExecutor {
                     "process.list",
                     serde_json::json!({}),
                 )?;
-                ObservationType::ProcessList {
-                    processes: resp["processes"].clone(),
-                }
+                ObservationType::ProcessList { processes: resp["processes"].clone() }
             }
             ActionVariant::ProcessInspect(p) => {
                 let resp = self.ipc_request(
@@ -209,9 +178,7 @@ impl ActionExecutor {
                     "process.inspect",
                     serde_json::json!({"pid": p.pid, "name": p.name}),
                 )?;
-                ObservationType::ProcessInspect {
-                    data: resp,
-                }
+                ObservationType::ProcessInspect { data: resp }
             }
 
             // Network actions → system core
@@ -281,20 +248,14 @@ impl ActionExecutor {
                 ObservationType::StorageStatus { data: resp }
             }
             ActionVariant::ContextGet => {
-                ObservationType::ContextSnapshot {
-                    data: serde_json::json!({}),
-                }
+                ObservationType::ContextSnapshot { data: serde_json::json!({}) }
             }
         };
 
         let duration = start.elapsed().as_millis() as u64;
         let obs = Observation::new(&action.id.to_string(), action.session_id.clone(), result);
 
-        Ok(ExecutionResult {
-            success: true,
-            observation: obs,
-            duration_ms: duration,
-        })
+        Ok(ExecutionResult { success: true, observation: obs, duration_ms: duration })
     }
 
     fn ipc_request(
@@ -332,14 +293,10 @@ impl ActionExecutor {
             return Err(AgentError::Ipc("empty response".to_string()));
         }
 
-        serde_json::from_str(line.trim())
-            .map_err(|e| AgentError::Ipc(format!("decode: {e}")))
+        serde_json::from_str(line.trim()).map_err(|e| AgentError::Ipc(format!("decode: {e}")))
     }
 
-    fn surface_request(
-        &self,
-        payload: serde_json::Value,
-    ) -> Result<serde_json::Value, AgentError> {
+    fn surface_request(&self, payload: serde_json::Value) -> Result<serde_json::Value, AgentError> {
         use std::io::{BufRead, BufReader, Write};
         use std::net::TcpStream;
 
@@ -362,8 +319,7 @@ impl ActionExecutor {
             return Err(AgentError::Ipc("empty surface response".to_string()));
         }
 
-        serde_json::from_str(line.trim())
-            .map_err(|e| AgentError::Ipc(format!("decode: {e}")))
+        serde_json::from_str(line.trim()).map_err(|e| AgentError::Ipc(format!("decode: {e}")))
     }
 }
 

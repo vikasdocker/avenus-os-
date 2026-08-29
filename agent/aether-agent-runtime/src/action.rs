@@ -183,11 +183,7 @@ pub struct ProcessInspectParams {
 // ---- action builder helpers ----
 
 impl Action {
-    pub fn new(
-        session_id: &str,
-        variant: ActionVariant,
-        reason: &str,
-    ) -> Self {
+    pub fn new(session_id: &str, variant: ActionVariant, reason: &str) -> Self {
         let (caps, risk) = classify_action(&variant);
         Self {
             id: ActionId::new(),
@@ -245,106 +241,37 @@ impl Action {
 /// This is TRUSTED CODE — the LLM cannot override these classifications.
 fn classify_action(variant: &ActionVariant) -> (Vec<String>, ActionRisk) {
     match variant {
-        ActionVariant::ApplicationLaunch(_) => (
-            vec!["application.launch".to_string()],
-            ActionRisk::Medium,
-        ),
-        ActionVariant::ApplicationClose(_) => (
-            vec!["application.close".to_string()],
-            ActionRisk::Medium,
-        ),
-        ActionVariant::WindowList => (
-            vec!["window.list".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::WindowFocus(_) => (
-            vec!["window.focus".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::WindowMinimize(_) => (
-            vec!["window.minimize".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::WindowMaximize(_) => (
-            vec!["window.maximize".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::WindowClose(_) => (
-            vec!["window.close".to_string()],
-            ActionRisk::Medium,
-        ),
-        ActionVariant::FileList(_) => (
-            vec!["file.list".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::FileRead(_) => (
-            vec!["file.read".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::FileCreate(_) => (
-            vec!["file.create".to_string()],
-            ActionRisk::Medium,
-        ),
-        ActionVariant::FileWrite(_) => (
-            vec!["file.write".to_string()],
-            ActionRisk::Medium,
-        ),
-        ActionVariant::FileSearch(_) => (
-            vec!["file.search".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::FileRename(_) => (
-            vec!["file.rename".to_string()],
-            ActionRisk::Medium,
-        ),
-        ActionVariant::FileMove(_) => (
-            vec!["file.move".to_string()],
-            ActionRisk::Medium,
-        ),
-        ActionVariant::FileDelete(_) => (
-            vec!["file.delete".to_string()],
-            ActionRisk::High,
-        ),
-        ActionVariant::ProcessList => (
-            vec!["process.list".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::ProcessInspect(_) => (
-            vec!["process.inspect".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::NetworkStatus => (
-            vec!["network.status".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::NetworkInterfaces => (
-            vec!["network.interfaces".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::SystemStatus => (
-            vec!["system.status".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::SystemInfo => (
-            vec!["system.info".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::SystemResources => (
-            vec!["system.resources".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::SystemUptime => (
-            vec!["system.uptime".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::StorageStatus => (
-            vec!["storage.status".to_string()],
-            ActionRisk::Low,
-        ),
-        ActionVariant::ContextGet => (
-            vec!["context.get".to_string()],
-            ActionRisk::Low,
-        ),
+        ActionVariant::ApplicationLaunch(_) => {
+            (vec!["application.launch".to_string()], ActionRisk::Medium)
+        }
+        ActionVariant::ApplicationClose(_) => {
+            (vec!["application.close".to_string()], ActionRisk::Medium)
+        }
+        ActionVariant::WindowList => (vec!["window.list".to_string()], ActionRisk::Low),
+        ActionVariant::WindowFocus(_) => (vec!["window.focus".to_string()], ActionRisk::Low),
+        ActionVariant::WindowMinimize(_) => (vec!["window.minimize".to_string()], ActionRisk::Low),
+        ActionVariant::WindowMaximize(_) => (vec!["window.maximize".to_string()], ActionRisk::Low),
+        ActionVariant::WindowClose(_) => (vec!["window.close".to_string()], ActionRisk::Medium),
+        ActionVariant::FileList(_) => (vec!["file.list".to_string()], ActionRisk::Low),
+        ActionVariant::FileRead(_) => (vec!["file.read".to_string()], ActionRisk::Low),
+        ActionVariant::FileCreate(_) => (vec!["file.create".to_string()], ActionRisk::Medium),
+        ActionVariant::FileWrite(_) => (vec!["file.write".to_string()], ActionRisk::Medium),
+        ActionVariant::FileSearch(_) => (vec!["file.search".to_string()], ActionRisk::Low),
+        ActionVariant::FileRename(_) => (vec!["file.rename".to_string()], ActionRisk::Medium),
+        ActionVariant::FileMove(_) => (vec!["file.move".to_string()], ActionRisk::Medium),
+        ActionVariant::FileDelete(_) => (vec!["file.delete".to_string()], ActionRisk::High),
+        ActionVariant::ProcessList => (vec!["process.list".to_string()], ActionRisk::Low),
+        ActionVariant::ProcessInspect(_) => (vec!["process.inspect".to_string()], ActionRisk::Low),
+        ActionVariant::NetworkStatus => (vec!["network.status".to_string()], ActionRisk::Low),
+        ActionVariant::NetworkInterfaces => {
+            (vec!["network.interfaces".to_string()], ActionRisk::Low)
+        }
+        ActionVariant::SystemStatus => (vec!["system.status".to_string()], ActionRisk::Low),
+        ActionVariant::SystemInfo => (vec!["system.info".to_string()], ActionRisk::Low),
+        ActionVariant::SystemResources => (vec!["system.resources".to_string()], ActionRisk::Low),
+        ActionVariant::SystemUptime => (vec!["system.uptime".to_string()], ActionRisk::Low),
+        ActionVariant::StorageStatus => (vec!["storage.status".to_string()], ActionRisk::Low),
+        ActionVariant::ContextGet => (vec!["context.get".to_string()], ActionRisk::Low),
     }
 }
 
@@ -369,9 +296,7 @@ mod tests {
     fn file_delete_is_high_risk() {
         let a = Action::new(
             "s1",
-            ActionVariant::FileDelete(FileDeleteParams {
-                path: "/tmp/test".to_string(),
-            }),
+            ActionVariant::FileDelete(FileDeleteParams { path: "/tmp/test".to_string() }),
             "cleanup",
         );
         assert_eq!(a.risk_level, ActionRisk::High);
@@ -381,9 +306,7 @@ mod tests {
     fn read_actions_are_low_risk() {
         let a = Action::new(
             "s1",
-            ActionVariant::FileRead(FileReadParams {
-                path: "/tmp/test".to_string(),
-            }),
+            ActionVariant::FileRead(FileReadParams { path: "/tmp/test".to_string() }),
             "read file",
         );
         assert_eq!(a.risk_level, ActionRisk::Low);

@@ -115,10 +115,7 @@ impl Plan {
         for step in &self.steps {
             for dep in &step.depends_on {
                 if *dep >= step.step_index {
-                    return Err(format!(
-                        "Step {} depends on future step {}",
-                        step.step_index, dep
-                    ));
+                    return Err(format!("Step {} depends on future step {}", step.step_index, dep));
                 }
             }
         }
@@ -182,12 +179,7 @@ impl Planner {
     }
 
     /// Creates a multi-step plan.
-    pub fn plan_multi(
-        &self,
-        session_id: &str,
-        intent_summary: &str,
-        steps: Vec<PlanStep>,
-    ) -> Plan {
+    pub fn plan_multi(&self, session_id: &str, intent_summary: &str, steps: Vec<PlanStep>) -> Plan {
         let mut plan = Plan::new(session_id, intent_summary);
         for step in steps {
             plan.add_step(step);
@@ -301,13 +293,7 @@ mod tests {
     #[test]
     fn plan_step_recovery_defaults_to_no_retry() {
         let p = Planner::new();
-        let plan = p.plan_single(
-            "s1",
-            "system.status",
-            serde_json::json!({}),
-            vec![],
-            "low",
-        );
+        let plan = p.plan_single("s1", "system.status", serde_json::json!({}), vec![], "low");
         assert_eq!(plan.steps[0].recovery.max_retries, 0);
     }
 
@@ -356,8 +342,7 @@ mod tests {
             "risk_level": "low",
             "optional": false,
         });
-        let step: PlanStep =
-            serde_json::from_value(legacy).unwrap_or_else(|e| panic!("{e}"));
+        let step: PlanStep = serde_json::from_value(legacy).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(step.recovery.max_retries, 0);
     }
 }

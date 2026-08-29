@@ -109,7 +109,10 @@ pub fn parse_envelope(raw: &str) -> Result<IntentEnvelope, StructuredIntentError
 /// that the user prompt does not map to a structured intent (i.e. plain
 /// chat). When the capability is non-empty but unknown, returns
 /// `Err(UnknownCapability)` — the LLM is hallucinating and must be ignored.
-pub fn parse_intent(env: &IntentEnvelope, request_id: &str) -> Result<Option<Intent>, StructuredIntentError> {
+pub fn parse_intent(
+    env: &IntentEnvelope,
+    request_id: &str,
+) -> Result<Option<Intent>, StructuredIntentError> {
     if env.capability.trim().is_empty() {
         return Ok(None);
     }
@@ -119,20 +122,14 @@ pub fn parse_intent(env: &IntentEnvelope, request_id: &str) -> Result<Option<Int
         return Err(StructuredIntentError::BadConfidence(env.confidence));
     }
     if !env.entities.is_object() {
-        return Err(StructuredIntentError::BadEntities(
-            "expected JSON object".to_string(),
-        ));
+        return Err(StructuredIntentError::BadEntities("expected JSON object".to_string()));
     }
     if env.reason.trim().is_empty() {
         return Err(StructuredIntentError::EmptyReason);
     }
-    let intent = Intent::new(
-        request_id,
-        intent_type,
-        Confidence(env.confidence),
-        env.entities.clone(),
-    )
-    .with_reason(env.reason.clone());
+    let intent =
+        Intent::new(request_id, intent_type, Confidence(env.confidence), env.entities.clone())
+            .with_reason(env.reason.clone());
     Ok(Some(intent))
 }
 
@@ -169,7 +166,8 @@ pub fn build_intent_prompt(user_text: &str, context_hint: &str) -> String {
          JSON:",
         schema = INTENT_SCHEMA,
         valid = valid,
-        context = if context_hint.is_empty() { "(none)".to_string() } else { context_hint.to_string() },
+        context =
+            if context_hint.is_empty() { "(none)".to_string() } else { context_hint.to_string() },
         user = user_text,
     )
 }

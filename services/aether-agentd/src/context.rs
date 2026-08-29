@@ -69,10 +69,7 @@ impl SystemContext {
 
     /// Focused app id if any.
     pub fn focused_app(&self) -> Option<&str> {
-        self.windows
-            .iter()
-            .find(|w| w.focused)
-            .map(|w| w.app_id.as_str())
+        self.windows.iter().find(|w| w.focused).map(|w| w.app_id.as_str())
     }
 
     /// Whether an app is running.
@@ -88,16 +85,14 @@ impl SystemContext {
     /// Find window by app id (case-insensitive).
     pub fn window_for_app(&self, app: &str) -> Option<&WindowSnapshot> {
         let lower = app.to_ascii_lowercase();
-        self.windows
-            .iter()
-            .find(|w| w.app_id.to_ascii_lowercase() == lower || w.title.to_ascii_lowercase() == lower)
+        self.windows.iter().find(|w| {
+            w.app_id.to_ascii_lowercase() == lower || w.title.to_ascii_lowercase() == lower
+        })
     }
 
     /// Is a window minimized for app.
     pub fn is_minimized(&self, app: &str) -> bool {
-        self.minimized_windows
-            .iter()
-            .any(|t| t.eq_ignore_ascii_case(app))
+        self.minimized_windows.iter().any(|t| t.eq_ignore_ascii_case(app))
     }
 
     /// Titles of open windows (excluding minimized if needed).
@@ -182,10 +177,7 @@ pub fn fetch_app_list(control_port: u16) -> Vec<serde_json::Value> {
     if !resp["ok"].as_bool().unwrap_or(false) {
         return Vec::new();
     }
-    resp["result"]["apps"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
+    resp["result"]["apps"].as_array().cloned().unwrap_or_default()
 }
 
 /// Query window.list via surface server (fallback via control plane proxy if surface direct fails).
@@ -379,8 +371,20 @@ mod tests {
             active_window: Some("Notes".to_string()),
             running_apps: vec!["notes".to_string(), "calculator".to_string()],
             windows: vec![
-                WindowSnapshot { id: 1, app_id: "calculator".to_string(), title: "Calculator".to_string(), state: "minimized".to_string(), focused: false },
-                WindowSnapshot { id: 2, app_id: "notes".to_string(), title: "Notes".to_string(), state: "normal".to_string(), focused: true },
+                WindowSnapshot {
+                    id: 1,
+                    app_id: "calculator".to_string(),
+                    title: "Calculator".to_string(),
+                    state: "minimized".to_string(),
+                    focused: false,
+                },
+                WindowSnapshot {
+                    id: 2,
+                    app_id: "notes".to_string(),
+                    title: "Notes".to_string(),
+                    state: "normal".to_string(),
+                    focused: true,
+                },
             ],
             minimized_windows: vec!["Calculator".to_string()],
             ..SystemContext::empty()

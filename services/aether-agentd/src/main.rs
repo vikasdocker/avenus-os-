@@ -24,19 +24,13 @@ fn handle_line(state: &Arc<Mutex<aether_agentd::AgentState>>, line: &str) -> Opt
             result: serde_json::json!({ "error": format!("bad request: {e}") }),
         },
     };
-    Some(
-        serde_json::to_string(&response)
-            .unwrap_or_else(|_| "{\"ok\":false}".to_string()),
-    )
+    Some(serde_json::to_string(&response).unwrap_or_else(|_| "{\"ok\":false}".to_string()))
 }
 
 fn serve_tcp(state: Arc<Mutex<aether_agentd::AgentState>>) {
-    let port: u16 = std::env::var("AETHER_AGENT_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(4748);
-    let bind_addr =
-        std::env::var("AETHER_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port: u16 =
+        std::env::var("AETHER_AGENT_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(4748);
+    let bind_addr = std::env::var("AETHER_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
     let listener = match TcpListener::bind((bind_addr.as_str(), port)) {
         Ok(l) => l,
         Err(e) => {
@@ -44,16 +38,16 @@ fn serve_tcp(state: Arc<Mutex<aether_agentd::AgentState>>) {
             std::process::exit(1);
         }
     };
-      {
-          // Single lock scope: two locks in one eprintln! would self-deadlock
-          // (the first guard lives until the end of the statement).
-          let guard = state.lock().unwrap_or_else(|p| p.into_inner());
-          eprintln!(
-              "[agentd] ready id={} provider={} protocol=ndjson-tcp 127.0.0.1:{port}",
-              guard.agent_id(),
-              guard.provider_name(),
-          );
-      }
+    {
+        // Single lock scope: two locks in one eprintln! would self-deadlock
+        // (the first guard lives until the end of the statement).
+        let guard = state.lock().unwrap_or_else(|p| p.into_inner());
+        eprintln!(
+            "[agentd] ready id={} provider={} protocol=ndjson-tcp 127.0.0.1:{port}",
+            guard.agent_id(),
+            guard.provider_name(),
+        );
+    }
 
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
@@ -68,9 +62,7 @@ fn serve_tcp(state: Arc<Mutex<aether_agentd::AgentState>>) {
                 if let Some(reply) = handle_line(&state, &line) {
                     let mut payload = reply;
                     payload.push('\n');
-                    if writer.write_all(payload.as_bytes()).is_err()
-                        || writer.flush().is_err()
-                    {
+                    if writer.write_all(payload.as_bytes()).is_err() || writer.flush().is_err() {
                         break;
                     }
                 }
@@ -80,14 +72,10 @@ fn serve_tcp(state: Arc<Mutex<aether_agentd::AgentState>>) {
 }
 
 fn main() {
-    let control_port = std::env::var("AETHER_CONTROL_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(4747);
-    let surface_port = std::env::var("AETHER_SURFACE_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(4750);
+    let control_port =
+        std::env::var("AETHER_CONTROL_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(4747);
+    let surface_port =
+        std::env::var("AETHER_SURFACE_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(4750);
     let state = Arc::new(Mutex::new(
         aether_agentd::AgentState::new(aether_agentd::system_time_ms)
             .with_control_port(control_port)
@@ -117,4 +105,3 @@ fn main() {
 
     serve_tcp(state);
 }
-

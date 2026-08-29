@@ -14,9 +14,7 @@ pub struct CancellationToken {
 
 impl CancellationToken {
     pub fn new() -> Self {
-        Self {
-            cancelled: Arc::new(AtomicBool::new(false)),
-        }
+        Self { cancelled: Arc::new(AtomicBool::new(false)) }
     }
 
     /// Requests cancellation.

@@ -20,8 +20,8 @@
 //   * LLM proposed a capability we already auto-detected deterministically
 //     (we just return the structured intent and let the planner run it)
 
-use crate::intent::{CapabilityId, Intent};
 use crate::context::SystemContext;
+use crate::intent::{CapabilityId, Intent};
 use crate::AiProvider;
 use serde_json::Value;
 
@@ -109,10 +109,10 @@ fn strip_code_fence(raw: &str) -> &str {
 /// Parse the raw LLM response text into an `IntentEnvelope`.
 pub fn parse_envelope(raw: &str) -> Result<IntentEnvelope, StructuredError> {
     let trimmed = strip_code_fence(raw);
-    let value: Value = serde_json::from_str(trimmed)
-        .map_err(|e| StructuredError::BadJson(e.to_string()))?;
-    let env: IntentEnvelope = serde_json::from_value(value)
-        .map_err(|e| StructuredError::BadShape(e.to_string()))?;
+    let value: Value =
+        serde_json::from_str(trimmed).map_err(|e| StructuredError::BadJson(e.to_string()))?;
+    let env: IntentEnvelope =
+        serde_json::from_value(value).map_err(|e| StructuredError::BadShape(e.to_string()))?;
     Ok(env)
 }
 
@@ -156,20 +156,32 @@ pub fn parse_intent(env: &IntentEnvelope) -> Result<Option<Intent>, StructuredEr
 /// match the current system state.
 pub fn build_intent_prompt(user_text: &str, ctx: &SystemContext) -> String {
     let slugs = vec![
-        "system.status", "app.list", "app.status",
-        "app.launch", "app.close",
-        "window.list", "window.focus", "window.minimize", "window.maximize", "window.close",
+        "system.status",
+        "app.list",
+        "app.status",
+        "app.launch",
+        "app.close",
+        "window.list",
+        "window.focus",
+        "window.minimize",
+        "window.maximize",
+        "window.close",
         "context.get",
-        "file.list", "file.search", "file.read", "file.create", "file.write",
-        "file.rename", "file.move", "file.delete",
-        "system.info", "system.resources", "system.uptime",
+        "file.list",
+        "file.search",
+        "file.read",
+        "file.create",
+        "file.write",
+        "file.rename",
+        "file.move",
+        "file.delete",
+        "system.info",
+        "system.resources",
+        "system.uptime",
     ];
     let valid = slugs.join(", ");
-    let context = if ctx.grounding_text().is_empty() {
-        "(none)".to_string()
-    } else {
-        ctx.grounding_text()
-    };
+    let context =
+        if ctx.grounding_text().is_empty() { "(none)".to_string() } else { ctx.grounding_text() };
     format!(
         "You are the Aether intent classifier. Map the user request to exactly one of \
          the Aether capability slugs listed below, or empty string if the user is just \
@@ -233,7 +245,9 @@ mod tests {
     /// without a real network call.
     struct FixedProvider(&'static str);
     impl crate::AiProvider for FixedProvider {
-        fn name(&self) -> &str { "fixed" }
+        fn name(&self) -> &str {
+            "fixed"
+        }
         fn complete(&self, _prompt: &str) -> Result<String, String> {
             Ok(self.0.to_string())
         }
@@ -241,7 +255,9 @@ mod tests {
 
     struct FailProvider;
     impl crate::AiProvider for FailProvider {
-        fn name(&self) -> &str { "fail" }
+        fn name(&self) -> &str {
+            "fail"
+        }
         fn complete(&self, _prompt: &str) -> Result<String, String> {
             Err("connection refused".to_string())
         }

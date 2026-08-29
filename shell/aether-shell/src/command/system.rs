@@ -1,8 +1,8 @@
 // System commands: help, version, status, health, services, events, audit, system control
-use async_trait::async_trait;
-use serde_json::json;
 use anyhow::Result;
+use async_trait::async_trait;
 use once_cell::sync::Lazy;
+use serde_json::json;
 
 use crate::command::{Command, CommandMetadata};
 use crate::history::ShellHistory;
@@ -141,6 +141,14 @@ Network Commands:
   network connectivity        - Check connectivity
   network stats               - Show network statistics
 
+Agent Runtime Commands (talk to aether-agentd on :4748):
+  agent status                - Show agent runtime host status
+  agent sessions              - List all sessions
+  agent inspect <sid>         - Inspect a single session
+  agent intent <json>         - Submit a structured intent through the host
+  agent cancel <sid>          - Cancel a session
+  agent audit [N]             - Show last N audit entries (default 20)
+
 Options:
   --json                      - Output in JSON format
   --help                      - Show command help
@@ -151,7 +159,8 @@ Type 'exit' or 'quit' to exit.
             formatter.print(help_text);
         } else {
             let cmd = args[0];
-            formatter.print(&format!("Help for command: {}\n(Detailed help not yet implemented)", cmd));
+            formatter
+                .print(&format!("Help for command: {}\n(Detailed help not yet implemented)", cmd));
         }
         Ok(())
     }
@@ -179,7 +188,7 @@ impl Command for VersionCommand {
             "phase": "1.8",
             "status": "development"
         });
-        
+
         formatter.output(&version_info)?;
         Ok(())
     }
@@ -209,7 +218,7 @@ impl Command for StatusCommand {
             "services_running": 0,
             "services_total": 0,
         });
-        
+
         formatter.output(&status)?;
         Ok(())
     }
@@ -236,7 +245,7 @@ impl Command for HealthCommand {
             "system": "HEALTHY",
             "services": "HEALTHY",
         });
-        
+
         formatter.output(&health)?;
         Ok(())
     }
@@ -261,7 +270,7 @@ impl Command for ServicesCommand {
         let services = json!({
             "services": []
         });
-        
+
         formatter.output(&services)?;
         Ok(())
     }
@@ -286,7 +295,7 @@ impl Command for EventsCommand {
         let events = json!({
             "events": []
         });
-        
+
         formatter.output(&events)?;
         Ok(())
     }
@@ -311,7 +320,7 @@ impl Command for AuditCommand {
         let audit = json!({
             "audit_entries": []
         });
-        
+
         formatter.output(&audit)?;
         Ok(())
     }

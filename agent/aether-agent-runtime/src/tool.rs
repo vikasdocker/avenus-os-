@@ -123,9 +123,7 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     pub fn new() -> Self {
-        Self {
-            tools: std::collections::HashMap::new(),
-        }
+        Self { tools: std::collections::HashMap::new() }
     }
 
     /// Registers a tool. Returns an error if the tool ID already exists.
@@ -166,15 +164,8 @@ impl ToolRegistry {
     }
 
     /// Validates that a tool's input meets its schema.
-    pub fn validate_input(
-        &self,
-        id: &ToolId,
-        input: &serde_json::Value,
-    ) -> Result<(), String> {
-        let tool = self
-            .tools
-            .get(id)
-            .ok_or_else(|| format!("Tool '{}' not found", id))?;
+    pub fn validate_input(&self, id: &ToolId, input: &serde_json::Value) -> Result<(), String> {
+        let tool = self.tools.get(id).ok_or_else(|| format!("Tool '{}' not found", id))?;
         tool.validate_input(input)
     }
 }
@@ -206,26 +197,22 @@ pub fn default_tools() -> ToolRegistry {
         ToolDefinition::new("process.inspect", "Inspect Process", "Inspect a process")
             .with_capability("process.inspect")
             .with_input_schema(serde_json::json!({"required": ["pid"]})),
-        ToolDefinition::new("application.list", "List Applications", "List registered applications")
-            .with_capability("application.list"),
         ToolDefinition::new(
-            "application.launch",
-            "Launch Application",
-            "Launch an application",
+            "application.list",
+            "List Applications",
+            "List registered applications",
         )
-        .with_capability("application.launch")
-        .with_risk_level(ToolRisk::Medium)
-        .with_side_effect("process.start")
-        .with_input_schema(serde_json::json!({"required": ["application_id"]})),
-        ToolDefinition::new(
-            "application.close",
-            "Close Application",
-            "Close an application",
-        )
-        .with_capability("application.close")
-        .with_risk_level(ToolRisk::Medium)
-        .with_side_effect("process.stop")
-        .with_input_schema(serde_json::json!({"required": ["application_id"]})),
+        .with_capability("application.list"),
+        ToolDefinition::new("application.launch", "Launch Application", "Launch an application")
+            .with_capability("application.launch")
+            .with_risk_level(ToolRisk::Medium)
+            .with_side_effect("process.start")
+            .with_input_schema(serde_json::json!({"required": ["application_id"]})),
+        ToolDefinition::new("application.close", "Close Application", "Close an application")
+            .with_capability("application.close")
+            .with_risk_level(ToolRisk::Medium)
+            .with_side_effect("process.stop")
+            .with_input_schema(serde_json::json!({"required": ["application_id"]})),
         ToolDefinition::new("network.status", "Network Status", "Get network status")
             .with_capability("network.status"),
         ToolDefinition::new("network.interfaces", "Network Interfaces", "List network interfaces")
@@ -291,9 +278,15 @@ mod tests {
     #[test]
     fn registry_discover_by_capability() {
         let mut reg = ToolRegistry::new();
-        assert!(reg.register(ToolDefinition::new("a", "A", "tool a").with_capability("cap.x")).is_ok());
-        assert!(reg.register(ToolDefinition::new("b", "B", "tool b").with_capability("cap.y")).is_ok());
-        assert!(reg.register(ToolDefinition::new("c", "C", "tool c").with_capability("cap.x")).is_ok());
+        assert!(reg
+            .register(ToolDefinition::new("a", "A", "tool a").with_capability("cap.x"))
+            .is_ok());
+        assert!(reg
+            .register(ToolDefinition::new("b", "B", "tool b").with_capability("cap.y"))
+            .is_ok());
+        assert!(reg
+            .register(ToolDefinition::new("c", "C", "tool c").with_capability("cap.x"))
+            .is_ok());
         let found = reg.discover("cap.x");
         assert_eq!(found.len(), 2);
     }

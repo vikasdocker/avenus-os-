@@ -645,15 +645,69 @@ risk classification, and timeouts.
 
 #### 2.4 Agent ↔ OS Integration
 
-**Status:** `IN_PROGRESS`.
+**Status:** `COMPLETE`.
 
-`aether-agentd` already talks to:
-- `aether-system-core` (port 4747) for system/app/process/network/filesystem
-  queries.
-- `aether-graphical-shell` (port 4750, surface server) for window operations.
+`aether-agentd` is now wired to the `aether-agent-runtime` library as the
+single executor for AI-initiated actions. The full pipeline runs as:
 
-**Open:** the `aether-agent-runtime` library is not the executor; the daemon
-has its own implementation. Phase 2.4 closes this gap.
+```
+User / Shell
+  -> agentd TCP (port 4748)
+  -> AgentRuntimeHost (lifecycle, identity, audit, event bus)
+  -> ActionExecutor (intent -> plan -> action)
+  -> Capability + Policy gate
+  -> Aether IPC (typed JSON-RPC over loopback)
+  -> aether-system-core / aether-application-manager / aether-network
+  -> Observation -> Audit -> Event publication
+```
+
+**What shipped:**
+
+- `aether-agent-runtime` exposes `AgentRuntimeHost`, the lifecycle state
+  machine (Starting -> Ready -> Running -> Stopping -> Stopped), the
+  `ActionExecutor`, the planner, the audit ring, the event bus, the
+  session registry, the LLM boundary, the structured-intent parser, and
+  the recovery policy.
+- `aether-agentd` integrates the host via `services/aether-agentd/src/runtime_host.rs`
+  and routes every `agent.*` IPC command through it. New commands:
+  `agent.status`, `agent.session.create`, `agent.session.list`,
+  `agent.session.status`, `agent.session.cancel`, `agent.intent`,
+  `agent.audit.session`, `agent.audit.recent`, `agent.action.cancel`,
+  `agent.stop`.
+- `intent_to_action.rs` maps LLM-proposed capabilities to typed
+  `ActionVariant`s. Shell capabilities are rejected at the type
+  boundary — no `agent.execute_shell` ever reaches the executor.
+- `shell/aether-shell` is a thin TCP client to agentd via the new
+  `agentd_client` module; `agent status`, `agent sessions`,
+  `agent inspect`, `agent intent`, `agent cancel`, `agent audit` all
+  reach the daemon.
+- Identity (Agent ID, Session ID, Request ID, Action ID) is produced
+  by the host and recorded in every audit entry and observation.
+- The event bus (`InMemoryEventBus`) publishes typed `AetherAgentEvent`s
+  to subscribers, with a bounded ring and a snapshot accessor.
+- 12 security tests cover: prompt injection, provider hostility,
+  malformed payloads, invalid capability, cross-session lookup,
+  replay (cancel-twice), invalid service, privilege escalation,
+  malicious tool output, unauthorized actions, policy denial, empty
+  chat. Every attack class is rejected cleanly.
+- 6 failure-recovery tests cover: service unavailable, IPC failure
+  mid-stream, app launch failure, control-plane timeout, session
+  cancellation, agentd restart.
+- The LLM boundary has a pure-selection helper (`provider_from_selection`)
+  plus a real Ollama adapter path; selection is env-gated and
+  tested without env mutation (which the workspace `unsafe_code` lint
+  forbids).
+- End-to-end test `e2e_open_test_application_through_runtime` drives
+  the full pipeline against a loopback mock of `aether-system-core`
+  and asserts the audit log + observations.
+- QEMU validation script (`scripts/run/qemu-agent-validate.sh`) plus
+  a phase-2.4 step-17 documentation file.
+
+**Test counts:**
+- `aether-agentd`: 123 unit tests (was 79 before phase 2.4; +44 added).
+- `aether-agent-runtime`: 60 unit tests.
+- `aether-shell`: 28 unit tests (was 18; +10 added for agentd proxy).
+- Workspace total: 447 tests passing, clippy clean, fmt clean.
 
 #### 2.5 LLM Provider Layer
 

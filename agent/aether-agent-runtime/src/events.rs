@@ -104,10 +104,8 @@ mod tests {
 
     #[test]
     fn event_type_strings() {
-        let e = AgentEvent::SessionCreated {
-            session_id: "s1".to_string(),
-            actor: "user".to_string(),
-        };
+        let e =
+            AgentEvent::SessionCreated { session_id: "s1".to_string(), actor: "user".to_string() };
         assert_eq!(e.event_type(), "agent.session.created");
     }
 
@@ -133,15 +131,40 @@ mod tests {
             AgentEvent::SessionCompleted { session_id: "s".into() },
             AgentEvent::SessionFailed { session_id: "s".into(), reason: "r".into() },
             AgentEvent::SessionCancelled { session_id: "s".into() },
-            AgentEvent::IntentCreated { session_id: "s".into(), intent_type: "i".into(), confidence: 80 },
+            AgentEvent::IntentCreated {
+                session_id: "s".into(),
+                intent_type: "i".into(),
+                confidence: 80,
+            },
             AgentEvent::PlanCreated { session_id: "s".into(), plan_id: "p".into(), step_count: 1 },
-            AgentEvent::ActionRequested { session_id: "s".into(), action_id: "a".into(), action_name: "n".into(), risk_level: "low".into() },
+            AgentEvent::ActionRequested {
+                session_id: "s".into(),
+                action_id: "a".into(),
+                action_name: "n".into(),
+                risk_level: "low".into(),
+            },
             AgentEvent::ActionApproved { session_id: "s".into(), action_id: "a".into() },
-            AgentEvent::ActionDenied { session_id: "s".into(), action_id: "a".into(), reason: "r".into() },
+            AgentEvent::ActionDenied {
+                session_id: "s".into(),
+                action_id: "a".into(),
+                reason: "r".into(),
+            },
             AgentEvent::ActionStarted { session_id: "s".into(), action_id: "a".into() },
-            AgentEvent::ActionCompleted { session_id: "s".into(), action_id: "a".into(), duration_ms: 0 },
-            AgentEvent::ActionFailed { session_id: "s".into(), action_id: "a".into(), error: "e".into() },
-            AgentEvent::ObservationCreated { session_id: "s".into(), observation_id: "o".into(), success: true },
+            AgentEvent::ActionCompleted {
+                session_id: "s".into(),
+                action_id: "a".into(),
+                duration_ms: 0,
+            },
+            AgentEvent::ActionFailed {
+                session_id: "s".into(),
+                action_id: "a".into(),
+                error: "e".into(),
+            },
+            AgentEvent::ObservationCreated {
+                session_id: "s".into(),
+                observation_id: "o".into(),
+                success: true,
+            },
         ];
         for e in &events {
             assert!(!e.event_type().is_empty());

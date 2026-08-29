@@ -129,9 +129,11 @@ mod tests {
 
     #[test]
     fn observation_creation() {
-        let obs = Observation::new("act-1", "sess-1".to_string(), ObservationType::ApplicationStarted {
-            application_id: "calc".to_string(),
-        });
+        let obs = Observation::new(
+            "act-1",
+            "sess-1".to_string(),
+            ObservationType::ApplicationStarted { application_id: "calc".to_string() },
+        );
         assert!(obs.success);
         assert_eq!(obs.action_id, "act-1");
         assert!(obs.timestamp > 0);
@@ -139,17 +141,21 @@ mod tests {
 
     #[test]
     fn error_observation_is_failure() {
-        let obs = Observation::new("act-1", "sess-1".to_string(), ObservationType::Error {
-            message: "failed".to_string(),
-        });
+        let obs = Observation::new(
+            "act-1",
+            "sess-1".to_string(),
+            ObservationType::Error { message: "failed".to_string() },
+        );
         assert!(!obs.success);
     }
 
     #[test]
     fn normalized_output() {
-        let obs = Observation::new("act-1", "sess-1".to_string(), ObservationType::SystemStatus {
-            data: serde_json::json!({"ok": true}),
-        });
+        let obs = Observation::new(
+            "act-1",
+            "sess-1".to_string(),
+            ObservationType::SystemStatus { data: serde_json::json!({"ok": true}) },
+        );
         let norm = obs.normalized();
         assert!(norm["success"].as_bool().unwrap_or(false));
         assert!(norm["type"].as_str().is_some());

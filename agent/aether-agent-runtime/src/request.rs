@@ -105,10 +105,7 @@ mod tests {
     use super::*;
 
     fn test_actor() -> RequestActor {
-        RequestActor {
-            actor_type: ActorType::Human,
-            identity: "test-user".to_string(),
-        }
+        RequestActor { actor_type: ActorType::Human, identity: "test-user".to_string() }
     }
 
     #[test]

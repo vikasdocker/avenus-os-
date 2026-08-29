@@ -65,9 +65,6 @@ mod tests {
     #[test]
     fn high_risk_requires_consent() {
         let cap = Capability::new(CapabilityDomain::System, "shutdown", RiskLevel::Critical);
-        assert!(matches!(
-            ConfirmationPolicy::decide(&cap),
-            Confirmation::RequiresConsent { .. }
-        ));
+        assert!(matches!(ConfirmationPolicy::decide(&cap), Confirmation::RequiresConsent { .. }));
     }
 }

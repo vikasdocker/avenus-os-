@@ -100,12 +100,7 @@ pub struct RecoveryPolicy {
 
 impl Default for RecoveryPolicy {
     fn default() -> Self {
-        Self {
-            max_retries: 0,
-            backoff_base_ms: 100,
-            backoff_max_ms: 5_000,
-            timeout_ms: None,
-        }
+        Self { max_retries: 0, backoff_base_ms: 100, backoff_max_ms: 5_000, timeout_ms: None }
     }
 }
 
@@ -140,10 +135,7 @@ pub fn backoff_delay(policy: &RecoveryPolicy, attempt: u32) -> Duration {
         return Duration::ZERO;
     }
     let shift = attempt.saturating_sub(1).min(20);
-    let delay = policy
-        .backoff_base_ms
-        .saturating_mul(1u64 << shift)
-        .min(policy.backoff_max_ms);
+    let delay = policy.backoff_base_ms.saturating_mul(1u64 << shift).min(policy.backoff_max_ms);
     Duration::from_millis(delay)
 }
 
@@ -179,11 +171,7 @@ pub fn decide_recovery(
 ) -> RecoveryAction {
     assert!(attempt >= 1, "decide_recovery called with attempt == 0");
     if attempt > policy.max_retries {
-        return if optional {
-            RecoveryAction::Skip
-        } else {
-            RecoveryAction::Abort
-        };
+        return if optional { RecoveryAction::Skip } else { RecoveryAction::Abort };
     }
     match kind {
         FailureKind::Permanent => {
@@ -264,19 +252,10 @@ mod core_tests {
             backoff_max_ms: 1,
             timeout_ms: None,
         };
-        assert_eq!(
-            decide_recovery(&p, 1, FailureKind::Transient, false),
-            RecoveryAction::Retry
-        );
-        assert_eq!(
-            decide_recovery(&p, 3, FailureKind::Transient, false),
-            RecoveryAction::Retry
-        );
+        assert_eq!(decide_recovery(&p, 1, FailureKind::Transient, false), RecoveryAction::Retry);
+        assert_eq!(decide_recovery(&p, 3, FailureKind::Transient, false), RecoveryAction::Retry);
         // attempt > max_retries => Abort
-        assert_eq!(
-            decide_recovery(&p, 4, FailureKind::Transient, false),
-            RecoveryAction::Abort
-        );
+        assert_eq!(decide_recovery(&p, 4, FailureKind::Transient, false), RecoveryAction::Abort);
     }
 
     #[test]
@@ -287,10 +266,7 @@ mod core_tests {
             backoff_max_ms: 1,
             timeout_ms: None,
         };
-        assert_eq!(
-            decide_recovery(&p, 1, FailureKind::Permanent, false),
-            RecoveryAction::Abort
-        );
+        assert_eq!(decide_recovery(&p, 1, FailureKind::Permanent, false), RecoveryAction::Abort);
     }
 
     #[test]
@@ -301,10 +277,7 @@ mod core_tests {
             backoff_max_ms: 1,
             timeout_ms: None,
         };
-        assert_eq!(
-            decide_recovery(&p, 1, FailureKind::Permanent, true),
-            RecoveryAction::Skip
-        );
+        assert_eq!(decide_recovery(&p, 1, FailureKind::Permanent, true), RecoveryAction::Skip);
     }
 
     #[test]
@@ -316,15 +289,9 @@ mod core_tests {
             timeout_ms: None,
         };
         // First unknown: retry (conservatively).
-        assert_eq!(
-            decide_recovery(&p, 1, FailureKind::Unknown, false),
-            RecoveryAction::Retry
-        );
+        assert_eq!(decide_recovery(&p, 1, FailureKind::Unknown, false), RecoveryAction::Retry);
         // Second unknown: we already tried once, no more guessing.
-        assert_eq!(
-            decide_recovery(&p, 2, FailureKind::Unknown, false),
-            RecoveryAction::Abort
-        );
+        assert_eq!(decide_recovery(&p, 2, FailureKind::Unknown, false), RecoveryAction::Abort);
     }
 
     #[test]
@@ -335,24 +302,15 @@ mod core_tests {
             backoff_max_ms: 1,
             timeout_ms: None,
         };
-        assert_eq!(
-            decide_recovery(&p, 3, FailureKind::Transient, true),
-            RecoveryAction::Skip
-        );
+        assert_eq!(decide_recovery(&p, 3, FailureKind::Transient, true), RecoveryAction::Skip);
     }
 
     #[test]
     fn zero_retry_policy_aborts_on_first_failure() {
         let p = RecoveryPolicy::no_retry();
-        assert_eq!(
-            decide_recovery(&p, 1, FailureKind::Transient, false),
-            RecoveryAction::Abort
-        );
+        assert_eq!(decide_recovery(&p, 1, FailureKind::Transient, false), RecoveryAction::Abort);
         // Optional + no-retry + permanent => still skip.
-        assert_eq!(
-            decide_recovery(&p, 1, FailureKind::Permanent, true),
-            RecoveryAction::Skip
-        );
+        assert_eq!(decide_recovery(&p, 1, FailureKind::Permanent, true), RecoveryAction::Skip);
     }
 
     #[test]
@@ -476,17 +434,20 @@ mod runner_tests {
                         }
                         RecoveryAction::Abort => return (Err(e), attempt),
                         RecoveryAction::Skip => {
-                            return (Ok(ExecutionResult {
-                                success: false,
-                                observation: crate::observation::Observation::new(
-                                    "test",
-                                    "s".to_string(),
-                                    crate::observation::ObservationType::Error {
-                                        message: format!("skipped: {e}"),
-                                    },
-                                ),
-                                duration_ms: 0,
-                            }), attempt);
+                            return (
+                                Ok(ExecutionResult {
+                                    success: false,
+                                    observation: crate::observation::Observation::new(
+                                        "test",
+                                        "s".to_string(),
+                                        crate::observation::ObservationType::Error {
+                                            message: format!("skipped: {e}"),
+                                        },
+                                    ),
+                                    duration_ms: 0,
+                                }),
+                                attempt,
+                            );
                         }
                     }
                 }
@@ -549,7 +510,8 @@ mod runner_tests {
 
     #[test]
     fn runner_aborts_immediately_on_permanent_failure() {
-        let mut fake = FakeExecutor::new(vec![Some(AgentError::CapabilityDenied("nope".to_string()))]);
+        let mut fake =
+            FakeExecutor::new(vec![Some(AgentError::CapabilityDenied("nope".to_string()))]);
         let step = step_with(RecoveryPolicy::transient_default(), false);
         let (res, attempts) = run_step(&step, &mut fake);
         assert!(res.is_err());

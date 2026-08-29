@@ -111,19 +111,11 @@ pub struct ApprovalDecision {
 
 impl ApprovalDecision {
     pub fn approve(request_id: ApprovalRequestId, reason: &str) -> Self {
-        Self {
-            request_id,
-            decision: ApprovalStatus::Approved,
-            reason: reason.to_string(),
-        }
+        Self { request_id, decision: ApprovalStatus::Approved, reason: reason.to_string() }
     }
 
     pub fn deny(request_id: ApprovalRequestId, reason: &str) -> Self {
-        Self {
-            request_id,
-            decision: ApprovalStatus::Denied,
-            reason: reason.to_string(),
-        }
+        Self { request_id, decision: ApprovalStatus::Denied, reason: reason.to_string() }
     }
 }
 

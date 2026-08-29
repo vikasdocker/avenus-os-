@@ -79,10 +79,7 @@ pub struct AuditLog {
 
 impl AuditLog {
     pub fn new(capacity: usize) -> Self {
-        Self {
-            entries: std::collections::VecDeque::with_capacity(capacity),
-            capacity,
-        }
+        Self { entries: std::collections::VecDeque::with_capacity(capacity), capacity }
     }
 
     /// Records an audit entry.
@@ -120,10 +117,7 @@ impl AuditLog {
 
     /// Returns all entries for a session.
     pub fn for_session(&self, session_id: &str) -> Vec<&AuditEntry> {
-        self.entries
-            .iter()
-            .filter(|e| e.session_id == session_id)
-            .collect()
+        self.entries.iter().filter(|e| e.session_id == session_id).collect()
     }
 
     pub fn len(&self) -> usize {
@@ -144,11 +138,8 @@ impl Default for AuditLog {
 /// Sanitizes audit detail to remove sensitive content.
 fn sanitize_detail(detail: &str) -> String {
     // Truncate and redact potential passwords/tokens
-    let truncated = if detail.len() > 500 {
-        format!("{}...", &detail[..497])
-    } else {
-        detail.to_string()
-    };
+    let truncated =
+        if detail.len() > 500 { format!("{}...", &detail[..497]) } else { detail.to_string() };
 
     // Redact values after sensitive keys
     redact_sensitive(&truncated)
@@ -191,7 +182,13 @@ mod tests {
     fn audit_log_bounded() {
         let mut log = AuditLog::new(3);
         for i in 0..5 {
-            log.record("s1", AuditEventType::ActionRequested, &format!("action {i}"), true, "runtime");
+            log.record(
+                "s1",
+                AuditEventType::ActionRequested,
+                &format!("action {i}"),
+                true,
+                "runtime",
+            );
         }
         assert_eq!(log.len(), 3);
         // Oldest entries evicted

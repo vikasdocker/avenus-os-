@@ -78,7 +78,11 @@ pub struct Planner;
 impl Planner {
     /// Build a plan from raw text + current context.
     /// Returns None when no intent is detected (plain chat).
-    pub fn plan(text: &str, ctx: &SystemContext, convo_last_app: Option<&str>) -> Option<Vec<Intent>> {
+    pub fn plan(
+        text: &str,
+        ctx: &SystemContext,
+        convo_last_app: Option<&str>,
+    ) -> Option<Vec<Intent>> {
         Self::plan_with_file(text, ctx, convo_last_app, None)
     }
 
@@ -90,7 +94,8 @@ impl Planner {
         convo_last_file: Option<&str>,
     ) -> Option<Vec<Intent>> {
         // Ask intent engine for all intents in the text (multi-step).
-        let mut intents = intent::parse_intents_with_file(text, ctx, convo_last_app, convo_last_file);
+        let mut intents =
+            intent::parse_intents_with_file(text, ctx, convo_last_app, convo_last_file);
         if intents.is_empty() {
             return None;
         }
@@ -255,7 +260,9 @@ impl Planner {
         }
 
         let summary = Self::build_summary(&actions);
-        let ok = overall_ok && !actions.is_empty() && actions.iter().all(|a| a.status == ActionStatus::Success);
+        let ok = overall_ok
+            && !actions.is_empty()
+            && actions.iter().all(|a| a.status == ActionStatus::Success);
         PlanResult { actions, summary, ok }
     }
 
@@ -324,7 +331,11 @@ impl Planner {
     fn precheck(intent: &Intent, ctx: &SystemContext) -> Option<(bool, String)> {
         let app = intent.arguments.get("app").and_then(|v| v.as_str()).unwrap_or_default();
         match intent.capability {
-            CapabilityId::WindowFocus | CapabilityId::WindowMinimize | CapabilityId::WindowMaximize | CapabilityId::WindowClose | CapabilityId::WindowRestore => {
+            CapabilityId::WindowFocus
+            | CapabilityId::WindowMinimize
+            | CapabilityId::WindowMaximize
+            | CapabilityId::WindowClose
+            | CapabilityId::WindowRestore => {
                 if !app.is_empty() && ctx.window_for_app(app).is_none() && !ctx.is_running(app) {
                     // If no window exists but app is installed, focus/minimize could mean launch+focus? For now report not found.
                     // Allow focus to auto-create? No - spec says window not found error.
@@ -334,7 +345,10 @@ impl Planner {
             }
             CapabilityId::AppLaunch => {
                 if !app.is_empty() && !ctx.is_installed(app) {
-                    return Some((false, format!("APPLICATION NOT FOUND - '{app}' is not installed")));
+                    return Some((
+                        false,
+                        format!("APPLICATION NOT FOUND - '{app}' is not installed"),
+                    ));
                 }
                 if ctx.is_running(app) {
                     return Some((false, format!("ALREADY RUNNING - '{app}' is already open")));
@@ -354,7 +368,11 @@ impl Planner {
 
     fn friendly_error(raw: &str, _cap: CapabilityId) -> String {
         let lower = raw.to_ascii_lowercase();
-        if lower.contains("not_found") || lower.contains("unknown") || lower.contains("no such window") || lower.contains("not found") {
+        if lower.contains("not_found")
+            || lower.contains("unknown")
+            || lower.contains("no such window")
+            || lower.contains("not found")
+        {
             format!("NOT FOUND - {raw}")
         } else if lower.contains("already running") || lower.contains("already open") {
             format!("ALREADY RUNNING - {raw}")
@@ -364,7 +382,10 @@ impl Planner {
             format!("INVALID REQUEST - {raw}")
         } else if lower.contains("approval_required") || lower.contains("requires confirmation") {
             format!("REQUIRES CONFIRMATION - {raw}")
-        } else if lower.contains("connect") || lower.contains("timeout") || lower.contains("service unavailable") {
+        } else if lower.contains("connect")
+            || lower.contains("timeout")
+            || lower.contains("service unavailable")
+        {
             format!("SERVICE UNAVAILABLE - {raw}")
         } else {
             format!("ACTION FAILED - {raw}")
@@ -404,7 +425,10 @@ mod tests {
         ctx.installed_apps = installed.iter().map(|s| s.to_string()).collect();
         ctx.running_apps = running.iter().map(|s| s.to_string()).collect();
         for id in installed {
-            ctx.app_states.insert(id.to_string(), if running.contains(id) { "RUNNING".to_string() } else { "INSTALLED".to_string() });
+            ctx.app_states.insert(
+                id.to_string(),
+                if running.contains(id) { "RUNNING".to_string() } else { "INSTALLED".to_string() },
+            );
         }
         ctx
     }
@@ -436,8 +460,10 @@ mod tests {
 
     #[test]
     fn friendly_error_mapping() {
-        assert!(Planner::friendly_error("unknown application 'ghost'", CapabilityId::AppLaunch).contains("NOT FOUND"));
-        assert!(Planner::friendly_error("already running", CapabilityId::AppLaunch).contains("ALREADY RUNNING"));
+        assert!(Planner::friendly_error("unknown application 'ghost'", CapabilityId::AppLaunch)
+            .contains("NOT FOUND"));
+        assert!(Planner::friendly_error("already running", CapabilityId::AppLaunch)
+            .contains("ALREADY RUNNING"));
     }
 
     // ---- Phase 2.7 bounded-recovery tests ----
@@ -465,18 +491,12 @@ mod tests {
 
     #[test]
     fn classify_failure_recognises_transient_signals() {
-        assert!(matches!(
-            Planner::classify_failure("connection refused"),
-            FailureKind::Transient
-        ));
+        assert!(matches!(Planner::classify_failure("connection refused"), FailureKind::Transient));
         assert!(matches!(
             Planner::classify_failure("operation timed out after 2s"),
             FailureKind::Transient
         ));
-        assert!(matches!(
-            Planner::classify_failure("service unavailable"),
-            FailureKind::Transient
-        ));
+        assert!(matches!(Planner::classify_failure("service unavailable"), FailureKind::Transient));
         assert!(matches!(
             Planner::classify_failure("temporarily unavailable, try again"),
             FailureKind::Transient
@@ -489,14 +509,8 @@ mod tests {
             Planner::classify_failure("unknown application 'ghost'"),
             FailureKind::Permanent
         ));
-        assert!(matches!(
-            Planner::classify_failure("not found: file"),
-            FailureKind::Permanent
-        ));
-        assert!(matches!(
-            Planner::classify_failure("capability denied"),
-            FailureKind::Permanent
-        ));
+        assert!(matches!(Planner::classify_failure("not found: file"), FailureKind::Permanent));
+        assert!(matches!(Planner::classify_failure("capability denied"), FailureKind::Permanent));
         assert!(matches!(
             Planner::classify_failure("policy rejected: forbidden"),
             FailureKind::Permanent
@@ -505,10 +519,7 @@ mod tests {
 
     #[test]
     fn classify_failure_defaults_to_unknown() {
-        assert!(matches!(
-            Planner::classify_failure("weird internal error"),
-            FailureKind::Unknown
-        ));
+        assert!(matches!(Planner::classify_failure("weird internal error"), FailureKind::Unknown));
     }
 
     /// End-to-end bounded-retry path: simulate an `execute_extended`
@@ -528,11 +539,8 @@ mod tests {
         let mut last_err = None;
         loop {
             attempt += 1;
-            let outcome: Result<(), &str> = if attempt < 3 {
-                Err("connection refused")
-            } else {
-                Ok(())
-            };
+            let outcome: Result<(), &str> =
+                if attempt < 3 { Err("connection refused") } else { Ok(()) };
             match outcome {
                 Ok(()) => break,
                 Err(e) => {

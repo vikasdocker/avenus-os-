@@ -69,10 +69,8 @@ impl Validator {
         let policy_ok = self.validate_policy(action, &mut errors);
 
         // Stage 4: Risk classification determines confirmation requirement
-        let needs_confirmation = matches!(
-            action.risk_level,
-            ActionRisk::High | ActionRisk::Critical
-        );
+        let needs_confirmation =
+            matches!(action.risk_level, ActionRisk::High | ActionRisk::Critical);
 
         let valid = schema_ok && capability_ok && policy_ok;
 
@@ -216,11 +214,7 @@ mod tests {
     #[test]
     fn empty_session_id_fails() {
         let v = validator();
-        let mut a = Action::new(
-            "s1",
-            ActionVariant::SystemStatus,
-            "check",
-        );
+        let mut a = Action::new("s1", ActionVariant::SystemStatus, "check");
         a.session_id = String::new();
         let result = match v.validate(&a) {
             Ok(r) => r,
@@ -247,9 +241,7 @@ mod tests {
         let v = validator();
         let a = Action::new(
             "s1",
-            ActionVariant::FileDelete(FileDeleteParams {
-                path: "/tmp/test".to_string(),
-            }),
+            ActionVariant::FileDelete(FileDeleteParams { path: "/tmp/test".to_string() }),
             "cleanup",
         );
         let result = match v.validate(&a) {
@@ -294,9 +286,7 @@ mod tests {
         let v = validator();
         let a = Action::new(
             "s1",
-            ActionVariant::FileDelete(FileDeleteParams {
-                path: "/".to_string(),
-            }),
+            ActionVariant::FileDelete(FileDeleteParams { path: "/".to_string() }),
             "nuke",
         );
         let result = match v.validate(&a) {

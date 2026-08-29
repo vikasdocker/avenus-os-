@@ -30,10 +30,7 @@ pub struct ConversationMemory {
 
 impl ConversationMemory {
     pub fn new(capacity: usize) -> Self {
-        Self {
-            entries: VecDeque::with_capacity(capacity),
-            capacity,
-        }
+        Self { entries: VecDeque::with_capacity(capacity), capacity }
     }
 
     /// Adds an entry, evicting oldest if at capacity.
@@ -45,11 +42,7 @@ impl ConversationMemory {
         if self.entries.len() >= self.capacity {
             self.entries.pop_front();
         }
-        self.entries.push_back(MemoryEntry {
-            role,
-            content: content.to_string(),
-            timestamp: now,
-        });
+        self.entries.push_back(MemoryEntry { role, content: content.to_string(), timestamp: now });
     }
 
     /// Returns all entries.

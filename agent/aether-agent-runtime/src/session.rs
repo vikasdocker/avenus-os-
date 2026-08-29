@@ -16,6 +16,19 @@ impl SessionId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Constructs a `SessionId` from an existing `Uuid`. Used by
+    /// the daemon to re-hydrate a session id that arrived from
+    /// IPC.
+    pub fn from_uuid(u: Uuid) -> Self {
+        Self(u)
+    }
+
+    /// Returns the inner UUID. Used by the host for action / audit
+    /// tracking where the underlying UUID is required.
+    pub fn as_uuid(&self) -> Uuid {
+        self.0
+    }
 }
 
 impl Default for SessionId {
@@ -65,10 +78,7 @@ impl fmt::Display for SessionState {
 
 impl SessionState {
     pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::Failed | Self::Cancelled
-        )
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
     }
 
     pub fn can_transition_to(&self, next: &SessionState) -> bool {
@@ -121,10 +131,8 @@ pub struct AgentSession {
 
 impl AgentSession {
     pub fn new(actor: SessionActor) -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let now =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         Self {
             id: SessionId::new(),
             state: SessionState::Created,
@@ -142,22 +150,14 @@ impl AgentSession {
     /// Transitions to a new state if the transition is valid.
     pub fn transition(&mut self, new_state: SessionState) -> Result<(), String> {
         if self.state.is_terminal() {
-            return Err(format!(
-                "Cannot transition from terminal state {}",
-                self.state
-            ));
+            return Err(format!("Cannot transition from terminal state {}", self.state));
         }
         if !self.state.can_transition_to(&new_state) {
-            return Err(format!(
-                "Invalid transition: {} -> {}",
-                self.state, new_state
-            ));
+            return Err(format!("Invalid transition: {} -> {}", self.state, new_state));
         }
         self.state = new_state;
-        self.updated_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        self.updated_at =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         Ok(())
     }
 
@@ -175,10 +175,7 @@ mod tests {
     use super::*;
 
     fn human_actor() -> SessionActor {
-        SessionActor {
-            actor_type: ActorType::Human,
-            identity: "user".to_string(),
-        }
+        SessionActor { actor_type: ActorType::Human, identity: "user".to_string() }
     }
 
     #[test]

@@ -79,9 +79,7 @@ impl CapabilityId {
             Self::AppStatus => {
                 Capability::new(CapabilityDomain::Application, "status", RiskLevel::Low)
             }
-            Self::AppList => {
-                Capability::new(CapabilityDomain::Application, "list", RiskLevel::Low)
-            }
+            Self::AppList => Capability::new(CapabilityDomain::Application, "list", RiskLevel::Low),
             Self::AppLaunch => {
                 Capability::new(CapabilityDomain::Application, "launch", RiskLevel::Medium)
             }
@@ -109,15 +107,11 @@ impl CapabilityId {
             Self::ContextGet => {
                 Capability::new(CapabilityDomain::System, "context", RiskLevel::Low)
             }
-            Self::FileList => {
-                Capability::new(CapabilityDomain::Filesystem, "list", RiskLevel::Low)
-            }
+            Self::FileList => Capability::new(CapabilityDomain::Filesystem, "list", RiskLevel::Low),
             Self::FileSearch => {
                 Capability::new(CapabilityDomain::Filesystem, "search", RiskLevel::Low)
             }
-            Self::FileRead => {
-                Capability::new(CapabilityDomain::Filesystem, "read", RiskLevel::Low)
-            }
+            Self::FileRead => Capability::new(CapabilityDomain::Filesystem, "read", RiskLevel::Low),
             Self::FileCreate => {
                 Capability::new(CapabilityDomain::Filesystem, "create", RiskLevel::Medium)
             }
@@ -133,9 +127,7 @@ impl CapabilityId {
             Self::FileDelete => {
                 Capability::new(CapabilityDomain::Filesystem, "delete", RiskLevel::High)
             }
-            Self::SystemInfo => {
-                Capability::new(CapabilityDomain::System, "info", RiskLevel::Low)
-            }
+            Self::SystemInfo => Capability::new(CapabilityDomain::System, "info", RiskLevel::Low),
             Self::SystemResources => {
                 Capability::new(CapabilityDomain::System, "resources", RiskLevel::Low)
             }
@@ -206,7 +198,11 @@ trait NonEmptyOption {
 }
 impl NonEmptyOption for String {
     fn non_empty(self) -> Option<String> {
-        if self.is_empty() { None } else { Some(self) }
+        if self.is_empty() {
+            None
+        } else {
+            Some(self)
+        }
     }
 }
 
@@ -220,33 +216,23 @@ pub struct SurfaceClient {
 
 impl SurfaceClient {
     pub fn new(surface_port: u16) -> Self {
-        Self {
-            addr: format!("127.0.0.1:{surface_port}"),
-            timeout: Duration::from_secs(5),
-        }
+        Self { addr: format!("127.0.0.1:{surface_port}"), timeout: Duration::from_secs(5) }
     }
 
     fn call(&self, req: Value) -> Result<Value, String> {
         use std::io::{BufRead, BufReader, Write};
         let mut stream = std::net::TcpStream::connect(&self.addr)
             .map_err(|e| format!("connect surface {}: {e}", self.addr))?;
-        stream
-            .set_read_timeout(Some(self.timeout))
-            .map_err(|e| format!("timeout: {e}"))?;
+        stream.set_read_timeout(Some(self.timeout)).map_err(|e| format!("timeout: {e}"))?;
         let mut payload = serde_json::to_string(&req).map_err(|e| format!("encode: {e}"))?;
         payload.push('\n');
-        stream
-            .write_all(payload.as_bytes())
-            .map_err(|e| format!("send: {e}"))?;
+        stream.write_all(payload.as_bytes()).map_err(|e| format!("send: {e}"))?;
         let mut line = String::new();
-        BufReader::new(stream)
-            .read_line(&mut line)
-            .map_err(|e| format!("recv: {e}"))?;
+        BufReader::new(stream).read_line(&mut line).map_err(|e| format!("recv: {e}"))?;
         if line.trim().is_empty() {
             return Err("empty surface response".to_string());
         }
-        let v: Value =
-            serde_json::from_str(line.trim()).map_err(|e| format!("decode: {e}"))?;
+        let v: Value = serde_json::from_str(line.trim()).map_err(|e| format!("decode: {e}"))?;
         if v["ok"].as_bool().unwrap_or(false) {
             Ok(v)
         } else {
@@ -259,7 +245,11 @@ impl SurfaceClient {
         self.call(serde_json::json!({ "op": "window.list" }))
     }
 
-    pub fn window_focus(&self, app_or_title: &str, window_id: Option<u64>) -> Result<Value, String> {
+    pub fn window_focus(
+        &self,
+        app_or_title: &str,
+        window_id: Option<u64>,
+    ) -> Result<Value, String> {
         if let Some(id) = window_id {
             self.call(serde_json::json!({ "op": "window.focus", "window_id": id }))
         } else {
@@ -272,7 +262,9 @@ impl SurfaceClient {
                     let target = app_or_title.to_ascii_lowercase();
                     if app == target || title == target {
                         if let Some(id) = w["id"].as_u64() {
-                            return self.call(serde_json::json!({ "op": "window.focus", "window_id": id }));
+                            return self.call(
+                                serde_json::json!({ "op": "window.focus", "window_id": id }),
+                            );
                         }
                     }
                 }
@@ -293,7 +285,9 @@ impl SurfaceClient {
                     let target = app.to_ascii_lowercase();
                     if a == target || t == target {
                         if let Some(id) = w["id"].as_u64() {
-                            return self.call(serde_json::json!({ "op": "window.minimize", "window_id": id }));
+                            return self.call(
+                                serde_json::json!({ "op": "window.minimize", "window_id": id }),
+                            );
                         }
                     }
                 }
@@ -314,7 +308,9 @@ impl SurfaceClient {
                     let target = app.to_ascii_lowercase();
                     if a == target || t == target {
                         if let Some(id) = w["id"].as_u64() {
-                            return self.call(serde_json::json!({ "op": "window.maximize", "window_id": id }));
+                            return self.call(
+                                serde_json::json!({ "op": "window.maximize", "window_id": id }),
+                            );
                         }
                     }
                 }
@@ -337,7 +333,23 @@ impl SurfaceClient {
 const FILLER: &[&str] = &["THE", "MY", "A", "AN", "THIS", "THAT"];
 const CONJ: &[&str] = &["AND", "THEN", "PLUS", ",", "&", ";"];
 const VERBS: &[&str] = &[
-    "OPEN", "LAUNCH", "START", "RUN", "CLOSE", "FOCUS", "BRING", "SHOW", "MINIMIZE", "HIDE", "MAXIMIZE", "MAXIMISE", "FULLSCREEN", "EXPAND", "RESTORE", "FRONT", "BACK",
+    "OPEN",
+    "LAUNCH",
+    "START",
+    "RUN",
+    "CLOSE",
+    "FOCUS",
+    "BRING",
+    "SHOW",
+    "MINIMIZE",
+    "HIDE",
+    "MAXIMIZE",
+    "MAXIMISE",
+    "FULLSCREEN",
+    "EXPAND",
+    "RESTORE",
+    "FRONT",
+    "BACK",
 ];
 
 fn is_filler(w: &str) -> bool {
@@ -355,8 +367,9 @@ fn normalize_token(raw: &str) -> Option<String> {
         .trim_end_matches(|c: char| !c.is_ascii_alphanumeric())
         .trim_start_matches(|c: char| !c.is_ascii_alphanumeric())
         .to_ascii_lowercase();
-    if t.is_empty() { None } else { Some(t) }
-    .filter(|s| s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_')))
+    if t.is_empty() { None } else { Some(t) }.filter(|s| {
+        s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
+    })
 }
 
 /// Collect app-like targets after a verb index. Returns list of app ids.
@@ -466,7 +479,8 @@ fn find_file_paths(text: &str) -> Vec<String> {
             .to_string();
         let lower = clean.to_ascii_lowercase();
         // Heuristic: contains '.' with extension 1-4 chars, or contains '/', or ends with .md/.txt etc
-        let is_path = (clean.contains('.') && clean.len() >= 3 && !clean.starts_with('.') || clean.contains('/'))
+        let is_path = (clean.contains('.') && clean.len() >= 3 && !clean.starts_with('.')
+            || clean.contains('/'))
             && clean.chars().any(|c| c.is_ascii_alphanumeric())
             && !clean.eq_ignore_ascii_case("aether")
             && !clean.eq_ignore_ascii_case("os");
@@ -486,23 +500,40 @@ fn find_file_paths(text: &str) -> Vec<String> {
 
 fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Option<Intent> {
     // Security: always parse file intents even for absolute paths so validation can reject
-    let _has_files = lower.contains("file") || lower.contains("files") || lower.contains("document") || lower.contains("documents") || lower.contains("notes") && lower.contains("find");
+    let _has_files = lower.contains("file")
+        || lower.contains("files")
+        || lower.contains("document")
+        || lower.contains("documents")
+        || lower.contains("notes") && lower.contains("find");
     // File list: show/list files
-    if (lower.contains("show") || lower.contains("list") || lower.contains("display")) && lower.contains("file") {
+    if (lower.contains("show") || lower.contains("list") || lower.contains("display"))
+        && lower.contains("file")
+    {
         // Extract path after "in" if present
         let mut path = "";
         if let Some(idx) = lower.find(" in ") {
             let after = original[idx + 4..].trim();
             // Take first token as folder
             if let Some(folder) = after.split_whitespace().next() {
-                let clean = folder.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-');
-                if !clean.is_empty() && (clean.eq_ignore_ascii_case("documents") || clean.eq_ignore_ascii_case("downloads") || clean.eq_ignore_ascii_case("projects") || clean.eq_ignore_ascii_case("notes") || clean.contains('/')) {
+                let clean = folder.trim_matches(|c: char| {
+                    !c.is_ascii_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
+                });
+                if !clean.is_empty()
+                    && (clean.eq_ignore_ascii_case("documents")
+                        || clean.eq_ignore_ascii_case("downloads")
+                        || clean.eq_ignore_ascii_case("projects")
+                        || clean.eq_ignore_ascii_case("notes")
+                        || clean.contains('/'))
+                {
                     path = clean;
                 }
             }
         }
         // Also handle "show my files" -> root
-        if lower.contains("show my files") || lower == "show my files." || lower.contains("show my files.") {
+        if lower.contains("show my files")
+            || lower == "show my files."
+            || lower.contains("show my files.")
+        {
             path = "";
         }
         return Some(Intent {
@@ -523,33 +554,36 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
         let words: Vec<&str> = lower.split_whitespace().collect();
         let mut query = "";
         for (i, w) in words.iter().enumerate() {
-            if (*w == "files" || *w == "file")
-                && i > 0 {
-                    let mut cand = words[i - 1].trim_matches(|c: char| !c.is_ascii_alphanumeric());
-                    // Skip fillers
-                    if matches!(cand, "my" | "all" | "the" | "a" | "an") && i > 1 {
-                        cand = words[i - 2].trim_matches(|c: char| !c.is_ascii_alphanumeric());
-                    }
-                    if !cand.is_empty() && cand != "find" && cand != "search" && cand != "all" && cand != "my" {
-                        query = cand;
-                        break;
-                    }
+            if (*w == "files" || *w == "file") && i > 0 {
+                let mut cand = words[i - 1].trim_matches(|c: char| !c.is_ascii_alphanumeric());
+                // Skip fillers
+                if matches!(cand, "my" | "all" | "the" | "a" | "an") && i > 1 {
+                    cand = words[i - 2].trim_matches(|c: char| !c.is_ascii_alphanumeric());
                 }
+                if !cand.is_empty()
+                    && cand != "find"
+                    && cand != "search"
+                    && cand != "all"
+                    && cand != "my"
+                {
+                    query = cand;
+                    break;
+                }
+            }
         }
         // Fallback: if query empty, try to find word after find/search
         if query.is_empty() {
             for (i, w) in words.iter().enumerate() {
-                if (*w == "find" || *w == "search")
-                    && i + 1 < words.len() {
-                        let mut cand = words[i + 1].trim_matches(|c: char| !c.is_ascii_alphanumeric());
-                        if matches!(cand, "my" | "all" | "the") && i + 2 < words.len() {
-                            cand = words[i + 2].trim_matches(|c: char| !c.is_ascii_alphanumeric());
-                        }
-                        if !cand.is_empty() && cand != "files" && cand != "file" {
-                            query = cand;
-                            break;
-                        }
+                if (*w == "find" || *w == "search") && i + 1 < words.len() {
+                    let mut cand = words[i + 1].trim_matches(|c: char| !c.is_ascii_alphanumeric());
+                    if matches!(cand, "my" | "all" | "the") && i + 2 < words.len() {
+                        cand = words[i + 2].trim_matches(|c: char| !c.is_ascii_alphanumeric());
                     }
+                    if !cand.is_empty() && cand != "files" && cand != "file" {
+                        query = cand;
+                        break;
+                    }
+                }
             }
         }
         if query.is_empty() {
@@ -585,7 +619,11 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
         // If not found, try to extract after "read"
         if let Some(idx) = lower.find("read") {
             let after = original[idx + 4..].trim();
-            let token = after.split_whitespace().next().unwrap_or("").trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'));
+            let token = after
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'));
             if !token.is_empty() {
                 return Some(Intent {
                     capability: CapabilityId::FileRead,
@@ -610,7 +648,8 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
             if let Some(idx) = lower.find(marker) {
                 let after = original[idx + marker.len()..].trim();
                 if let Some(tok) = after.split_whitespace().next() {
-                    let clean = tok.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'));
+                    let clean =
+                        tok.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'));
                     if !clean.is_empty() {
                         return Some(Intent {
                             capability: CapabilityId::FileCreate,
@@ -634,7 +673,11 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
                     if let Some(into_idx) = lower.find("into") {
                         let between = original[write_idx + 5..into_idx].trim();
                         let c = between.trim_matches(|c: char| matches!(c, '"' | '\'' | ' '));
-                        if !c.is_empty() { c.to_string() } else { content }
+                        if !c.is_empty() {
+                            c.to_string()
+                        } else {
+                            content
+                        }
                     } else {
                         content
                     }
@@ -664,8 +707,16 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
             if let Some(to_idx) = lower.find(" to ") {
                 let from_part = original[rename_idx + 6..to_idx].trim();
                 let to_part = original[to_idx + 4..].trim();
-                let from_tok = from_part.split_whitespace().last().unwrap_or("").trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'));
-                let to_tok = to_part.split_whitespace().next().unwrap_or("").trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'));
+                let from_tok = from_part
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or("")
+                    .trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'));
+                let to_tok = to_part
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'));
                 if !from_tok.is_empty() && !to_tok.is_empty() {
                     return Some(Intent {
                         capability: CapabilityId::FileRename,
@@ -679,7 +730,9 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
     if lower.contains("move") {
         let paths = find_file_paths(original);
         // Handle pronoun "this note" / "it" -> use last_file if available
-        let is_pronoun_move = lower.contains("this") && (lower.contains("note") || lower.contains("file")) || lower.contains(" this ") && lower.contains("move");
+        let is_pronoun_move = lower.contains("this")
+            && (lower.contains("note") || lower.contains("file"))
+            || lower.contains(" this ") && lower.contains("move");
         if is_pronoun_move {
             if let Some(last) = last_file {
                 // Extract destination after "into" or "to"
@@ -687,19 +740,27 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
                 if let Some(into_idx) = lower.find(" into ") {
                     let after = original[into_idx + 6..].trim();
                     if let Some(tok) = after.split_whitespace().next() {
-                        to = tok.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';')).to_string();
+                        to = tok
+                            .trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'))
+                            .to_string();
                     }
                 } else if let Some(to_idx) = lower.rfind(" to ") {
                     let after = original[to_idx + 4..].trim();
                     if let Some(tok) = after.split_whitespace().next() {
-                        to = tok.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';')).to_string();
+                        to = tok
+                            .trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'))
+                            .to_string();
                     }
                 }
                 if !to.is_empty() {
                     let dest = if to.contains('.') {
                         to.clone()
                     } else {
-                        format!("{}/{}", to.trim_end_matches('/'), last.split('/').next_back().unwrap_or(last))
+                        format!(
+                            "{}/{}",
+                            to.trim_end_matches('/'),
+                            last.split('/').next_back().unwrap_or(last)
+                        )
                     };
                     return Some(Intent {
                         capability: CapabilityId::FileMove,
@@ -711,7 +772,11 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
                     let dest = if dest_candidate.contains('.') {
                         dest_candidate.clone()
                     } else {
-                        format!("{}/{}", dest_candidate.trim_end_matches('/'), last.split('/').next_back().unwrap_or(last))
+                        format!(
+                            "{}/{}",
+                            dest_candidate.trim_end_matches('/'),
+                            last.split('/').next_back().unwrap_or(last)
+                        )
                     };
                     return Some(Intent {
                         capability: CapabilityId::FileMove,
@@ -729,12 +794,16 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
             if let Some(into_idx) = lower.find(" into ") {
                 let after = original[into_idx + 6..].trim();
                 if let Some(tok) = after.split_whitespace().next() {
-                    to = tok.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';')).to_string();
+                    to = tok
+                        .trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'))
+                        .to_string();
                 }
             } else if let Some(to_idx) = lower.rfind(" to ") {
                 let after = original[to_idx + 4..].trim();
                 if let Some(tok) = after.split_whitespace().next() {
-                    to = tok.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';')).to_string();
+                    to = tok
+                        .trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'))
+                        .to_string();
                 }
             }
             if !from.is_empty() && !to.is_empty() && from != to {
@@ -742,7 +811,11 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
                 let dest = if to.contains('.') {
                     to
                 } else {
-                    format!("{}/{}", to.trim_end_matches('/'), from.split('/').next_back().unwrap_or(&from))
+                    format!(
+                        "{}/{}",
+                        to.trim_end_matches('/'),
+                        from.split('/').next_back().unwrap_or(&from)
+                    )
                 };
                 return Some(Intent {
                     capability: CapabilityId::FileMove,
@@ -787,20 +860,34 @@ fn parse_file_intent(lower: &str, original: &str, last_file: Option<&str>) -> Op
 }
 
 fn parse_system_intent(lower: &str) -> Option<Intent> {
-    if (lower.contains("ram") || lower.contains("memory") || (lower.contains("resources") && lower.contains("system")))
-        && (lower.contains("how much") || lower.contains("available") || lower.contains("memory") || lower.contains("ram") || lower.contains("resources")) {
-            return Some(Intent {
-                capability: CapabilityId::SystemResources,
-                arguments: serde_json::json!({}),
-            });
-        }
-    if lower.contains("uptime") || (lower.contains("how long") && lower.contains("running")) || lower.contains("been running") {
+    if (lower.contains("ram")
+        || lower.contains("memory")
+        || (lower.contains("resources") && lower.contains("system")))
+        && (lower.contains("how much")
+            || lower.contains("available")
+            || lower.contains("memory")
+            || lower.contains("ram")
+            || lower.contains("resources"))
+    {
+        return Some(Intent {
+            capability: CapabilityId::SystemResources,
+            arguments: serde_json::json!({}),
+        });
+    }
+    if lower.contains("uptime")
+        || (lower.contains("how long") && lower.contains("running"))
+        || lower.contains("been running")
+    {
         return Some(Intent {
             capability: CapabilityId::SystemUptime,
             arguments: serde_json::json!({}),
         });
     }
-    if lower.contains("system info") || lower.contains("os version") || lower.contains("system information") || (lower.contains("system") && lower.contains("info")) {
+    if lower.contains("system info")
+        || lower.contains("os version")
+        || lower.contains("system information")
+        || (lower.contains("system") && lower.contains("info"))
+    {
         return Some(Intent {
             capability: CapabilityId::SystemInfo,
             arguments: serde_json::json!({}),
@@ -847,10 +934,7 @@ pub fn parse_intents_with_file(
     let upper = text.to_uppercase();
     let raw_cleaned: Vec<String> = upper
         .split_whitespace()
-        .map(|w| {
-            w.trim_matches(|c: char| !c.is_ascii_alphanumeric())
-                .to_string()
-        })
+        .map(|w| w.trim_matches(|c: char| !c.is_ascii_alphanumeric()).to_string())
         .filter(|s| !s.is_empty())
         .collect();
     if raw_cleaned.is_empty() {
@@ -877,7 +961,10 @@ pub fn parse_intents_with_file(
     if is_window_list_query {
         // But don't trigger on "open calculator" which also contains OPEN.
         // Heuristic: if phrase is short and contains WHAT/WHICH/LIST, it's a query.
-        if norm_words.contains(&"WHAT") || norm_words.contains(&"WHICH") || norm_words.contains(&"LIST") {
+        if norm_words.contains(&"WHAT")
+            || norm_words.contains(&"WHICH")
+            || norm_words.contains(&"LIST")
+        {
             return vec![Intent {
                 capability: CapabilityId::WindowList,
                 arguments: serde_json::json!({}),
@@ -886,7 +973,10 @@ pub fn parse_intents_with_file(
     }
 
     // Also handle explicit "what's open" as window.list even without verb check.
-    if upper.contains("WHAT") && upper.contains("OPEN?") || upper.trim() == "WHAT'S OPEN?" || upper.trim() == "WHATS OPEN" {
+    if upper.contains("WHAT") && upper.contains("OPEN?")
+        || upper.trim() == "WHAT'S OPEN?"
+        || upper.trim() == "WHATS OPEN"
+    {
         return vec![Intent {
             capability: CapabilityId::WindowList,
             arguments: serde_json::json!({}),
@@ -895,18 +985,40 @@ pub fn parse_intents_with_file(
 
     // More precise: if text matches patterns like "what's open" ignoring punctuation/case
     let lower = text.to_ascii_lowercase();
-    let lower_nopunct: String = lower.chars().filter(|c| c.is_ascii_alphabetic() || c.is_ascii_whitespace()).collect();
+    let lower_nopunct: String =
+        lower.chars().filter(|c| c.is_ascii_alphabetic() || c.is_ascii_whitespace()).collect();
     let lower_trim = lower_nopunct.trim().replace("  ", " ");
-    if matches!(lower_trim.as_str(), "whats open" | "what is open" | "what is open " | "which windows are open" | "list windows" | "show open windows" | "what windows are open") {
+    if matches!(
+        lower_trim.as_str(),
+        "whats open"
+            | "what is open"
+            | "what is open "
+            | "which windows are open"
+            | "list windows"
+            | "show open windows"
+            | "what windows are open"
+    ) {
         return vec![Intent {
             capability: CapabilityId::WindowList,
             arguments: serde_json::json!({}),
         }];
     }
     // Also detect "what's open?" with apostrophe removed -> already.
-    if lower.contains("what's open") || lower.contains("whats open") || (lower.contains("what") && lower.contains("open") && lower.split_whitespace().count() <= 4 && !lower.contains("calculator") && !lower.contains("notes") && !lower.contains("files")) {
+    if lower.contains("what's open")
+        || lower.contains("whats open")
+        || (lower.contains("what")
+            && lower.contains("open")
+            && lower.split_whitespace().count() <= 4
+            && !lower.contains("calculator")
+            && !lower.contains("notes")
+            && !lower.contains("files"))
+    {
         // Only if not containing a specific app name that suggests launch.
-        if !lower.contains("calculator") && !lower.contains("notes") && !lower.contains("files") && !lower.contains("open calculator") {
+        if !lower.contains("calculator")
+            && !lower.contains("notes")
+            && !lower.contains("files")
+            && !lower.contains("open calculator")
+        {
             return vec![Intent {
                 capability: CapabilityId::WindowList,
                 arguments: serde_json::json!({}),
@@ -917,17 +1029,12 @@ pub fn parse_intents_with_file(
     let mut intents: Vec<Intent> = Vec::new();
 
     // Track pronouns to resolve.
-    let has_pronoun = lower
-        .split_whitespace()
-        .any(|w| {
-            let t = w.trim_matches(|c: char| !c.is_ascii_alphabetic());
-            t == "it" || t == "that" || t == "this" || t == "them"
-        })
-        || lower.contains(" it ")
+    let has_pronoun = lower.split_whitespace().any(|w| {
+        let t = w.trim_matches(|c: char| !c.is_ascii_alphabetic());
+        t == "it" || t == "that" || t == "this" || t == "them"
+    }) || lower.contains(" it ")
         || lower.contains(" it.")
-        || lower
-            .trim_end_matches(|c: char| !c.is_ascii_alphabetic())
-            .ends_with(" it");
+        || lower.trim_end_matches(|c: char| !c.is_ascii_alphabetic()).ends_with(" it");
 
     // File and system capabilities have priority when their keywords are present.
     // Check file intents first so "Show my files" doesn't become WindowFocus.
@@ -964,7 +1071,11 @@ pub fn parse_intents_with_file(
                         // Disambiguate window.close vs app.close: for now use AppClose for "close X"
                         // unless phrase contains "window".
                         let is_window_close = upper[idx..].to_string().contains("WINDOW");
-                        let cap = if is_window_close { CapabilityId::WindowClose } else { CapabilityId::AppClose };
+                        let cap = if is_window_close {
+                            CapabilityId::WindowClose
+                        } else {
+                            CapabilityId::AppClose
+                        };
                         intents.push(Intent {
                             capability: cap,
                             arguments: serde_json::json!({ "app": t }),
@@ -1001,9 +1112,8 @@ pub fn parse_intents_with_file(
                 let targets = collect_targets(&words, idx);
                 let mut resolved = targets;
                 if resolved.is_empty() && has_pronoun {
-                    if let Some(last) = convo_last_app
-                        .or(ctx.active_window.as_deref())
-                        .or(ctx.focused_app())
+                    if let Some(last) =
+                        convo_last_app.or(ctx.active_window.as_deref()).or(ctx.focused_app())
                     {
                         // Normalize to app id
                         let norm = last.to_ascii_lowercase();
@@ -1105,8 +1215,7 @@ pub fn parse_intents_with_file(
                 .rev()
                 .find(|w| !matches!(**w, "IS" | "THE" | "MY" | "STILL"))
                 .map(|w| {
-                    w.trim_end_matches(|c: char| !c.is_ascii_alphanumeric())
-                        .to_ascii_lowercase()
+                    w.trim_end_matches(|c: char| !c.is_ascii_alphanumeric()).to_ascii_lowercase()
                 })
                 .and_then(|w| w.non_empty())
         });
@@ -1171,7 +1280,9 @@ pub fn validate(intent: &Intent) -> Result<(), Rejection> {
         CapabilityId::FileList => {
             if let Some(p) = intent.arguments.get("path") {
                 if !p.is_string() {
-                    return Err(Rejection("MALFORMED_ARGUMENTS: 'path' must be string".to_string()));
+                    return Err(Rejection(
+                        "MALFORMED_ARGUMENTS: 'path' must be string".to_string(),
+                    ));
                 }
                 let s = p.as_str().unwrap_or_default();
                 if s.contains('\0') {
@@ -1182,7 +1293,9 @@ pub fn validate(intent: &Intent) -> Result<(), Rejection> {
         CapabilityId::FileSearch => {
             let q = intent.arguments.get("query").and_then(|v| v.as_str()).unwrap_or("");
             if q.trim().is_empty() || q.len() > 100 {
-                return Err(Rejection("MALFORMED_ARGUMENTS: 'query' must be 1..100 chars".to_string()));
+                return Err(Rejection(
+                    "MALFORMED_ARGUMENTS: 'query' must be 1..100 chars".to_string(),
+                ));
             }
         }
         CapabilityId::FileRead | CapabilityId::FileCreate | CapabilityId::FileDelete => {
@@ -1434,9 +1547,7 @@ pub fn format_result(capability: CapabilityId, result: &Value) -> String {
             let names: Vec<String> = result["apps"]
                 .as_array()
                 .map(|apps| {
-                    apps.iter()
-                        .map(|a| a["id"].as_str().unwrap_or("?").to_uppercase())
-                        .collect()
+                    apps.iter().map(|a| a["id"].as_str().unwrap_or("?").to_uppercase()).collect()
                 })
                 .unwrap_or_default();
             if names.is_empty() {
@@ -1465,10 +1576,8 @@ pub fn format_result(capability: CapabilityId, result: &Value) -> String {
                 if arr.is_empty() {
                     return "NO WINDOWS OPEN".to_string();
                 }
-                let titles: Vec<String> = arr
-                    .iter()
-                    .map(|w| w["title"].as_str().unwrap_or("?").to_uppercase())
-                    .collect();
+                let titles: Vec<String> =
+                    arr.iter().map(|w| w["title"].as_str().unwrap_or("?").to_uppercase()).collect();
                 format!("OPEN WINDOWS: {}", titles.join(", "))
             } else {
                 // Fallback if result is directly window list array
@@ -1493,7 +1602,16 @@ pub fn format_result(capability: CapabilityId, result: &Value) -> String {
                 if arr.is_empty() {
                     return "NO FILES FOUND".to_string();
                 }
-                let names: Vec<String> = arr.iter().map(|f| f["relative_path"].as_str().or_else(|| f["filename"].as_str()).unwrap_or("?").to_string()).collect();
+                let names: Vec<String> = arr
+                    .iter()
+                    .map(|f| {
+                        f["relative_path"]
+                            .as_str()
+                            .or_else(|| f["filename"].as_str())
+                            .unwrap_or("?")
+                            .to_string()
+                    })
+                    .collect();
                 format!("FILES: {}", names.join(", "))
             } else {
                 format!("FILES: {}", result)
@@ -1505,7 +1623,16 @@ pub fn format_result(capability: CapabilityId, result: &Value) -> String {
                 if files.is_empty() {
                     return "NO FILES FOUND".to_string();
                 }
-                let names: Vec<String> = files.iter().map(|f| f["relative_path"].as_str().or_else(|| f["filename"].as_str()).unwrap_or("?").to_string()).collect();
+                let names: Vec<String> = files
+                    .iter()
+                    .map(|f| {
+                        f["relative_path"]
+                            .as_str()
+                            .or_else(|| f["filename"].as_str())
+                            .unwrap_or("?")
+                            .to_string()
+                    })
+                    .collect();
                 format!("FOUND {} FILES: {}", files.len(), names.join(", "))
             } else {
                 format!("SEARCH RESULTS: {}", result)
@@ -1513,16 +1640,22 @@ pub fn format_result(capability: CapabilityId, result: &Value) -> String {
         }
         CapabilityId::FileRead => {
             let path = result["path"].as_str().unwrap_or("FILE");
-            let preview = result["content"].as_str().unwrap_or("").chars().take(80).collect::<String>();
+            let preview =
+                result["content"].as_str().unwrap_or("").chars().take(80).collect::<String>();
             if preview.is_empty() {
-                format!("READ {}: {} bytes", path.to_uppercase(), result["size"].as_u64().unwrap_or(0))
+                format!(
+                    "READ {}: {} bytes",
+                    path.to_uppercase(),
+                    result["size"].as_u64().unwrap_or(0)
+                )
             } else {
                 format!("READ {}: {}", path.to_uppercase(), preview)
             }
         }
         CapabilityId::FileCreate => {
             let path = result["path"].as_str().unwrap_or("FILE").to_uppercase();
-            let bytes = result["bytes_written"].as_u64().or_else(|| result["size"].as_u64()).unwrap_or(0);
+            let bytes =
+                result["bytes_written"].as_u64().or_else(|| result["size"].as_u64()).unwrap_or(0);
             format!("CREATED {path} ({bytes} bytes)")
         }
         CapabilityId::FileWrite => {
@@ -1599,22 +1732,17 @@ mod tests {
 
     #[test]
     fn validate_rejects_malformed_launch_arguments() {
-        let intent = Intent {
-            capability: CapabilityId::AppLaunch,
-            arguments: serde_json::json!({}),
-        };
+        let intent =
+            Intent { capability: CapabilityId::AppLaunch, arguments: serde_json::json!({}) };
         assert_eq!(
             validate(&intent),
-            Err(Rejection(
-                "MALFORMED_ARGUMENTS: 'app' must be a registered app id".to_string()
-            ))
+            Err(Rejection("MALFORMED_ARGUMENTS: 'app' must be a registered app id".to_string()))
         );
     }
 
     #[test]
     fn validate_accepts_wellformed_launch() {
-        let intent =
-            parse_intent("open calculator").unwrap_or_else(|| panic!("expected intent"));
+        let intent = parse_intent("open calculator").unwrap_or_else(|| panic!("expected intent"));
         assert!(validate(&intent).is_ok());
     }
 
@@ -1717,14 +1845,16 @@ mod tests {
 
     #[test]
     fn create_ideas_maps_to_file_create() {
-        let intents = parse_intents("Create a file called ideas.md.", &SystemContext::empty(), None);
+        let intents =
+            parse_intents("Create a file called ideas.md.", &SystemContext::empty(), None);
         assert_eq!(intents[0].capability, CapabilityId::FileCreate);
         assert_eq!(intents[0].arguments["path"], "ideas.md");
     }
 
     #[test]
     fn write_ideas_maps_to_file_write() {
-        let intents = parse_intents("Write 'Aether OS idea' into ideas.md.", &SystemContext::empty(), None);
+        let intents =
+            parse_intents("Write 'Aether OS idea' into ideas.md.", &SystemContext::empty(), None);
         assert_eq!(intents[0].capability, CapabilityId::FileWrite);
         assert_eq!(intents[0].arguments["path"], "ideas.md");
         assert_eq!(intents[0].arguments["content"], "Aether OS idea");
@@ -1732,7 +1862,8 @@ mod tests {
 
     #[test]
     fn rename_maps_correctly() {
-        let intents = parse_intents("Rename ideas.md to project-ideas.md.", &SystemContext::empty(), None);
+        let intents =
+            parse_intents("Rename ideas.md to project-ideas.md.", &SystemContext::empty(), None);
         assert_eq!(intents[0].capability, CapabilityId::FileRename);
         assert_eq!(intents[0].arguments["from"], "ideas.md");
         assert_eq!(intents[0].arguments["to"], "project-ideas.md");
@@ -1740,7 +1871,8 @@ mod tests {
 
     #[test]
     fn move_maps_correctly() {
-        let intents = parse_intents("Move project-ideas.md into Documents.", &SystemContext::empty(), None);
+        let intents =
+            parse_intents("Move project-ideas.md into Documents.", &SystemContext::empty(), None);
         assert_eq!(intents[0].capability, CapabilityId::FileMove);
         assert_eq!(intents[0].arguments["from"], "project-ideas.md");
         let to = intents[0].arguments["to"].as_str().unwrap_or("");
@@ -1755,7 +1887,8 @@ mod tests {
 
     #[test]
     fn system_uptime_maps_correctly() {
-        let intents = parse_intents("How long has Aether been running?", &SystemContext::empty(), None);
+        let intents =
+            parse_intents("How long has Aether been running?", &SystemContext::empty(), None);
         assert_eq!(intents[0].capability, CapabilityId::SystemUptime);
     }
 

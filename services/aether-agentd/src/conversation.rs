@@ -99,7 +99,9 @@ impl ConversationContext {
                 w.trim_matches(|c: char| !c.is_ascii_alphabetic()),
                 "it" | "that" | "this" | "them" | "there"
             )
-        }) || lower.contains(" it ") || lower.contains(" it.") || lower.ends_with(" it");
+        }) || lower.contains(" it ")
+            || lower.contains(" it.")
+            || lower.ends_with(" it");
         if has_pronoun {
             self.last_app.clone().or_else(|| self.last_window.clone())
         } else {
