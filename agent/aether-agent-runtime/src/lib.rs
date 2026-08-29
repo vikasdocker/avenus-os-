@@ -26,6 +26,7 @@ pub mod llm;
 pub mod errors;
 pub mod audit;
 pub mod events;
+pub mod recovery;
 
 pub use session::{AgentSession, SessionId, SessionState};
 pub use request::{RequestActor, UserRequest};
@@ -45,3 +46,6 @@ pub use cancellation::CancellationToken;
 pub use memory::{ConversationMemory, SessionMemory};
 pub use llm::{LlmProvider, LlmRequest, LlmResponse};
 pub use errors::AgentError;
+pub use recovery::{
+    backoff_delay, decide_recovery, FailureKind, RecoveryAction, RecoveryPolicy,
+};

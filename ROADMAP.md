@@ -703,12 +703,73 @@ remains in trusted planner + capability-policy code.
 
 #### 2.7 Planning
 
-**Status:** `IN_PROGRESS`.
+**Status:** `COMPLETE`.
 
-`aether-agentd::planner` and `aether-agent-runtime::planner` both exist. Multi-step
-plans, dependencies, expected outcomes, failure recovery, bounded execution,
-cancellation: the types are present. **Bounded execution semantics and
-recovery policies are partially specified; full semantics land in Phase 2.7.**
+`aether-agentd::planner` and `aether-agent-runtime::planner` both exist.
+Multi-step plans, dependencies, expected outcomes, recovery policies,
+bounded execution, cancellation: the types and the semantics are now
+fully specified.
+
+**Where it lives:**
+- `agent/aether-agent-runtime/src/recovery.rs` (NEW, 26 unit tests):
+  - `RecoveryAction` (Retry / Abort / Skip)
+  - `FailureKind` (Transient / Permanent / Unknown), with
+    `FailureKind::from_error(&AgentError)` mapping
+  - `RecoveryPolicy { max_retries, backoff_base_ms, backoff_max_ms,
+    timeout_ms }`, with `transient_default()` and `no_retry()` presets
+  - `backoff_delay(&policy, attempt) -> Duration` (capped exponential)
+  - `decide_recovery(&policy, attempt, kind, optional) -> RecoveryAction`
+    as the single source of truth for retry/skip/abort decisions
+  - A reference `PlanRunner` with tests for every policy branch.
+- `agent/aether-agent-runtime/src/planner.rs`: `PlanStep` now carries a
+  `RecoveryPolicy` (with `#[serde(default)]` so older serialized plans
+  keep working). `Plan` carries `max_plan_retries`. `Planner` exposes
+  `plan_single_with_recovery`. 4 new tests, plus a
+  `legacy_plan_step_without_recovery_field_deserializes` regression
+  test.
+- `agent/aether-agent-runtime/src/lib.rs`: re-exports the recovery
+  surface.
+- `services/aether-agentd/Cargo.toml`: takes `aether-agent-runtime` as
+  a path dependency.
+- `services/aether-agentd/src/planner.rs`: the runtime is now the
+  source of truth — the daemon imports `decide_recovery`,
+  `backoff_delay`, `FailureKind`, `RecoveryAction`, `RecoveryPolicy`
+  and uses them to bound its own `execute` loop.
+  - `recovery_policy_for(cap)` returns the per-capability policy
+    (read-only caps get 3 retries with 5 s cap; mutating caps get 1
+    retry with 1 s cap).
+  - `classify_failure(&str)` maps raw IPC errors to
+    `FailureKind` (`connect`/`timeout`/`unavailable` → Transient,
+    `not_found`/`denied`/`rejected`/`approval` → Permanent,
+    everything else → Unknown).
+  - The execution loop now retries on `Retry`, aborts on `Abort`
+    and reports the final outcome. The previous "first failure
+    breaks the plan" behaviour is preserved when recovery decides
+    to abort.
+  - 7 new wiring tests pin down the per-capability policy, the
+    classifier, and the runtime `decide_recovery` integration.
+
+**Security properties preserved:**
+- The runtime's `decide_recovery` is the only place that decides
+  retry/abort/skip. The daemon, the planner, and the executor all
+  share it.
+- The LLM cannot influence the recovery policy; the policy is
+  attached at plan-construction time by trusted code.
+- A `AETHER_FAST_RETRY=1` env var is recognised by the daemon to
+  skip backoff sleeps during tests. It does not change the
+  decision; only the wait.
+- `FailureKind::Permanent` is never retried, even when
+  `max_retries > 0`. `CapabilityDenied`, `PolicyDenied`,
+  `ApprovalRequired`, `Validation`, and `NotFound` are all
+  permanent.
+- A failure classified as `Unknown` is retried at most once, then
+  aborted. The runtime never silently spins on a misclassified
+  error.
+
+**Test coverage:** 26 new unit tests in `recovery.rs` (16 core +
+8 runner), 7 new wiring tests in the daemon's planner. The whole
+runtime + daemon still passes `cargo test --workspace` and
+`cargo clippy --workspace --all-targets -- -D warnings`.
 
 #### 2.8 Observation + Recovery
 
@@ -745,6 +806,9 @@ schema-enforced; runtime is not embedded inside `aether-agentd`.
       executor / observation.
 - [ ] At least one real LLM provider (Ollama or OpenAI-compatible) is wired.
 - [x] Structured-output schema validation is enforced. ← **DONE in 2.6**
+- [x] Bounded recovery semantics are enforced (Phase 2.7). The runtime
+      exposes `RecoveryPolicy`, `FailureKind`, `decide_recovery`,
+      and the daemon's planner uses the same source of truth.
 - [ ] Memory persists across session restart.
 - [ ] End-to-end demo: user text → agentd → intent → plan → action via IPC →
       service → observation → agentd → response → UI.

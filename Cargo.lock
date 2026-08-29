@@ -18,6 +18,7 @@ dependencies = [
 name = "aether-agentd"
 version = "0.1.0"
 dependencies = [
+ "aether-agent-runtime",
  "aether-core",
  "aether-sdk",
  "serde",

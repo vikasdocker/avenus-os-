@@ -4,10 +4,25 @@
 // (including multi-step), validates each via the capability policy, checks
 // confirmation requirements, executes in order, and returns structured
 // per-step feedback. Stops on first failure unless the step is non-critical.
+//
+// Bounded recovery semantics (Phase 2.7):
+//   * Read-only capabilities (window.list, file.read, system.status, …)
+//     are auto-retried on transient IPC errors up to 3 times with
+//     capped exponential backoff.
+//   * Mutating capabilities (app.launch, file.delete, …) are retried at
+//     most once, and only on transient errors.
+//   * Permanent failures (capability denied, approval required, not
+//     found) are never retried.
+//   * The runtime's `decide_recovery` is the source of truth. We
+//     import it from `aether-agent-runtime::recovery` and feed it the
+//     same `FailureKind` classifier.
 
 use crate::confirmation::ConfirmationPolicy;
 use crate::context::SystemContext;
 use crate::intent::{self, CapabilityId, Intent, Rejection};
+use aether_agent_runtime::recovery::{
+    backoff_delay, decide_recovery, FailureKind, RecoveryAction, RecoveryPolicy,
+};
 use serde_json::Value;
 
 /// Result of a single planned action.
@@ -163,13 +178,57 @@ impl Planner {
                 }
             }
 
-            // 4) Execute via intent layer with both ports.
+            // 4) Execute via intent layer with bounded retry.
             let client = intent::control_client(control_port);
             let surface_client = intent::SurfaceClient::new(surface_port);
-            let result = intent::execute_extended(&intent, &client, &surface_client);
+            let policy = Self::recovery_policy_for(cap);
+            let mut attempt = 0u32;
+            let mut last_err: Option<String> = None;
+            let mut last_value: Option<Value> = None;
+            let final_outcome = loop {
+                attempt += 1;
+                match intent::execute_extended(&intent, &client, &surface_client) {
+                    Ok(value) => {
+                        last_value = Some(value);
+                        break Ok(());
+                    }
+                    Err(e) => {
+                        let kind = Self::classify_failure(&e);
+                        let action = decide_recovery(&policy, attempt, kind, false);
+                        match action {
+                            RecoveryAction::Retry => {
+                                let wait = backoff_delay(&policy, attempt);
+                                // Honour the backoff unless the
+                                // test environment asked us not to.
+                                if std::env::var("AETHER_FAST_RETRY")
+                                    .ok()
+                                    .filter(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                                    .is_none()
+                                {
+                                    std::thread::sleep(wait);
+                                }
+                                last_err = Some(e);
+                                continue;
+                            }
+                            RecoveryAction::Abort => {
+                                last_err = Some(e);
+                                break Err(());
+                            }
+                            RecoveryAction::Skip => {
+                                // We never mark daemon steps as
+                                // optional in this surface. Treat
+                                // Skip as Abort.
+                                last_err = Some(e);
+                                break Err(());
+                            }
+                        }
+                    }
+                }
+            };
 
-            match result {
-                Ok(value) => {
+            match final_outcome {
+                Ok(()) => {
+                    let value = last_value.unwrap_or(Value::Null);
                     let msg = intent::format_result(cap, &value);
                     actions.push(ActionResult {
                         capability: cap,
@@ -179,9 +238,9 @@ impl Planner {
                         raw_result: Some(value),
                     });
                 }
-                Err(e) => {
+                Err(()) => {
                     overall_ok = false;
-                    // Map known errors to user-friendly messages.
+                    let e = last_err.unwrap_or_else(|| "unknown failure".to_string());
                     let friendly = Self::friendly_error(&e, cap);
                     actions.push(ActionResult {
                         capability: cap,
@@ -198,6 +257,66 @@ impl Planner {
         let summary = Self::build_summary(&actions);
         let ok = overall_ok && !actions.is_empty() && actions.iter().all(|a| a.status == ActionStatus::Success);
         PlanResult { actions, summary, ok }
+    }
+
+    /// Per-capability recovery policy. Read-only capabilities retry
+    /// up to 3 times (transient IPC faults are common on a busy
+    /// system). Mutating capabilities retry at most once — the
+    /// cost of a second attempt is real, and the failure is more
+    /// likely to be permanent.
+    fn recovery_policy_for(cap: CapabilityId) -> RecoveryPolicy {
+        match cap {
+            CapabilityId::WindowList
+            | CapabilityId::WindowFocus
+            | CapabilityId::WindowMinimize
+            | CapabilityId::WindowMaximize
+            | CapabilityId::WindowClose
+            | CapabilityId::WindowRestore
+            | CapabilityId::AppList
+            | CapabilityId::AppStatus
+            | CapabilityId::SystemStatus
+            | CapabilityId::SystemInfo
+            | CapabilityId::SystemResources
+            | CapabilityId::SystemUptime
+            | CapabilityId::ContextGet
+            | CapabilityId::FileList
+            | CapabilityId::FileSearch
+            | CapabilityId::FileRead => RecoveryPolicy::transient_default(),
+            _ => RecoveryPolicy {
+                max_retries: 1,
+                backoff_base_ms: 50,
+                backoff_max_ms: 1_000,
+                timeout_ms: None,
+            },
+        }
+    }
+
+    /// Classify a raw IPC error string into a `FailureKind` for
+    /// the recovery decision. The classification is intentionally
+    /// conservative: only clear transient signals retry, everything
+    /// else aborts.
+    fn classify_failure(err: &str) -> FailureKind {
+        let lower = err.to_ascii_lowercase();
+        if lower.contains("connect")
+            || lower.contains("timeout")
+            || lower.contains("timed out")
+            || lower.contains("temporarily")
+            || lower.contains("unavailable")
+            || lower.contains("service unavailable")
+        {
+            FailureKind::Transient
+        } else if lower.contains("not_found")
+            || lower.contains("not found")
+            || lower.contains("unknown")
+            || lower.contains("denied")
+            || lower.contains("rejected")
+            || lower.contains("approval")
+            || lower.contains("requires consent")
+        {
+            FailureKind::Permanent
+        } else {
+            FailureKind::Unknown
+        }
     }
 
     /// Lightweight pre-check using context to fail fast with friendly message.
@@ -319,5 +438,129 @@ mod tests {
     fn friendly_error_mapping() {
         assert!(Planner::friendly_error("unknown application 'ghost'", CapabilityId::AppLaunch).contains("NOT FOUND"));
         assert!(Planner::friendly_error("already running", CapabilityId::AppLaunch).contains("ALREADY RUNNING"));
+    }
+
+    // ---- Phase 2.7 bounded-recovery tests ----
+
+    #[test]
+    fn recovery_policy_for_readonly_caps_is_transient_default() {
+        let p = Planner::recovery_policy_for(CapabilityId::SystemStatus);
+        assert_eq!(p.max_retries, 3);
+        assert_eq!(p.backoff_max_ms, 5_000);
+        let p = Planner::recovery_policy_for(CapabilityId::WindowList);
+        assert_eq!(p.max_retries, 3);
+        let p = Planner::recovery_policy_for(CapabilityId::FileRead);
+        assert_eq!(p.max_retries, 3);
+    }
+
+    #[test]
+    fn recovery_policy_for_mutating_caps_is_single_retry() {
+        let p = Planner::recovery_policy_for(CapabilityId::AppLaunch);
+        assert_eq!(p.max_retries, 1);
+        let p = Planner::recovery_policy_for(CapabilityId::FileDelete);
+        assert_eq!(p.max_retries, 1);
+        let p = Planner::recovery_policy_for(CapabilityId::FileWrite);
+        assert_eq!(p.max_retries, 1);
+    }
+
+    #[test]
+    fn classify_failure_recognises_transient_signals() {
+        assert!(matches!(
+            Planner::classify_failure("connection refused"),
+            FailureKind::Transient
+        ));
+        assert!(matches!(
+            Planner::classify_failure("operation timed out after 2s"),
+            FailureKind::Transient
+        ));
+        assert!(matches!(
+            Planner::classify_failure("service unavailable"),
+            FailureKind::Transient
+        ));
+        assert!(matches!(
+            Planner::classify_failure("temporarily unavailable, try again"),
+            FailureKind::Transient
+        ));
+    }
+
+    #[test]
+    fn classify_failure_recognises_permanent_signals() {
+        assert!(matches!(
+            Planner::classify_failure("unknown application 'ghost'"),
+            FailureKind::Permanent
+        ));
+        assert!(matches!(
+            Planner::classify_failure("not found: file"),
+            FailureKind::Permanent
+        ));
+        assert!(matches!(
+            Planner::classify_failure("capability denied"),
+            FailureKind::Permanent
+        ));
+        assert!(matches!(
+            Planner::classify_failure("policy rejected: forbidden"),
+            FailureKind::Permanent
+        ));
+    }
+
+    #[test]
+    fn classify_failure_defaults_to_unknown() {
+        assert!(matches!(
+            Planner::classify_failure("weird internal error"),
+            FailureKind::Unknown
+        ));
+    }
+
+    /// End-to-end bounded-retry path: simulate an `execute_extended`
+    /// that fails twice with a transient error, then succeeds. The
+    /// `recovery_policy_for(readonly)` must be `transient_default`,
+    /// and `decide_recovery` must report `Retry` for the first two
+    /// failures and stop after success — so the call count must
+    /// land at exactly 3.
+    #[test]
+    fn bounded_retry_exhausts_then_succeeds_against_runtime_decide_recovery() {
+        let policy = Planner::recovery_policy_for(CapabilityId::SystemStatus);
+        assert_eq!(policy.max_retries, 3);
+
+        // Simulate three attempts: 1 = transient fail, 2 = transient
+        // fail, 3 = success.
+        let mut attempt = 0u32;
+        let mut last_err = None;
+        loop {
+            attempt += 1;
+            let outcome: Result<(), &str> = if attempt < 3 {
+                Err("connection refused")
+            } else {
+                Ok(())
+            };
+            match outcome {
+                Ok(()) => break,
+                Err(e) => {
+                    let kind = Planner::classify_failure(e);
+                    let action = decide_recovery(&policy, attempt, kind, false);
+                    match action {
+                        aether_agent_runtime::recovery::RecoveryAction::Retry => {
+                            last_err = Some(e);
+                            continue;
+                        }
+                        _ => panic!("unexpected recovery action at attempt {attempt}"),
+                    }
+                }
+            }
+        }
+        assert_eq!(attempt, 3);
+        assert!(last_err.is_some());
+    }
+
+    /// Permanent failure must NOT be retried by the runtime
+    /// `decide_recovery`. Verify the wiring: classify + decide
+    /// yields Abort on attempt 1 for a permanent signal.
+    #[test]
+    fn bounded_retry_does_not_retry_permanent() {
+        let policy = Planner::recovery_policy_for(CapabilityId::AppLaunch);
+        let err = "unknown application 'ghost'";
+        let kind = Planner::classify_failure(err);
+        let action = decide_recovery(&policy, 1, kind, false);
+        assert_eq!(action, aether_agent_runtime::recovery::RecoveryAction::Abort);
     }
 }

@@ -3,6 +3,7 @@
 // Converts intents into ordered plans. Each step references a structured
 // action. Planning is deterministic where possible.
 
+use crate::recovery::RecoveryPolicy;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -38,6 +39,19 @@ pub struct PlanStep {
     pub required_capabilities: Vec<String>,
     pub risk_level: String,
     pub optional: bool,
+    /// Bounded recovery policy for this step. Defaults to no-retry.
+    /// The executor and the daemon planner both consult this when
+    /// an attempt fails.
+    #[serde(default)]
+    pub recovery: RecoveryPolicy,
+}
+
+impl PlanStep {
+    /// Sets the recovery policy in a builder style.
+    pub fn with_recovery(mut self, recovery: RecoveryPolicy) -> Self {
+        self.recovery = recovery;
+        self
+    }
 }
 
 /// A plan consisting of ordered steps.
@@ -50,6 +64,11 @@ pub struct Plan {
     pub estimated_risk: String,
     pub requires_approval: bool,
     pub created_at: u64,
+    /// Maximum number of times the whole plan may be retried after
+    /// a partial failure. Defaults to 0 (no plan-level retry; each
+    /// step decides for itself).
+    #[serde(default)]
+    pub max_plan_retries: u32,
 }
 
 impl Plan {
@@ -66,6 +85,7 @@ impl Plan {
             estimated_risk: "low".to_string(),
             requires_approval: false,
             created_at: now,
+            max_plan_retries: 0,
         }
     }
 
@@ -132,6 +152,31 @@ impl Planner {
             required_capabilities: capabilities,
             risk_level: risk_level.to_string(),
             optional: false,
+            recovery: RecoveryPolicy::default(),
+        });
+        plan
+    }
+
+    /// Creates a single-step plan with a custom recovery policy.
+    pub fn plan_single_with_recovery(
+        &self,
+        session_id: &str,
+        action_name: &str,
+        params: serde_json::Value,
+        capabilities: Vec<String>,
+        risk_level: &str,
+        recovery: RecoveryPolicy,
+    ) -> Plan {
+        let mut plan = Plan::new(session_id, action_name);
+        plan.add_step(PlanStep {
+            step_index: 0,
+            action_name: action_name.to_string(),
+            parameters: params,
+            depends_on: Vec::new(),
+            required_capabilities: capabilities,
+            risk_level: risk_level.to_string(),
+            optional: false,
+            recovery,
         });
         plan
     }
@@ -204,6 +249,7 @@ mod tests {
                     required_capabilities: vec![],
                     risk_level: "low".to_string(),
                     optional: false,
+                    recovery: RecoveryPolicy::default(),
                 },
                 PlanStep {
                     step_index: 1,
@@ -213,6 +259,7 @@ mod tests {
                     required_capabilities: vec![],
                     risk_level: "low".to_string(),
                     optional: false,
+                    recovery: RecoveryPolicy::default(),
                 },
             ],
         );
@@ -234,6 +281,7 @@ mod tests {
                     required_capabilities: vec![],
                     risk_level: "low".to_string(),
                     optional: false,
+                    recovery: RecoveryPolicy::default(),
                 },
                 PlanStep {
                     step_index: 1,
@@ -243,9 +291,73 @@ mod tests {
                     required_capabilities: vec![],
                     risk_level: "low".to_string(),
                     optional: false,
+                    recovery: RecoveryPolicy::default(),
                 },
             ],
         );
         assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn plan_step_recovery_defaults_to_no_retry() {
+        let p = Planner::new();
+        let plan = p.plan_single(
+            "s1",
+            "system.status",
+            serde_json::json!({}),
+            vec![],
+            "low",
+        );
+        assert_eq!(plan.steps[0].recovery.max_retries, 0);
+    }
+
+    #[test]
+    fn plan_step_with_recovery_attaches_policy() {
+        let p = Planner::new();
+        let plan = p.plan_single_with_recovery(
+            "s1",
+            "network.status",
+            serde_json::json!({}),
+            vec![],
+            "low",
+            RecoveryPolicy::transient_default(),
+        );
+        assert_eq!(plan.steps[0].recovery.max_retries, 3);
+        assert_eq!(plan.steps[0].recovery.timeout_ms, Some(2_000));
+    }
+
+    #[test]
+    fn plan_step_serialization_round_trip() {
+        let p = Planner::new();
+        let plan = p.plan_single_with_recovery(
+            "s1",
+            "network.status",
+            serde_json::json!({}),
+            vec![],
+            "low",
+            RecoveryPolicy::transient_default(),
+        );
+        let json = serde_json::to_string(&plan).unwrap_or_default();
+        let back: Plan = serde_json::from_str(&json).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(back.steps[0].recovery.max_retries, 3);
+        assert_eq!(back.max_plan_retries, 0);
+    }
+
+    #[test]
+    fn legacy_plan_step_without_recovery_field_deserializes() {
+        // Older serialized plans (or hand-written test fixtures) may
+        // not include the `recovery` field. The default must apply.
+        let legacy = serde_json::json!({
+            "step_index": 0,
+            "action_name": "a",
+            "parameters": {},
+            "depends_on": [],
+            "required_capabilities": [],
+            "risk_level": "low",
+            "optional": false,
+        });
+        let step: PlanStep =
+            serde_json::from_value(legacy).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(step.recovery.max_retries, 0);
     }
 }
