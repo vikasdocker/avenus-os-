@@ -9,6 +9,7 @@ pub mod context;
 pub mod planner;
 pub mod conversation;
 pub mod confirmation;
+pub mod structured_llm;
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -182,6 +183,13 @@ impl AgentState {
 
     pub fn with_surface_port(mut self, port: u16) -> Self {
         self.surface_port = port;
+        self
+    }
+
+    /// Replace the AI provider. Used by tests to inject deterministic
+    /// structured-LLM responses without a real network call.
+    pub fn with_provider(mut self, provider: Box<dyn AiProvider + Send>) -> Self {
+        self.provider = provider;
         self
     }
 
@@ -376,7 +384,7 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
                 let convo_app = state.conversation.last_app().map(|s| s.to_string());
                 let convo_file = state.conversation.last_file().map(|s| s.to_string());
 
-                // Try structured multi-step intent via planner.
+                // 1) Try deterministic multi-step intent via planner first.
                 if let Some(intents) = planner::Planner::plan_with_file(text, &ctx, convo_app.as_deref(), convo_file.as_deref()) {
                     // Execute sequentially with per-step validation.
                     let plan = planner::Planner::execute(
@@ -460,8 +468,86 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
                     };
                 }
 
-                // No intent -> plain AI chat (with optional context grounding, minimal).
-                // For this phase we keep provider isolated; future phases can inject ctx.grounding_text() into prompt.
+                // 2) No deterministic intent. Try the structured-LLM path: ask
+                //    the provider to classify the user request using the
+                //    INTENT_SCHEMA envelope. If the LLM returns a valid
+                //    capability, execute it through the planner (which still
+                //    validates against policy). Anything else falls through
+                //    to plain chat.
+                let llm_outcome = structured_llm::try_structured(state.provider.as_ref(), text, &ctx);
+                if let structured_llm::LlmIntentOutcome::Intent(llm_intent) = llm_outcome {
+                    state.record_event(
+                        EventSeverity::Info,
+                        "ai",
+                        &format!(
+                            "structured LLM intent: {} ({})",
+                            llm_intent.capability.as_str(),
+                            llm_intent.arguments
+                        ),
+                    );
+                    let plan = planner::Planner::execute(
+                        vec![llm_intent.clone()],
+                        state.control_port,
+                        state.surface_port,
+                        &ctx,
+                    );
+                    // Update conversation memory with apps mentioned.
+                    let apps: Vec<String> = llm_intent
+                        .arguments
+                        .get("app")
+                        .and_then(|v| v.as_str())
+                        .map(|s| vec![s.to_string()])
+                        .unwrap_or_default();
+                    state.conversation.push_with_files(text, apps.clone(), apps, Vec::new());
+                    // Record action outcome.
+                    for action in &plan.actions {
+                        let sev = if action.status == planner::ActionStatus::Success {
+                            EventSeverity::Info
+                        } else if action.status == planner::ActionStatus::Rejected {
+                            EventSeverity::Warning
+                        } else {
+                            EventSeverity::Error
+                        };
+                        state.record_event(
+                            sev,
+                            "capability",
+                            &format!("{} -> {} ({:?})", action.capability.as_str(), action.message, action.status),
+                        );
+                    }
+                    let response = if plan.actions.len() == 1 {
+                        plan.actions[0].message.clone()
+                    } else {
+                        plan.summary.clone()
+                    };
+                    let actions_json: Vec<serde_json::Value> = plan
+                        .actions
+                        .iter()
+                        .map(|a| {
+                            serde_json::json!({
+                                "capability": a.capability.as_str(),
+                                "arguments": a.arguments,
+                                "status": format!("{:?}", a.status),
+                                "message": a.message,
+                            })
+                        })
+                        .collect();
+                    return AgentResponse {
+                        ok: plan.ok,
+                        result: serde_json::json!({
+                            "response": response,
+                            "capability": plan.actions.first().map(|a| a.capability.as_str()).unwrap_or("none"),
+                            "provider": "structured-llm",
+                            "actions": actions_json,
+                            "context": {
+                                "active_window": ctx.active_window,
+                                "running_apps": ctx.running_apps,
+                                "windows": ctx.windows.iter().map(|w| w.title.clone()).collect::<Vec<_>>(),
+                            }
+                        }),
+                    };
+                }
+
+                // 3) No structured intent either. Plain AI chat.
                 let outcome = state.provider.complete(text);
                 let (provider, response) = match outcome {
                     Ok(reply) => (state.provider.name().to_string(), reply),
@@ -1221,5 +1307,109 @@ mod tests {
         // Should be RequiresConsent or Failed, not success with ok true and no confirmation
         let status = r.result["actions"].as_array().and_then(|a| a.first()).and_then(|a| a.get("status")).and_then(|s| s.as_str()).unwrap_or("");
         assert!(status == "RequiresConsent" || r.result["response"].as_str().unwrap_or_default().contains("REQUIRES") || !r.ok, "expected confirmation for bulk delete, got {:?}", r.result);
+    }
+
+    /// A provider that always returns a valid structured intent. Used to
+    /// verify the chat handler routes through the LLM path when the
+    /// deterministic parser finds no intent (i.e. unprompted freeform text).
+    struct StubStructuredProvider;
+    impl AiProvider for StubStructuredProvider {
+        fn name(&self) -> &str { "stub-structured" }
+        fn complete(&self, _prompt: &str) -> Result<String, String> {
+            Ok(r#"{"capability":"system.status","confidence":80,"entities":{},"reason":"stub"}"#.to_string())
+        }
+    }
+
+    /// A provider whose structured output should be rejected as an unknown
+    /// capability, forcing the chat handler to fall back to plain chat.
+    struct StubUnknownCapabilityProvider;
+    impl AiProvider for StubUnknownCapabilityProvider {
+        fn name(&self) -> &str { "stub-unknown" }
+        fn complete(&self, _prompt: &str) -> Result<String, String> {
+            Ok(r#"{"capability":"agent.execute_shell","confidence":99,"entities":{"command":"x"},"reason":"y"}"#.to_string())
+        }
+    }
+
+    /// A provider that always fails. Should fall through to plain chat.
+    struct StubFailingProvider;
+    impl AiProvider for StubFailingProvider {
+        fn name(&self) -> &str { "stub-fail" }
+        fn complete(&self, _prompt: &str) -> Result<String, String> {
+            Err("no network".to_string())
+        }
+    }
+
+    fn spawn_state_with_provider(
+        port: u16,
+        clock: fn() -> u64,
+        provider: Box<dyn AiProvider + Send>,
+    ) -> AgentState {
+        AgentState::new(clock)
+            .with_control_port(port)
+            .with_surface_port(port)
+            .with_provider(provider)
+    }
+
+    #[test]
+    fn chat_routes_freeform_through_structured_llm() {
+        // A prompt that the deterministic parser will not match, but the LLM
+        // returns a valid structured intent for.
+        let (ctrl_port, _h) = spawn_mock_control_plane();
+        let (clock, _tick) = fake_clock(7000);
+        let mut state = spawn_state_with_provider(ctrl_port, clock, Box::new(StubStructuredProvider));
+
+        let r = handle_request(
+            &mut state,
+            &AgentRequest {
+                command: "chat".to_string(),
+                argument: Some("how are things?".to_string()),
+            },
+        );
+        assert!(r.ok, "structured llm chat failed: {:?}", r.result);
+        assert_eq!(r.result["provider"], "structured-llm");
+        let actions = r.result["actions"].as_array().unwrap_or_else(|| panic!("no actions"));
+        assert_eq!(actions.len(), 1, "expected one structured action, got {:?}", actions);
+        assert_eq!(actions[0]["capability"], "system.status");
+    }
+
+    #[test]
+    fn chat_falls_back_to_plain_chat_on_unknown_capability() {
+        let (ctrl_port, _h) = spawn_mock_control_plane();
+        let (clock, _tick) = fake_clock(7100);
+        let mut state = spawn_state_with_provider(ctrl_port, clock, Box::new(StubUnknownCapabilityProvider));
+
+        let r = handle_request(
+            &mut state,
+            &AgentRequest {
+                command: "chat".to_string(),
+                argument: Some("some unrecognizable ask".to_string()),
+            },
+        );
+        assert!(r.ok, "expected plain chat fallback to succeed: {:?}", r.result);
+        // The provider is stub-unknown (it returned a structured response that
+        // was rejected, then the handler falls through to the plain provider
+        // call - which returns the same bad payload as the chat reply).
+        // We just verify the structured-llm path did NOT run.
+        assert_ne!(r.result["provider"], "structured-llm");
+    }
+
+    #[test]
+    fn chat_falls_back_to_plain_chat_on_provider_error() {
+        let (ctrl_port, _h) = spawn_mock_control_plane();
+        let (clock, _tick) = fake_clock(7200);
+        let mut state = spawn_state_with_provider(ctrl_port, clock, Box::new(StubFailingProvider));
+
+        let r = handle_request(
+            &mut state,
+            &AgentRequest {
+                command: "chat".to_string(),
+                argument: Some("tell me a joke".to_string()),
+            },
+        );
+        assert!(r.ok, "expected plain chat fallback to succeed: {:?}", r.result);
+        // Should report the provider failure but still produce a friendly reply.
+        let resp = r.result["response"].as_str().unwrap_or_default();
+        assert!(resp.contains("unavailable") || resp.contains("ECHO"), "got: {resp}");
+        assert_ne!(r.result["provider"], "structured-llm");
     }
 }

@@ -12,6 +12,7 @@
 pub mod session;
 pub mod request;
 pub mod intent;
+pub mod structured_intent;
 pub mod action;
 pub mod tool;
 pub mod validator;
@@ -29,6 +30,10 @@ pub mod events;
 pub use session::{AgentSession, SessionId, SessionState};
 pub use request::{RequestActor, UserRequest};
 pub use intent::{Confidence, Intent, IntentType};
+pub use structured_intent::{
+    build_intent_prompt, parse_envelope, parse_intent, IntentEnvelope, StructuredIntentError,
+    INTENT_SCHEMA,
+};
 pub use action::{Action, ActionId, ActionVariant};
 pub use tool::{ToolDefinition, ToolId, ToolRegistry};
 pub use validator::{ValidationResult, Validator};

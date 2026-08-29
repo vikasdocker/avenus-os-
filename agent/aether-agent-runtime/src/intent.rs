@@ -80,6 +80,79 @@ pub enum IntentType {
     Chat,
 }
 
+impl IntentType {
+    /// Parse a string slug like "application.launch" into an `IntentType`.
+    /// Used to validate LLM-produced structured output.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "application.launch" => Some(Self::ApplicationLaunch),
+            "application.close" => Some(Self::ApplicationClose),
+            "application.status" => Some(Self::ApplicationStatus),
+            "application.list" => Some(Self::ApplicationList),
+            "window.list" => Some(Self::WindowList),
+            "window.focus" => Some(Self::WindowFocus),
+            "window.minimize" => Some(Self::WindowMinimize),
+            "window.maximize" => Some(Self::WindowMaximize),
+            "window.close" => Some(Self::WindowClose),
+            "file.list" => Some(Self::FileList),
+            "file.read" => Some(Self::FileRead),
+            "file.create" => Some(Self::FileCreate),
+            "file.write" => Some(Self::FileWrite),
+            "file.search" => Some(Self::FileSearch),
+            "file.rename" => Some(Self::FileRename),
+            "file.move" => Some(Self::FileMove),
+            "file.delete" => Some(Self::FileDelete),
+            "process.list" => Some(Self::ProcessList),
+            "process.inspect" => Some(Self::ProcessInspect),
+            "network.status" => Some(Self::NetworkStatus),
+            "network.interfaces" => Some(Self::NetworkInterfaces),
+            "system.status" => Some(Self::SystemStatus),
+            "system.info" => Some(Self::SystemInfo),
+            "system.resources" => Some(Self::SystemResources),
+            "system.uptime" => Some(Self::SystemUptime),
+            "storage.status" => Some(Self::StorageStatus),
+            "context.get" => Some(Self::ContextGet),
+            "chat" => Some(Self::Chat),
+            _ => None,
+        }
+    }
+
+    /// All valid slugs. Used to build LLM prompts and to validate responses.
+    pub fn all_slugs() -> &'static [&'static str] {
+        &[
+            "application.launch",
+            "application.close",
+            "application.status",
+            "application.list",
+            "window.list",
+            "window.focus",
+            "window.minimize",
+            "window.maximize",
+            "window.close",
+            "file.list",
+            "file.read",
+            "file.create",
+            "file.write",
+            "file.search",
+            "file.rename",
+            "file.move",
+            "file.delete",
+            "process.list",
+            "process.inspect",
+            "network.status",
+            "network.interfaces",
+            "system.status",
+            "system.info",
+            "system.resources",
+            "system.uptime",
+            "storage.status",
+            "context.get",
+            "chat",
+        ]
+    }
+}
+
 impl fmt::Display for IntentType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
@@ -142,6 +215,9 @@ pub struct Intent {
     pub constraints: Vec<String>,
     /// Risk level assigned by trusted system code, NOT by the LLM.
     pub risk_level: RiskLevel,
+    /// LLM-supplied reason explaining the classification (or empty for
+    /// deterministic sources).
+    pub reason: String,
 }
 
 /// Risk level for intents — validated by system code, never assigned by LLM.
@@ -168,12 +244,19 @@ impl Intent {
             entities,
             constraints: Vec::new(),
             risk_level: RiskLevel::Low,
+            reason: String::new(),
         }
     }
 
     /// Sets the risk level — called by trusted validation code.
     pub fn with_risk_level(mut self, level: RiskLevel) -> Self {
         self.risk_level = level;
+        self
+    }
+
+    /// Sets the LLM-supplied reason.
+    pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
+        self.reason = reason.into();
         self
     }
 
