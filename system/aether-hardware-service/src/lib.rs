@@ -320,6 +320,12 @@ impl Capability {
     }
 }
 
+/// The capability executor — the typed bridge
+/// that takes a `Capability` + a `Device` and
+/// produces a `CapabilityResult`. Lives in
+/// `executor.rs`.
+pub mod executor;
+
 /// A single piece of hardware. The hardware
 /// service daemon (the future Phase 10 bring-up)
 /// produces these; the agent and the shell
@@ -511,7 +517,7 @@ impl HardwareService {
             // disabled; the user can re-enable.
             _ => DeviceState::Disabled,
         };
-        self.set_state(id, new_state);
+        let _ = self.set_state(id, new_state);
         Some(new_state)
     }
 

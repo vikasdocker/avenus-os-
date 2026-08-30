@@ -1385,8 +1385,9 @@ consent) perform a restart, and report success.
 ### Phase 8 — Device + Hardware Ecosystem
 
 **Status:** `IN_PROGRESS` (8.1 hardware service
-shipped; the future hardware service daemon
-that talks to the real HAL is Phase 10's
+shipped including the capability executor;
+the future hardware service daemon that
+talks to the real HAL is Phase 10's
 real-hardware bring-up work).
 
 **Sub-milestones:**
@@ -1446,6 +1447,33 @@ real-hardware bring-up work).
     cross the boundary. 32 unit tests, 0
     warnings, 0 clippy lints. Files:
     `system/aether-hardware-service/src/lib.rs`.
+  * **Capability executor** (8.1 cont.)
+    `system/aether-hardware-service/src/executor.rs`
+    ships the typed bridge that takes a
+    `Capability` + a `Device` and produces
+    a `CapabilityResult`. The executor holds
+    a `HardwareService` and a list of
+    approved capabilities. A
+    `CapabilityRequest` carries the
+    capability, the target device id, and
+    the `Actor` (User / Agent / Peer). The
+    executor enforces four gates: device
+    exists, device state allows the
+    capability (`Enable` / `Disable` are
+    allowed to recover from any state),
+    device claims the capability (except
+    `Enable` / `Disable` which are
+    meta), and the actor + capability
+    `requires_consent` flags + the
+    approved-list line up. The pure-data
+    executor returns a deterministic
+    `CapabilityResult::Ok { detail }`
+    describing the would-be side effect;
+    the future HAL call uses it for audit
+    logging. `can_exercise(&req)` is the
+    one-liner the UI uses to grey out
+    menu items. 14 unit tests, 0 warnings,
+    0 clippy lints.
 - Aether Hardware Service exposing CPU, GPU, display, keyboard, touchpad,
   mouse, audio, mic, camera, Wi-Fi, Bluetooth, Ethernet, USB, storage, battery,
   thermal, external displays, printers, future sensors.
