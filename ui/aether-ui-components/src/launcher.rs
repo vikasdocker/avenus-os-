@@ -114,6 +114,34 @@ impl Launcher {
         self
     }
 
+    /// Set the tile list wholesale. Used by the launcher
+    /// surface when the content resolver returns a
+    /// fresh set of matches.
+    #[must_use]
+    pub fn with_tiles(mut self, tiles: alloc::vec::Vec<LauncherTile>) -> Self {
+        self.tiles = tiles;
+        self
+    }
+
+    /// Override the backing panel's size. The launcher
+    /// surface sets this to the resolved grid box
+    /// dimensions; the underlying `Panel` carries the
+    /// size for the renderer's anchor pass.
+    #[must_use]
+    pub fn with_panel_size(mut self, width: u32, height: u32) -> Self {
+        self.panel = self.panel.with_size(width, height);
+        self
+    }
+
+    /// Override the backing panel's visibility. The
+    /// launcher surface sets `visible = false` when
+    /// the user has dismissed the launcher.
+    #[must_use]
+    pub fn with_visible(mut self, visible: bool) -> Self {
+        self.panel.visible = visible;
+        self
+    }
+
     /// Set the search query.
     #[must_use]
     pub fn query(mut self, q: impl Into<String>) -> Self {

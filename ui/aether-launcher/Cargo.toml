@@ -1,0 +1,14 @@
+[package]
+name = "aether-launcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether Launcher — the AI-first central UI surface composing the mode rail, search, and tile grid from aether-ui-components."
+
+[dependencies]
+aether-design-tokens = { path = "../aether-design-tokens" }
+aether-ui-components = { path = "../aether-ui-components" }
+
+[lints]
+workspace = true

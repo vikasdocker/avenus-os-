@@ -156,6 +156,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-launcher"
+version = "0.1.0"
+dependencies = [
+ "aether-design-tokens",
+ "aether-ui-components",
+]
+
+[[package]]
 name = "aether-network"
 version = "0.1.0"
 dependencies = [
