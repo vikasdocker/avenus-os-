@@ -1002,8 +1002,8 @@ through a typed capability (not screen-scraped shell calls).
 
 ### Phase 6 — Aether UI / UX
 
-**Status:** `IN_PROGRESS` (6.1 design tokens shipped; 6.2
-component library, 6.3–6.5 AI surfaces, 6.6 AI states, 6.7
+**Status:** `IN_PROGRESS` (6.1 design tokens and 6.2 component
+library shipped; 6.3–6.5 AI surfaces, 6.6 AI states, 6.7
 iconography, 6.8 animation bindings, 6.9 accessibility are
 the remaining work).
 
@@ -1035,8 +1035,36 @@ The complete UI/UX direction is in [§12 — Aether UI / UX Design Direction](#1
   one-file change. Files:
   `ui/aether-design-tokens/src/{lib, color, spacing,
   radius, type_scale, motion, ai_state}.rs`.
-- 6.2 Component library (button, card, list, dialog, panel, nav, taskbar,
-  launcher).
+- 6.2 **Component library (button, card, list, dialog, panel, nav, taskbar,
+  launcher) — COMPLETE**. New crate `ui/aether-ui-components`
+  defines the typed, non-painting component primitives
+  that every Aether surface composes. The architecture is
+  "components are descriptions, not framebuffer calls":
+  each `Component` trait impl exposes `layout() ->
+  LayoutBox`, `style() -> ComponentStyle`, `padding() ->
+  Insets`, and a derived `content_rect()`. The renderer /
+  layout pass consumes these and applies its own paint
+  logic, so the headless test renderer, the Wayland
+  compositor, the graphical shell, and the accessibility
+  auditor all share the same source of truth. Every
+  component resolves its colors through
+  `aether_design_tokens::Color::role(Role::...)` — a
+  re-skin is one file. The component set today: `Button`
+  (3 variants × 2 sizes, focused/pressed/disabled
+  modifiers), `Card` (3 elevations, `with_padding`
+  builder), `List` (single / multi / no selection, row
+  height = body line + 2 × Lg padding), `Dialog` (title +
+  body + right-aligned action row, `SCRIM` const for the
+  scrim), `Panel` (Left/Right/Top/Bottom anchored, with
+  the §12 default 240 px / 48 px), `Nav` (horizontal /
+  vertical rail, item length = body line + 2 × Lg), the
+  AI-anchored `Taskbar` (running-window chips, network /
+  volume / battery / AI tray colors, clock), and the
+  AI-first `Launcher` (3-column grid of `LauncherTile`s
+  with 2-pastel gradient stops, search query, selected
+  index). 98 unit tests, 0 warnings, 0 clippy lints.
+  Files: `ui/aether-ui-components/src/{lib, button, card,
+  list, dialog, panel, nav, taskbar, launcher}.rs`.
 - 6.3 Aether Launcher (AI-first central UI).
 - 6.4 AI Command Bar.
 - 6.5 AI Assistant Panel + AI Agent Workspace + AI Task View.

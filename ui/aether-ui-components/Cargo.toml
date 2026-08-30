@@ -1,0 +1,13 @@
+[package]
+name = "aether-ui-components"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether UI component library — typed button, card, list, dialog, panel, nav, taskbar, launcher primitives built on top of aether-design-tokens."
+
+[dependencies]
+aether-design-tokens = { path = "../aether-design-tokens" }
+
+[lints]
+workspace = true
