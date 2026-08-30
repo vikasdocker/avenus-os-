@@ -25,7 +25,7 @@
    - [Phase 0 — Project Foundation](#phase-0--project-foundation) **COMPLETE**
    - [Phase 1 — Core Operating System](#phase-1--core-operating-system) **IN_PROGRESS (parts done, parts partial)**
    - [Phase 2 — Aether Agent Core](#phase-2--aether-agent-core) **IN_PROGRESS**
-   - [Phase 3 — Conversational Aether](#phase-3--conversational-aether) **IN_PROGRESS (3.1–3.4 shipped)**
+   - [Phase 3 — Conversational Aether](#phase-3--conversational-aether) **COMPLETE (3.1–3.4 shipped)**
    - [Phase 4 — Voice + Audio](#phase-4--voice--audio) **NOT_STARTED**
    - [Phase 5 — Vision + Computer Understanding](#phase-5--vision--computer-understanding) **NOT_STARTED**
    - [Phase 6 — Aether UI / UX](#phase-6--aether-ui--ux) **IN_PROGRESS (foundation only)**
@@ -937,7 +937,7 @@ schema-enforced; runtime is not embedded inside `aether-agentd`.
 
 ### Phase 3 — Conversational Aether
 
-**Status:** `IN_PROGRESS` (3.1, 3.2, 3.3, 3.4 shipped).
+**Status:** `COMPLETE` (3.1, 3.2, 3.3, 3.4 all shipped).
 
 **Objective:** Make Aether naturally conversational.
 
