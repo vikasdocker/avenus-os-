@@ -1,0 +1,13 @@
+[package]
+name = "aether-diagnostics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether system diagnostics: typed symptom / health model. Collects observations about the OS (CPU, memory, disk, network, services, app crashes, security events), groups them into symptoms, and reports a SystemHealth score. The agent reads the diagnostics and decides what to propose."
+
+[dependencies]
+aether-agent-core = { path = "../../agent/aether-agent-core" }
+
+[lints]
+workspace = true

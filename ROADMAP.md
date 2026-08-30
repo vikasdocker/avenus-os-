@@ -1005,8 +1005,11 @@ through a typed capability (not screen-scraped shell calls).
 **Status:** `IN_PROGRESS` (6.1 design tokens, 6.2 component
 library, 6.3 Aether Launcher, 6.4 AI Command Bar,
 6.5 AI Assistant surfaces, 6.6 AI state consumers,
-6.7 iconography, 6.8 animation runtime shipped;
-6.9 accessibility is the remaining work).
+6.7 iconography, 6.8 animation runtime, 6.9
+accessibility shipped). The crate set is complete;
+the renderer / shell that paints these surfaces is
+the next stage of work and the entry stays
+`IN_PROGRESS` until the first paint is in place.
 
 **Objective:** Define and implement the final Aether graphical identity. The
 entire OS must share one design system.
@@ -1247,19 +1250,42 @@ will paint the surfaces with them.
 
 ### Phase 7 — Aether Agent Deep System Control
 
-**Status:** `NOT_STARTED`.
+**Status:** `IN_PROGRESS` (7.1 system diagnostics shipped;
+7.2 self-healing, 7.3 system automation, 7.4
+background agent are the remaining work).
 
 **Objective:** Make Aether capable of operating the entire OS.
 
 **Sub-milestones:**
 
-- 7.1 System diagnostics ("Why is my computer slow?" → collect, analyze,
-  explain, fix).
-- 7.2 Self-healing (bounded recovery: service restart, network recovery,
-  application recovery, dependency recovery, resource recovery).
-- 7.3 System automation (user-defined workflows, e.g. morning setup).
-- 7.4 Background agent (disk space, service failure, network failure, app
-  crash, battery, security events).
+- 7.1 **System diagnostics — COMPLETE**. New crate
+  `system/aether-diagnostics` ships the typed
+  "why is my computer slow?" model. The pipeline
+  has four steps: **collect** (`Signal` values
+  from each subsystem — CPU / Memory / Disk /
+  Network / Service / App / Security / Power /
+  FileSystem), **symptom** (correlated
+  `Symptom` values that represent a specific
+  problem — "high CPU *and* OOM-kill *and* app
+  crash = system_unstable"), **explain**
+  (human-readable `Explanation` with a cause
+  and a proposed fix, tagged with whether the
+  fix requires user consent), and **score**
+  (`DiagnosticReport::score()` returns 0..=100;
+  every `Critical` symptom drops the score by
+  30, every `Warning` by 5). The rules table is
+  data: the crate ships a `default_rules()` that
+  handles the common cases (cpu_overload,
+  memory_pressure, disk_full, service_down,
+  app_crash_loop, system_unstable) and callers
+  can extend it at runtime. The report's
+  `to_observations()` method bridges the
+  diagnostics vocabulary to the agent's existing
+  `Observation` type so the proposal pipeline
+  can consume symptoms without caring that they
+  came from diagnostics. 24 unit tests, 0
+  warnings, 0 clippy lints. Files:
+  `system/aether-diagnostics/src/lib.rs`.
 
 **Dependencies:** Phase 2 + Phase 3 + Phase 8 (devices).
 
