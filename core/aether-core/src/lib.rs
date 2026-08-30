@@ -9,6 +9,8 @@ pub mod manifest;
 pub mod sandbox;
 pub mod types;
 
+pub mod app;
+
 pub use capability::{Capability, CapabilityDomain, RiskLevel};
 pub use error::AetherError;
 pub use identity::{AetherIdentity, ComponentId};

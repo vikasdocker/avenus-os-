@@ -1,6 +1,7 @@
 use aether_core::{Capability, RiskLevel};
 use std::fmt::{self, Display};
 
+pub mod app_signing;
 pub mod audit;
 pub mod credentials;
 pub mod manifest_signing;
