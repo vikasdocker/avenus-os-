@@ -31,7 +31,8 @@ members = [
   "agent/aether-agent-runtime",
   "ui/aether-design-tokens",
   "ui/aether-ui-components",
-  "ui/aether-launcher"
+  "ui/aether-launcher",
+  "ui/aether-command-bar"
 ]
 
 [workspace.package]
