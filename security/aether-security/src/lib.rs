@@ -4,6 +4,7 @@ use std::fmt::{self, Display};
 pub mod app_security;
 pub mod app_signing;
 pub mod audit;
+pub mod boot_measure;
 pub mod credentials;
 pub mod manifest_signing;
 pub mod signed_update;
