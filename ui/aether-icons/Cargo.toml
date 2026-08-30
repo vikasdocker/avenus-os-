@@ -1,0 +1,13 @@
+[package]
+name = "aether-icons"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether icon primitives: a typed, non-painting icon system. Icons are descriptions (kind + size + tint) the renderer resolves. The palette is the Aether pastel family; re-skinning is a one-file change."
+
+[dependencies]
+aether-design-tokens = { path = "../aether-design-tokens" }
+
+[lints]
+workspace = true

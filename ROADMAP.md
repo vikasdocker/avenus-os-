@@ -1003,10 +1003,10 @@ through a typed capability (not screen-scraped shell calls).
 ### Phase 6 — Aether UI / UX
 
 **Status:** `IN_PROGRESS` (6.1 design tokens, 6.2 component
-library, and 6.3 Aether Launcher shipped; 6.4 AI Command
-Bar, 6.5 AI Assistant Panel + Agent Workspace + Task View,
-6.6 AI states, 6.7 iconography, 6.8 animation bindings,
-6.9 accessibility are the remaining work).
+library, 6.3 Aether Launcher, 6.4 AI Command Bar,
+6.5 AI Assistant surfaces, 6.7 iconography shipped;
+6.6 AI states, 6.8 animation bindings, 6.9
+accessibility are the remaining work).
 
 **Objective:** Define and implement the final Aether graphical identity. The
 entire OS must share one design system.
@@ -1090,13 +1090,96 @@ The complete UI/UX direction is in [§12 — Aether UI / UX Design Direction](#1
   tests. 59 unit tests, 0 warnings, 0 clippy lints.
   Files: `ui/aether-launcher/src/{lib, mode, content,
   view}.rs`.
-- 6.4 AI Command Bar.
+- 6.4 **AI Command Bar — COMPLETE**. New crate
+  `ui/aether-command-bar` ships the prompt
+  surface: a `Panel::Top` thin horizontal strip
+  carrying the mode tabs (`CommandTabs` —
+  horizontal `Nav` of Apps / Files / AI), the
+  prompt field (`PromptField` — focused = lavender
+  border, unfocused = hairline, 40 px tall, mode-
+  aware placeholder), and the send button
+  (`SendButton` — `Button::Primary::Large`, disabled
+  when prompt is empty). The state machine
+  (`CommandView` / `CommandAction`) is the same
+  shape as the launcher: `TypeChar` / `Backspace` /
+  `DeletePrevWord` / `ClearPrompt` /
+  `SwitchMode` / `FocusNext` / `FocusPrev` / `Submit` /
+  `ShowHelp` / `Close`. The submit resolves to a
+  `SubmitIntent` enum (`LaunchApp` / `OpenFile` /
+  `AskAgent` / `Noop`) that the renderer / router
+  dispatches on. The AI mode is the default active
+  tab because the command bar is the type-to-AI
+  surface. 51 unit tests, 0 warnings, 0 clippy
+  lints. Files: `ui/aether-command-bar/src/{lib,
+  state, action, view}.rs`.
+- 6.5 **AI Assistant Panel + AI Agent Workspace + AI Task
+  View — COMPLETE**. New crate `ui/aether-assistant`
+  ships three Aether AI surfaces, all consuming
+  `AiVisualState` for their accent color: the
+  `AssistantPanel` (a `Panel::Right` sidebar at the
+  §12 default 360 px showing the agent's current
+  state + recent history + a quick-prompt input),
+  the `Agent Workspace` (`WorkspaceView` —
+  `Panel::Left` at 480 px with a goal header, a
+  progress bar, a vertical timeline of `PlanStep`s,
+  and a state footer; each step carries a
+  `PlanStepKind` glyph, a title, and a
+  `PlanStepState` chip), and the `TaskView` (a
+  floating card 560 × 480 showing the focused
+  step's inputs, outputs, and a permission
+  prompt with `TaskDecision` accept / reject
+  controls). The `PlanStepState` is its own
+  per-step state machine (Pending / Running
+  (AiVisualState) / Done / Failed / Skipped) that
+  collapses to the 9-state `AiVisualState`
+  vocabulary for styling. 67 unit tests, 0
+  warnings, 0 clippy lints. Files:
+  `ui/aether-assistant/src/{lib, plan, panel,
+  task, workspace}.rs`.
+- 6.6 AI visual states (IDLE, LISTENING, THINKING, PLANNING, WORKING,
+  WAITING_FOR_PERMISSION, COMPLETED, ERROR, RECOVERING) — the
+  state colors are now in `aether-design-tokens` (6.1); this
+  sub-milestone covers the surfaces that consume them.
 - 6.5 AI Assistant Panel + AI Agent Workspace + AI Task View.
 - 6.6 AI visual states (IDLE, LISTENING, THINKING, PLANNING, WORKING,
   WAITING_FOR_PERMISSION, COMPLETED, ERROR, RECOVERING) — the
   state colors are now in `aether-design-tokens` (6.1); this
   sub-milestone covers the surfaces that consume them.
-- 6.7 Iconography (rounded-square, soft gradients, custom Aether language).
+- 6.6 AI visual states (IDLE, LISTENING, THINKING, PLANNING, WORKING,
+  WAITING_FOR_PERMISSION, COMPLETED, ERROR, RECOVERING) — the
+  state colors are now in `aether-design-tokens` (6.1) and the
+  consumer surfaces that read them shipped in 6.5 (the
+  Assistant Panel, the Agent Workspace, and the Task View all
+  drive their accents from `AiVisualState::color()`). 6.6
+  closes with the tray indicator on the taskbar (6.2's
+  `Taskbar` already has the `ai_tray_color(state: AiVisualState)
+  -> Color` helper — that's the consumer surface).
+- 6.7 **Iconography — COMPLETE**. New crate
+  `ui/aether-icons` defines the typed, non-painting
+  icon system. Every Aether surface that needs an
+  icon constructs an `Icon { kind, size, tint,
+  background, focused }` value and hands it to the
+  renderer; the renderer resolves the kind to a
+  glyph. The `IconKind` enum ships 38 kinds across
+  four families: app categories (Calculator /
+  Document / Notes / Folder / File / Image /
+  Music / Video / Settings / Terminal), AI glyphs
+  (Aether / Spark / Globe / Key / Gear), system /
+  tray (Network / Volume / Battery / Microphone /
+  Camera / Lock / Shield / Search), action /
+  control (Plus / Minus / Close / Back / Forward /
+  Check / Menu / Send / Refresh / Trash), and
+  status (Info / Warning / Error / Done / Pending).
+  Each kind has a §12 default tint (the AI glyphs
+  get the AI palette — Aether/Spark=lavender,
+  Key=yellow, Globe=blue, Gear=mint) and a default
+  background (tiles get a pastel; tray icons get
+  no background). `IconSize` covers the 4-px grid
+  (Xs=16, Sm=20, Md=24, Lg=32, Xl=40), with `Md`
+  as the §12 default. `IconBackground` is `None` /
+  `RoundedSquare` / `Circle`. 22 unit tests, 0
+  warnings, 0 clippy lints. Files:
+  `ui/aether-icons/src/lib.rs`.
 - 6.8 Animation system (150–300 ms; smooth, premium, non-aggressive) — the
   durations and easings are in `aether-design-tokens` (6.1);
   this sub-milestone covers the runtime animation engine.
