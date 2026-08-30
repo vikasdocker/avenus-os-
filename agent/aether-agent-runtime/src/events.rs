@@ -50,6 +50,29 @@ pub enum AgentEvent {
         action_id: String,
         reason: String,
     },
+    /// Emitted when a high-risk action is parked waiting for the
+    /// user (or a policy) to grant or deny approval. The action
+    /// is in `WaitingApproval` until a corresponding
+    /// `ApprovalGranted` or `ApprovalDenied` is published.
+    ApprovalRequested {
+        session_id: String,
+        action_id: String,
+        action_name: String,
+        risk_level: String,
+    },
+    /// Emitted when the user (or policy) granted an approval and
+    /// the host is about to run the action.
+    ApprovalGranted {
+        session_id: String,
+        action_id: String,
+    },
+    /// Emitted when an approval was denied. The session is moved
+    /// to `Cancelled`.
+    ApprovalDenied {
+        session_id: String,
+        action_id: String,
+        reason: String,
+    },
     ActionStarted {
         session_id: String,
         action_id: String,
@@ -85,6 +108,9 @@ impl AgentEvent {
             Self::ActionRequested { .. } => "agent.action.requested",
             Self::ActionApproved { .. } => "agent.action.approved",
             Self::ActionDenied { .. } => "agent.action.denied",
+            Self::ApprovalRequested { .. } => "agent.approval.requested",
+            Self::ApprovalGranted { .. } => "agent.approval.granted",
+            Self::ApprovalDenied { .. } => "agent.approval.denied",
             Self::ActionStarted { .. } => "agent.action.started",
             Self::ActionCompleted { .. } => "agent.action.completed",
             Self::ActionFailed { .. } => "agent.action.failed",

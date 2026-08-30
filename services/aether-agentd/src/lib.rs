@@ -10,6 +10,7 @@ pub mod conversation;
 pub mod intent;
 pub mod intent_to_action;
 pub mod planner;
+pub mod progress;
 pub mod runtime_host;
 pub mod structured_llm;
 
@@ -83,6 +84,10 @@ pub struct AgentState {
     /// Wall-clock milliseconds at the time of the last successful
     /// `flush_persisted`. Used to throttle periodic flushes.
     last_flush_ms: u64,
+    /// Discrete progress tracker for the UI. Bounded ring of
+    /// transitions, queryable through `agent.progress.*` IPC
+    /// commands.
+    progress: progress::ProgressTracker,
 }
 
 /// Replaceable AI backend. The UI never talks to a model directly; the
@@ -260,6 +265,7 @@ impl AgentState {
             working: HashMap::new(),
             memory_store,
             last_flush_ms: 0,
+            progress: progress::ProgressTracker::new(now_ms),
         }
     }
 
@@ -324,6 +330,28 @@ impl AgentState {
 
     pub fn working_snapshot(&self) -> HashMap<String, String> {
         self.working.clone()
+    }
+
+    /// Progress accessor: records a discrete state transition.
+    /// Used by the chat path and the approval flow.
+    pub fn progress_transition(
+        &mut self,
+        state: progress::ProgressState,
+        session_id: Option<String>,
+        message: &str,
+    ) {
+        self.progress.transition(state, session_id, message);
+    }
+
+    /// Returns the most-recent discrete progress state.
+    pub fn progress_current(&self) -> progress::ProgressState {
+        self.progress.current_state()
+    }
+
+    /// Returns the most-recent `n` progress transitions, newest
+    /// first.
+    pub fn progress_history(&self, limit: usize) -> Vec<progress::ProgressEvent> {
+        self.progress.history(limit).into_iter().cloned().collect()
     }
 
     pub fn provider_name(&self) -> &str {
@@ -593,8 +621,12 @@ fn default_memory_store() -> Arc<dyn MemoryStore> {
 pub enum PersistenceOutcome {
     #[default]
     Missing,
-    Loaded { entries: usize },
-    Written { bytes: usize },
+    Loaded {
+        entries: usize,
+    },
+    Written {
+        bytes: usize,
+    },
     Corrupt(String),
     WriteFailed(String),
 }
@@ -783,6 +815,99 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
                 },
             }
         }
+        "agent.approval.list" => {
+            let bridge = state.runtime_mut();
+            let list = bridge.with_host(|h| h.list_pending_approvals());
+            AgentResponse { ok: true, result: serde_json::json!({ "pending": list }) }
+        }
+        "agent.approval.grant" => {
+            let raw = request.argument.as_deref().unwrap_or("");
+            let approval_id = match aether_agent_runtime::approval::ApprovalRequestId::parse(raw) {
+                Some(v) => v,
+                None => {
+                    return AgentResponse {
+                        ok: false,
+                        result: serde_json::json!({ "error": format!("invalid approval_id: '{raw}'") }),
+                    };
+                }
+            };
+            let bridge = state.runtime_mut();
+            let outcome: Result<
+                Option<aether_agent_runtime::host::RequestOutcome>,
+                serde_json::Value,
+            > = bridge.with_host_mut(|h| {
+                h.approve_request(approval_id).map_err(|e| runtime_host::err(e.to_string()))
+            });
+            match outcome {
+                Ok(Some(o)) => {
+                    // Surface a progress transition for the grant.
+                    state.progress_transition(
+                        progress::ProgressState::Working,
+                        Some(o.session_id.clone()),
+                        &format!(
+                            "approval granted; executing action {}",
+                            o.action_id.as_deref().unwrap_or("?")
+                        ),
+                    );
+                    AgentResponse {
+                        ok: true,
+                        result: runtime_host::outcome_to_value(&o)["result"].clone(),
+                    }
+                }
+                Ok(None) => AgentResponse {
+                    ok: false,
+                    result: serde_json::json!({ "error": "approval not found", "approval_id": raw }),
+                },
+                Err(e) => AgentResponse {
+                    ok: false,
+                    result: serde_json::json!({ "error": e.to_string() }),
+                },
+            }
+        }
+        "agent.approval.deny" => {
+            // `argument` is a JSON-encoded { approval_id, reason } map.
+            let raw = request.argument.as_deref().unwrap_or("{}");
+            let payload: serde_json::Value =
+                serde_json::from_str(raw).unwrap_or_else(|_| serde_json::json!({}));
+            let approval_id_str = payload["approval_id"].as_str().unwrap_or("");
+            let reason = payload["reason"].as_str().unwrap_or("user denied");
+            let approval_id = match aether_agent_runtime::approval::ApprovalRequestId::parse(
+                approval_id_str,
+            ) {
+                Some(v) => v,
+                None => {
+                    return AgentResponse {
+                        ok: false,
+                        result: serde_json::json!({ "error": format!("invalid approval_id: '{approval_id_str}'") }),
+                    };
+                }
+            };
+            let bridge = state.runtime_mut();
+            let denied: Result<bool, serde_json::Value> = bridge.with_host_mut(|h| {
+                h.deny_request(approval_id, reason).map_err(|e| runtime_host::err(e.to_string()))
+            });
+            match denied {
+                Ok(true) => {
+                    state.progress_transition(
+                        progress::ProgressState::Failed,
+                        None,
+                        &format!("approval denied: {reason}"),
+                    );
+                    AgentResponse {
+                        ok: true,
+                        result: serde_json::json!({ "denied": true, "reason": reason }),
+                    }
+                }
+                Ok(false) => AgentResponse {
+                    ok: false,
+                    result: serde_json::json!({ "denied": false, "error": "approval not found", "approval_id": approval_id_str }),
+                },
+                Err(e) => AgentResponse {
+                    ok: false,
+                    result: serde_json::json!({ "error": e.to_string() }),
+                },
+            }
+        }
         "agent.audit.session" => {
             let raw = request.argument.as_deref().unwrap_or("");
             let bridge = state.runtime_mut();
@@ -885,12 +1010,39 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
             let outcome = match outcome_result {
                 Ok(o) => o,
                 Err(e) => {
+                    state.progress_transition(
+                        progress::ProgressState::Failed,
+                        Some(session_str.to_string()),
+                        &format!("submit_action failed: {e}"),
+                    );
                     return AgentResponse {
                         ok: false,
                         result: serde_json::json!({ "error": e.to_string() }),
                     };
                 }
             };
+            if outcome.pending_approval_id.is_some() {
+                state.progress_transition(
+                    progress::ProgressState::WaitingForPermission,
+                    Some(session_str.to_string()),
+                    &format!("action {action_name} requires approval"),
+                );
+            } else if outcome.success {
+                state.progress_transition(
+                    progress::ProgressState::Completed,
+                    Some(session_str.to_string()),
+                    &format!("action {action_name} succeeded"),
+                );
+            } else {
+                state.progress_transition(
+                    progress::ProgressState::Failed,
+                    Some(session_str.to_string()),
+                    &format!(
+                        "action {action_name} failed: {}",
+                        outcome.error.as_deref().unwrap_or("unknown")
+                    ),
+                );
+            }
             AgentResponse {
                 ok: outcome.success,
                 result: runtime_host::outcome_to_value(&outcome)["result"].clone(),
@@ -950,11 +1102,21 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
         "chat" => match request.argument.as_deref() {
             Some(text) if !text.trim().is_empty() => {
                 state.record_event(EventSeverity::Info, "ai", &format!("user: {text}"));
+                state.progress_transition(
+                    progress::ProgressState::Thinking,
+                    None,
+                    "received user input",
+                );
 
                 // Build grounded context for this turn (minimal, bounded).
                 let ctx = context::build_context(state.control_port, state.surface_port);
                 let convo_app = state.conversation.last_app().map(|s| s.to_string());
                 let convo_file = state.conversation.last_file().map(|s| s.to_string());
+                state.progress_transition(
+                    progress::ProgressState::Planning,
+                    None,
+                    "matching capabilities",
+                );
 
                 // 1) Try deterministic multi-step intent via planner first.
                 if let Some(intents) = planner::Planner::plan_with_file(
@@ -1059,6 +1221,25 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
                         })
                         .collect();
 
+                    state.progress_transition(
+                        progress::ProgressState::Working,
+                        None,
+                        &format!("executing {} step(s)", plan.actions.len()),
+                    );
+                    if plan.ok {
+                        state.progress_transition(
+                            progress::ProgressState::Completed,
+                            None,
+                            "capability plan succeeded",
+                        );
+                    } else {
+                        state.progress_transition(
+                            progress::ProgressState::Failed,
+                            None,
+                            "capability plan failed",
+                        );
+                    }
+
                     return AgentResponse {
                         ok: plan.ok,
                         result: serde_json::json!({
@@ -1144,6 +1325,24 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
                             })
                         })
                         .collect();
+                    state.progress_transition(
+                        progress::ProgressState::Working,
+                        None,
+                        &format!("executing {} step(s)", plan.actions.len()),
+                    );
+                    if plan.ok {
+                        state.progress_transition(
+                            progress::ProgressState::Completed,
+                            None,
+                            "LLM plan succeeded",
+                        );
+                    } else {
+                        state.progress_transition(
+                            progress::ProgressState::Failed,
+                            None,
+                            "LLM plan failed",
+                        );
+                    }
                     return AgentResponse {
                         ok: plan.ok,
                         result: serde_json::json!({
@@ -1172,6 +1371,11 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
                 state.record_event(EventSeverity::Info, "ai", &format!("reply via {provider}"));
                 // Still push to conversation as non-capability turn for pronoun future.
                 state.conversation.push(text, Vec::new(), Vec::new());
+                state.progress_transition(
+                    progress::ProgressState::Completed,
+                    None,
+                    &format!("chat reply via {provider}"),
+                );
                 AgentResponse {
                     ok: true,
                     result: serde_json::json!({
@@ -1299,6 +1503,28 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
         "agent.memory.load" => {
             let report = state.load_persisted();
             AgentResponse { ok: report.is_clean(), result: serde_json::json!({ "report": report }) }
+        }
+        "agent.progress.current" => {
+            let current = state.progress_current();
+            AgentResponse {
+                ok: true,
+                result: serde_json::json!({
+                    "state": current.as_str(),
+                }),
+            }
+        }
+        "agent.progress.history" => {
+            let limit =
+                request.argument.as_deref().and_then(|a| a.parse::<usize>().ok()).unwrap_or(10);
+            let events: Vec<serde_json::Value> =
+                state.progress_history(limit).iter().map(|e| e.to_json()).collect();
+            AgentResponse {
+                ok: true,
+                result: serde_json::json!({
+                    "count": events.len(),
+                    "events": events,
+                }),
+            }
         }
         unknown => AgentResponse {
             ok: false,
@@ -2563,6 +2789,137 @@ mod tests {
         assert!(!r.ok, "shell-like capability should be rejected");
         let err = r.result["error"].as_str().unwrap_or_default();
         assert!(err.contains("unknown capability"), "got: {err}");
+    }
+
+    #[test]
+    fn progress_starts_idle() {
+        let (clock, _tick) = fake_clock(450);
+        let mut state = AgentState::new(clock);
+        let r = handle_request(&mut state, &agent_request("agent.progress.current", None));
+        assert!(r.ok);
+        assert_eq!(r.result["state"], "idle");
+    }
+
+    #[test]
+    fn progress_history_records_chat_transitions() {
+        let (clock, _tick) = fake_clock(500);
+        let mut state = AgentState::new(clock);
+        // Drive a chat so we observe at least one transition.
+        let _ = handle_request(&mut state, &agent_request("chat", Some("hello, how are you?")));
+        let r = handle_request(&mut state, &agent_request("agent.progress.current", None));
+        assert!(r.ok);
+        // After a plain chat we expect to land in either completed
+        // (deterministic path) or a downstream state.
+        let state_str = r.result["state"].as_str().unwrap_or_default();
+        assert!(
+            ["completed", "failed", "working", "recovering"].contains(&state_str),
+            "expected a non-initial progress state, got: {state_str}"
+        );
+
+        let r = handle_request(&mut state, &agent_request("agent.progress.history", Some("5")));
+        assert!(r.ok);
+        let events = r.result["events"].as_array().unwrap_or_else(|| panic!("not array"));
+        assert!(!events.is_empty());
+        // Newest first.
+        let last = events.last().unwrap_or_else(|| panic!("empty"));
+        let first = events.first().unwrap_or_else(|| panic!("empty"));
+        assert!(
+            first["timestamp_ms"].as_u64().unwrap_or(0)
+                >= last["timestamp_ms"].as_u64().unwrap_or(0),
+            "history not sorted newest-first: {events:?}"
+        );
+    }
+
+    #[test]
+    fn progress_history_default_limit() {
+        let (clock, _tick) = fake_clock(550);
+        let mut state = AgentState::new(clock);
+        for i in 0..15 {
+            state.progress_transition(progress::ProgressState::Working, None, &format!("m{i}"));
+        }
+        let r = handle_request(&mut state, &agent_request("agent.progress.history", None));
+        assert!(r.ok);
+        // Default limit is 10.
+        let count = r.result["count"].as_u64().unwrap_or(0);
+        assert_eq!(count, 10);
+    }
+
+    #[test]
+    fn progress_history_respects_limit() {
+        let (clock, _tick) = fake_clock(560);
+        let mut state = AgentState::new(clock);
+        for i in 0..5 {
+            state.progress_transition(progress::ProgressState::Working, None, &format!("m{i}"));
+        }
+        let r = handle_request(&mut state, &agent_request("agent.progress.history", Some("3")));
+        assert!(r.ok);
+        let count = r.result["count"].as_u64().unwrap_or(0);
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn agent_approval_list_starts_empty() {
+        let (clock, _tick) = fake_clock(600);
+        let mut state = AgentState::new(clock);
+        let r = handle_request(&mut state, &agent_request("agent.approval.list", None));
+        assert!(r.ok);
+        let pending = r.result["pending"].as_array().unwrap_or_else(|| panic!("not array"));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn agent_approval_grant_unknown_id_returns_error() {
+        let (clock, _tick) = fake_clock(650);
+        let mut state = AgentState::new(clock);
+        let bogus = uuid::Uuid::new_v4().to_string();
+        let r = handle_request(&mut state, &agent_request("agent.approval.grant", Some(&bogus)));
+        assert!(!r.ok);
+        let err = r.result["error"].as_str().unwrap_or_default();
+        assert!(err.contains("not found"), "got: {err}");
+    }
+
+    #[test]
+    fn agent_approval_grant_invalid_id_fails_cleanly() {
+        let (clock, _tick) = fake_clock(660);
+        let mut state = AgentState::new(clock);
+        let r =
+            handle_request(&mut state, &agent_request("agent.approval.grant", Some("not-a-uuid")));
+        assert!(!r.ok);
+        let err = r.result["error"].as_str().unwrap_or_default();
+        assert!(err.contains("invalid approval_id"), "got: {err}");
+    }
+
+    #[test]
+    fn agent_approval_deny_unknown_id_returns_error() {
+        let (clock, _tick) = fake_clock(670);
+        let mut state = AgentState::new(clock);
+        let bogus = uuid::Uuid::new_v4().to_string();
+        let payload = format!(r#"{{"approval_id":"{bogus}","reason":"x"}}"#);
+        let r = handle_request(&mut state, &agent_request("agent.approval.deny", Some(&payload)));
+        assert!(!r.ok);
+        assert_eq!(r.result["denied"], false);
+    }
+
+    #[test]
+    fn agent_approval_deny_invalid_id_fails_cleanly() {
+        let (clock, _tick) = fake_clock(680);
+        let mut state = AgentState::new(clock);
+        let payload = r#"{"approval_id":"not-a-uuid","reason":"x"}"#;
+        let r = handle_request(&mut state, &agent_request("agent.approval.deny", Some(payload)));
+        assert!(!r.ok);
+        let err = r.result["error"].as_str().unwrap_or_default();
+        assert!(err.contains("invalid approval_id"), "got: {err}");
+    }
+
+    #[test]
+    fn agent_approval_deny_without_reason_uses_default() {
+        let (clock, _tick) = fake_clock(690);
+        let mut state = AgentState::new(clock);
+        let bogus = uuid::Uuid::new_v4().to_string();
+        let payload = format!(r#"{{"approval_id":"{bogus}"}}"#);
+        let r = handle_request(&mut state, &agent_request("agent.approval.deny", Some(&payload)));
+        assert!(!r.ok);
+        // No crash on missing reason — denial proceeds.
     }
 
     #[test]

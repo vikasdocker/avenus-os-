@@ -171,6 +171,9 @@ pub fn outcome_to_value(o: &RequestOutcome) -> Value {
     if let Some(e) = &o.error {
         result.insert("error".to_string(), Value::String(e.clone()));
     }
+    if let Some(pid) = &o.pending_approval_id {
+        result.insert("pending_approval_id".to_string(), Value::String(pid.clone()));
+    }
     ok(Value::Object(result))
 }
 

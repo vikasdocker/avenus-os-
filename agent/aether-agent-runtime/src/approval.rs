@@ -4,6 +4,8 @@
 // The API exists for future UI/voice integration.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// Unique approval request identifier.
@@ -14,11 +16,36 @@ impl ApprovalRequestId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Returns the underlying UUID. The host and the daemon need
+    /// this to render ids in the audit log and IPC payloads.
+    pub fn as_uuid(&self) -> Uuid {
+        self.0
+    }
+
+    /// Parses an `ApprovalRequestId` from a UUID string. Returns
+    /// `None` if the input is not a valid UUID.
+    pub fn parse(s: &str) -> Option<Self> {
+        Uuid::parse_str(s).ok().map(Self)
+    }
 }
 
 impl Default for ApprovalRequestId {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl fmt::Display for ApprovalRequestId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for ApprovalRequestId {
+    type Err = uuid::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Uuid::parse_str(s).map(Self)
     }
 }
 
