@@ -23,6 +23,10 @@ use aether_update_core::{plan_from_signed_update, UpdateAction, UpdatePlanError,
 use aether_agent_core::{
     AgentStatus, Observation, Proposal, ProposalError, TaskId,
 };
+use aether_device_core::{
+    DeviceClass, DeviceFingerprint, DeviceId, DeviceRegistry, DeviceRegistryError, PairingCode,
+    PairingGrant, PairingState,
+};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -455,6 +459,7 @@ fn dispatch(
     update_status: &Mutex<UpdateStatus>,
     version_policy: &Mutex<VersionPolicy>,
     agent_status: &Mutex<AgentStatus>,
+    device_registry: &Mutex<DeviceRegistry>,
     started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
@@ -477,6 +482,7 @@ fn dispatch(
         update_status,
         version_policy,
         agent_status,
+        device_registry,
         started_at,
         req,
     );
@@ -546,6 +552,7 @@ fn dispatch_inner(
     update_status: &Mutex<UpdateStatus>,
     version_policy: &Mutex<VersionPolicy>,
     agent_status: &Mutex<AgentStatus>,
+    device_registry: &Mutex<DeviceRegistry>,
     started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
@@ -2466,6 +2473,572 @@ fn dispatch_inner(
                 serde_json::json!({ "task": task_json }),
             )
         }
+        // ----- Devices (Phase 14) -----
+        //
+        // The future device runtime is the
+        // only thing that will talk to a real
+        // network. Today the shell exposes the
+        // registry, the pairing state machine,
+        // and a typed delivery gate. Every
+        // command here is purely a contract
+        // for the future runtime to drive.
+        "device.list" => {
+            // Read-only view of the registry.
+            // Returns the registered devices
+            // sorted by id, with a separate
+            // `paired` list for the subset the
+            // local agent trusts.
+            let registry = match device_registry.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let devices: Vec<serde_json::Value> = registry
+                .devices()
+                .iter()
+                .filter_map(|d| serde_json::to_value(d).ok())
+                .collect();
+            let paired: Vec<serde_json::Value> = registry
+                .paired()
+                .iter()
+                .filter_map(|d| serde_json::to_value(d).ok())
+                .collect();
+            IpcResponse::ok(
+                "device.list",
+                serde_json::json!({
+                    "devices": devices,
+                    "paired": paired,
+                    "total": devices.len(),
+                    "paired_count": paired.len(),
+                    "capacity": registry.capacity(),
+                }),
+            )
+        }
+        "device.register" => {
+            // Registers a new device in the
+            // `Available` state. The caller
+            // supplies the device id, class,
+            // public-key fingerprint, and the
+            // grant. The shell does not
+            // validate the fingerprint (the
+            // future runtime owns the
+            // out-of-band key check); it just
+            // stores it.
+            let id = match req.parameters.get("device_id").and_then(|v| v.as_str()) {
+                Some(s) => s.to_string(),
+                None => {
+                    return IpcResponse::err(
+                        "device.register",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'device_id' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let class_str = match req
+                .parameters
+                .get("device_class")
+                .and_then(|v| v.as_str())
+            {
+                Some(s) => s.to_string(),
+                None => {
+                    return IpcResponse::err(
+                        "device.register",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'device_class' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let class = match class_str.as_str() {
+                "phone" => DeviceClass::Phone,
+                "tablet" => DeviceClass::Tablet,
+                "laptop" => DeviceClass::Laptop,
+                "desktop" => DeviceClass::Desktop,
+                "iot" => DeviceClass::Iot,
+                "server" => DeviceClass::Server,
+                "external" => DeviceClass::External,
+                "other" => DeviceClass::Other,
+                other => {
+                    return IpcResponse::err(
+                        "device.register",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: format!("unknown device class '{other}'"),
+                        },
+                    );
+                }
+            };
+            let fp_hex = match req
+                .parameters
+                .get("fingerprint")
+                .and_then(|v| v.as_str())
+            {
+                Some(s) => s.to_string(),
+                None => {
+                    return IpcResponse::err(
+                        "device.register",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'fingerprint' is required (64 hex chars)"
+                                .to_string(),
+                        },
+                    );
+                }
+            };
+            let fp_bytes = match decode_hex_32(&fp_hex) {
+                Some(b) => b,
+                None => {
+                    return IpcResponse::err(
+                        "device.register",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "fingerprint must be 64 hex chars".to_string(),
+                        },
+                    );
+                }
+            };
+            let grant = if req.parameters.get("grant").is_some() {
+                match serde_json::from_value::<PairingGrant>(
+                    req.parameters["grant"].clone(),
+                ) {
+                    Ok(g) => g,
+                    Err(e) => {
+                        return IpcResponse::err(
+                            "device.register",
+                            IpcError {
+                                code: "INVALID_INPUT".to_string(),
+                                message: format!("grant decode: {e}"),
+                            },
+                        );
+                    }
+                }
+            } else {
+                PairingGrant::default()
+            };
+            let device_id = match DeviceId::new(id.clone()) {
+                Some(d) => d,
+                None => {
+                    return IpcResponse::err(
+                        "device.register",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "device id is empty or too long".to_string(),
+                        },
+                    );
+                }
+            };
+            let now = unix_ms().min(u128::from(u64::MAX)) as u64;
+            let mut registry = match device_registry.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            match registry.register(
+                device_id,
+                class,
+                DeviceFingerprint::from_bytes(fp_bytes),
+                grant,
+                now,
+            ) {
+                Ok(()) => IpcResponse::ok(
+                    "device.register",
+                    serde_json::json!({ "id": id, "state": "available" }),
+                ),
+                Err(e) => {
+                    let code = match &e {
+                        DeviceRegistryError::Full => "REGISTRY_FULL",
+                        DeviceRegistryError::AlreadyRegistered => "ALREADY_REGISTERED",
+                        DeviceRegistryError::UnknownDevice => "UNKNOWN_DEVICE",
+                    };
+                    IpcResponse::err(
+                        "device.register",
+                        IpcError {
+                            code: code.to_string(),
+                            message: e.to_string(),
+                        },
+                    )
+                }
+            }
+        }
+        "device.pair.begin" => {
+            // Moves a device from `Available`
+            // (or `Revoked` / `Expired`) into
+            // the `Pairing` state. The
+            // handshake is the future runtime's
+            // responsibility; the shell only
+            // tracks the state.
+            let id = match req.parameters.get("device_id").and_then(|v| v.as_str()) {
+                Some(s) => s.to_string(),
+                None => {
+                    return IpcResponse::err(
+                        "device.pair.begin",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'device_id' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let device_id = match DeviceId::new(id.clone()) {
+                Some(d) => d,
+                None => {
+                    return IpcResponse::err(
+                        "device.pair.begin",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "device id is empty or too long".to_string(),
+                        },
+                    );
+                }
+            };
+            let now = unix_ms().min(u128::from(u64::MAX)) as u64;
+            let mut registry = match device_registry.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            // Reject if not in a state that
+            // can start a new pairing.
+            let current = match registry.get(&device_id) {
+                Some(d) => d.pairing.state,
+                None => {
+                    return IpcResponse::err(
+                        "device.pair.begin",
+                        IpcError {
+                            code: "NOT_FOUND".to_string(),
+                            message: format!("device '{id}' is not registered"),
+                        },
+                    );
+                }
+            };
+            if !matches!(current, PairingState::Available | PairingState::Cancelled) {
+                return IpcResponse::err(
+                    "device.pair.begin",
+                    IpcError {
+                        code: "INVALID_STATE".to_string(),
+                        message: format!(
+                            "device is in '{}' state; only Available or Cancelled can begin pairing",
+                            current.as_str()
+                        ),
+                    },
+                );
+            }
+            match registry.transition(&device_id, PairingState::Pairing, now) {
+                Ok(()) => IpcResponse::ok(
+                    "device.pair.begin",
+                    serde_json::json!({ "id": id, "state": "pairing" }),
+                ),
+                Err(e) => IpcResponse::err(
+                    "device.pair.begin",
+                    IpcError {
+                        code: "REGISTRY_ERROR".to_string(),
+                        message: e.to_string(),
+                    },
+                ),
+            }
+        }
+        "device.pair.complete" => {
+            // Validates a `PairingAcceptance`
+            // against a `PairingRequest` and,
+            // if they match, flips the device
+            // from `Pairing` to `Paired`.
+            // Returns the new state on
+            // success.
+            let request = match req
+                .parameters
+                .get("request")
+                .cloned()
+            {
+                Some(v) => v,
+                None => {
+                    return IpcResponse::err(
+                        "device.pair.complete",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'request' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let acceptance = match req
+                .parameters
+                .get("acceptance")
+                .cloned()
+            {
+                Some(v) => v,
+                None => {
+                    return IpcResponse::err(
+                        "device.pair.complete",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'acceptance' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let request: aether_device_core::PairingRequest =
+                match serde_json::from_value(request) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return IpcResponse::err(
+                            "device.pair.complete",
+                            IpcError {
+                                code: "INVALID_INPUT".to_string(),
+                                message: format!("request decode: {e}"),
+                            },
+                        );
+                    }
+                };
+            let acceptance: aether_device_core::PairingAcceptance =
+                match serde_json::from_value(acceptance) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        return IpcResponse::err(
+                            "device.pair.complete",
+                            IpcError {
+                                code: "INVALID_INPUT".to_string(),
+                                message: format!("acceptance decode: {e}"),
+                            },
+                        );
+                    }
+                };
+            // The local-side `code` is the
+            // 6-digit pairing code the user
+            // reads on the local device. The
+            // future runtime produces it; for
+            // now we accept an optional
+            // `local_code` parameter and
+            // default to the request's code
+            // (the IPC caller is the trust
+            // anchor in tests).
+            let local_code = match req
+                .parameters
+                .get("local_code")
+                .and_then(|v| v.as_str())
+            {
+                Some(s) => match PairingCode::new(s) {
+                    Some(c) => c,
+                    None => {
+                        return IpcResponse::err(
+                            "device.pair.complete",
+                            IpcError {
+                                code: "INVALID_INPUT".to_string(),
+                                message: "local_code is not a 6-digit decimal"
+                                    .to_string(),
+                            },
+                        );
+                    }
+                },
+                None => request.code,
+            };
+            // The acceptance's `code` must
+            // match the request's. We use
+            // `validate_acceptance` but supply
+            // a request whose code is the
+            // local code; the local code must
+            // equal the request's code, and
+            // the acceptance's code must equal
+            // the local code. Simpler: build
+            // a "synthetic" request whose code
+            // is the local one and validate.
+            let synthetic = aether_device_core::PairingRequest {
+                device_id: request.device_id.clone(),
+                device_class: request.device_class,
+                fingerprint: request.fingerprint,
+                code: local_code,
+                grant: request.grant.clone(),
+                timestamp_ms: request.timestamp_ms,
+            };
+            let now = unix_ms().min(u128::from(u64::MAX)) as u64;
+            // 60-second skew window for tests.
+            if let Err(e) = aether_device_core::pairing::validate_acceptance(
+                &synthetic,
+                &acceptance,
+                60_000,
+                now,
+            ) {
+                let code = match &e {
+                    aether_device_core::PairingError::CodeMismatch => "CODE_MISMATCH",
+                    aether_device_core::PairingError::FingerprintMismatch => {
+                        "FINGERPRINT_MISMATCH"
+                    }
+                    aether_device_core::PairingError::IdentityMismatch => "IDENTITY_MISMATCH",
+                    aether_device_core::PairingError::RequestExpired => "REQUEST_EXPIRED",
+                    aether_device_core::PairingError::AlreadyPaired => "ALREADY_PAIRED",
+                    aether_device_core::PairingError::TerminalState => "TERMINAL_STATE",
+                };
+                return IpcResponse::err(
+                    "device.pair.complete",
+                    IpcError {
+                        code: code.to_string(),
+                        message: e.to_string(),
+                    },
+                );
+            }
+            // Move the device from `Pairing`
+            // to `Paired`. If the device is
+            // not in `Pairing` (e.g. the user
+            // cancelled), refuse.
+            let mut registry = match device_registry.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let device_id = match DeviceId::new(acceptance.device_id.as_str()) {
+                Some(d) => d,
+                None => {
+                    return IpcResponse::err(
+                        "device.pair.complete",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "device id is empty or too long".to_string(),
+                        },
+                    );
+                }
+            };
+            let current = match registry.get(&device_id) {
+                Some(d) => d.pairing.state,
+                None => {
+                    return IpcResponse::err(
+                        "device.pair.complete",
+                        IpcError {
+                            code: "NOT_FOUND".to_string(),
+                            message: format!("device '{}' is not registered", acceptance.device_id.as_str()),
+                        },
+                    );
+                }
+            };
+            if current != PairingState::Pairing {
+                return IpcResponse::err(
+                    "device.pair.complete",
+                    IpcError {
+                        code: "INVALID_STATE".to_string(),
+                        message: format!(
+                            "device is in '{}' state; only Pairing can be completed",
+                            current.as_str()
+                        ),
+                    },
+                );
+            }
+            match registry.transition(&device_id, PairingState::Paired, now) {
+                Ok(()) => IpcResponse::ok(
+                    "device.pair.complete",
+                    serde_json::json!({
+                        "id": acceptance.device_id.as_str(),
+                        "state": "paired",
+                    }),
+                ),
+                Err(e) => IpcResponse::err(
+                    "device.pair.complete",
+                    IpcError {
+                        code: "REGISTRY_ERROR".to_string(),
+                        message: e.to_string(),
+                    },
+                ),
+            }
+        }
+        "device.revoke" => {
+            // Moves a device into `Revoked`
+            // state. The future runtime can
+            // later unregister the device
+            // entirely.
+            let id = match req.parameters.get("device_id").and_then(|v| v.as_str()) {
+                Some(s) => s.to_string(),
+                None => {
+                    return IpcResponse::err(
+                        "device.revoke",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'device_id' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let device_id = match DeviceId::new(id.clone()) {
+                Some(d) => d,
+                None => {
+                    return IpcResponse::err(
+                        "device.revoke",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "device id is empty or too long".to_string(),
+                        },
+                    );
+                }
+            };
+            let now = unix_ms().min(u128::from(u64::MAX)) as u64;
+            let mut registry = match device_registry.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if registry.get(&device_id).is_none() {
+                return IpcResponse::err(
+                    "device.revoke",
+                    IpcError {
+                        code: "NOT_FOUND".to_string(),
+                        message: format!("device '{id}' is not registered"),
+                    },
+                );
+            }
+            match registry.transition(&device_id, PairingState::Revoked, now) {
+                Ok(()) => IpcResponse::ok(
+                    "device.revoke",
+                    serde_json::json!({ "id": id, "state": "revoked" }),
+                ),
+                Err(e) => IpcResponse::err(
+                    "device.revoke",
+                    IpcError {
+                        code: "REGISTRY_ERROR".to_string(),
+                        message: e.to_string(),
+                    },
+                ),
+            }
+        }
+        "device.unregister" => {
+            // Removes a device from the
+            // registry entirely. Returns the
+            // removed entry.
+            let id = match req.parameters.get("device_id").and_then(|v| v.as_str()) {
+                Some(s) => s.to_string(),
+                None => {
+                    return IpcResponse::err(
+                        "device.unregister",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'device_id' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let device_id = match DeviceId::new(id.clone()) {
+                Some(d) => d,
+                None => {
+                    return IpcResponse::err(
+                        "device.unregister",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "device id is empty or too long".to_string(),
+                        },
+                    );
+                }
+            };
+            let mut registry = match device_registry.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            match registry.unregister(&device_id) {
+                Some(entry) => IpcResponse::ok(
+                    "device.unregister",
+                    serde_json::json!({ "id": id, "removed": serde_json::to_value(&entry).ok() }),
+                ),
+                None => IpcResponse::err(
+                    "device.unregister",
+                    IpcError {
+                        code: "NOT_FOUND".to_string(),
+                        message: format!("device '{id}' is not registered"),
+                    },
+                ),
+            }
+        }
         other => IpcResponse::err(
             other,
             IpcError {
@@ -2599,6 +3172,12 @@ fn main() {
     // machine; today the shell only stores
     // observations, proposals, and tasks.
     let agent_status = Mutex::new(AgentStatus::new());
+    // Phase 14: paired-device registry. The
+    // future device runtime owns the
+    // transport and the persistence; today
+    // the shell only stores the in-memory
+    // map of registered peers.
+    let device_registry = Mutex::new(DeviceRegistry::new());
 
     let listener = match std::net::TcpListener::bind((bind_addr.as_str(), port)) {
         Ok(l) => l,
@@ -2644,6 +3223,7 @@ fn main() {
                         &update_status,
                         &version_policy,
                         &agent_status,
+                        &device_registry,
                         started_at,
                         &req,
                     )
@@ -2675,6 +3255,7 @@ fn main() {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::type_complexity)]
 mod dispatch_policy_tests {
     //! Integration tests for the policy gate wired into `dispatch_inner`.
     //!
@@ -2757,6 +3338,7 @@ mod dispatch_policy_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::type_complexity)]
 mod audit_chain_tests {
     //! Tests for the tamper-evident audit chain wired into
     //! `record_audit`. The chain is exercised directly here
@@ -2846,6 +3428,7 @@ mod audit_chain_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::type_complexity)]
 mod credentials_ipc_tests {
     //! Integration tests for the credentials.* IPC commands.
     //!
@@ -2860,6 +3443,7 @@ mod credentials_ipc_tests {
     use super::dispatch_inner;
     use aether_agent_core::AgentStatus;
     use aether_update_core::{UpdateStatus, VersionPolicy};
+    use aether_device_core::DeviceRegistry;
     use aether_application_manager::ApplicationManager;
     use aether_core::ipc::{ActorTrust, IpcRequest};
     use aether_security::audit::{AuditChain, RetentionPolicy};
@@ -2874,6 +3458,10 @@ mod credentials_ipc_tests {
         FileManager,
         Mutex<AuditChain>,
         Mutex<SealedStore<StaticKeyProvider>>,
+        Mutex<UpdateStatus>,
+        Mutex<VersionPolicy>,
+        Mutex<AgentStatus>,
+        Mutex<DeviceRegistry>,
     ) {
         // The credentials tests never reach the manager
         // (every command is short-circuited by the IPC
@@ -2886,7 +3474,11 @@ mod credentials_ipc_tests {
             .expect("workspace init");
         let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
         let store = Mutex::new(SealedStore::new(StaticKeyProvider::new([0x55u8; 32])));
-        (manager, apps, files, chain, store)
+        let status = Mutex::new(UpdateStatus::new());
+        let policy = Mutex::new(VersionPolicy::default());
+        let agent = Mutex::new(AgentStatus::new());
+        let registry = Mutex::new(DeviceRegistry::new());
+        (manager, apps, files, chain, store, status, policy, agent, registry)
     }
 
     fn req(command: &str, params: serde_json::Value) -> IpcRequest {
@@ -2900,7 +3492,7 @@ mod credentials_ipc_tests {
 
     #[test]
     fn seal_then_unseal_round_trip_via_ipc() {
-        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let (mut mgr, mut apps, mut files, chain, store, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
 
         // Seal.
@@ -2919,9 +3511,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -2936,9 +3529,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -2948,7 +3542,7 @@ mod credentials_ipc_tests {
 
     #[test]
     fn seal_rejects_missing_inputs() {
-        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let (mut mgr, mut apps, mut files, chain, store, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req("credentials.seal", serde_json::json!({}));
         let resp = dispatch_inner(
@@ -2958,9 +3552,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -2970,7 +3565,7 @@ mod credentials_ipc_tests {
 
     #[test]
     fn seal_rejects_duplicate_by_default() {
-        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let (mut mgr, mut apps, mut files, chain, store, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r1 = req(
             "credentials.seal",
@@ -2983,9 +3578,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r1,
         );
@@ -3000,9 +3596,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r2,
         );
@@ -3012,7 +3609,7 @@ mod credentials_ipc_tests {
 
     #[test]
     fn list_returns_sorted_names() {
-        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let (mut mgr, mut apps, mut files, chain, store, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         for (name, value) in [("zeta", "z"), ("alpha", "a"), ("mu", "m")] {
             let r = req(
@@ -3026,9 +3623,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3041,9 +3639,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3057,7 +3656,7 @@ mod credentials_ipc_tests {
 
     #[test]
     fn metadata_returns_label_and_length_only() {
-        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let (mut mgr, mut apps, mut files, chain, store, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "credentials.seal",
@@ -3070,9 +3669,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3084,9 +3684,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3100,7 +3701,7 @@ mod credentials_ipc_tests {
 
     #[test]
     fn metadata_for_unknown_name_is_not_found() {
-        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let (mut mgr, mut apps, mut files, chain, store, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req("credentials.metadata", serde_json::json!({ "name": "nope" }));
         let resp = dispatch_inner(
@@ -3110,9 +3711,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3122,7 +3724,7 @@ mod credentials_ipc_tests {
 
     #[test]
     fn remove_drops_the_credential() {
-        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let (mut mgr, mut apps, mut files, chain, store, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "credentials.seal",
@@ -3135,9 +3737,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3149,9 +3752,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3166,9 +3770,10 @@ mod credentials_ipc_tests {
             &chain,
             &store,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3203,6 +3808,7 @@ mod credentials_ipc_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::type_complexity)]
 mod trust_store_ipc_tests {
     //! Integration tests for the `manifest.trust_store` IPC
     //! command. The trust store is wired into
@@ -3212,6 +3818,7 @@ mod trust_store_ipc_tests {
     use super::dispatch_inner;
     use aether_agent_core::AgentStatus;
     use aether_update_core::{UpdateStatus, VersionPolicy};
+    use aether_device_core::DeviceRegistry;
     use aether_application_manager::ApplicationManager;
     use aether_core::ipc::{ActorTrust, IpcRequest};
     use aether_security::audit::{AuditChain, RetentionPolicy};
@@ -3229,6 +3836,10 @@ mod trust_store_ipc_tests {
         FileManager,
         Mutex<AuditChain>,
         Mutex<SealedStore<StaticKeyProvider>>,
+        Mutex<UpdateStatus>,
+        Mutex<VersionPolicy>,
+        Mutex<AgentStatus>,
+        Mutex<DeviceRegistry>,
     ) {
         let graph = aether_system_core::graph::DependencyGraph::new(&[]).expect("empty");
         let manager = aether_system_core::manager::ServiceManager::new(graph);
@@ -3237,13 +3848,17 @@ mod trust_store_ipc_tests {
             .expect("workspace");
         let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
         let creds = Mutex::new(SealedStore::new(StaticKeyProvider::new([0x77u8; 32])));
+        let status = Mutex::new(UpdateStatus::new());
+        let policy = Mutex::new(VersionPolicy::default());
+        let agent = Mutex::new(AgentStatus::new());
+        let registry = Mutex::new(DeviceRegistry::new());
         // Stash the trust store in a thread-local so the
         // helper closure inside the test can read it. A
         // cleaner refactor would thread the store through
         // a real test harness; for now the local keeps
         // the existing env() shape unchanged.
         let _ = store; // store is passed via env_with_trust_store below
-        (manager, apps, files, chain, creds)
+        (manager, apps, files, chain, creds, status, policy, agent, registry)
     }
 
     fn req(command: &str, params: serde_json::Value) -> IpcRequest {
@@ -3257,11 +3872,11 @@ mod trust_store_ipc_tests {
 
     #[test]
     fn trust_store_command_reports_disabled_when_none() {
-        let (mut mgr, mut apps, mut files, chain, creds) = env_with_trust(None);
+        let (mut mgr, mut apps, mut files, chain, creds, _status, _policy, _agent, _registry) = env_with_trust(None);
         let started_at = SystemTime::now();
         let r = req("manifest.trust_store", serde_json::json!({}));
         let resp =
-            dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &creds, None, &Mutex::new(UpdateStatus::new()), &Mutex::new(VersionPolicy::default()), &Mutex::new(AgentStatus::new()), started_at, &r);
+            dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &creds, None, &Mutex::new(UpdateStatus::new()), &Mutex::new(VersionPolicy::default()), &Mutex::new(AgentStatus::new()), &Mutex::new(DeviceRegistry::new()), started_at, &r);
         assert!(resp.ok);
         assert_eq!(resp.result["enabled"], serde_json::json!(false));
         assert_eq!(resp.result["count"], serde_json::json!(0));
@@ -3269,7 +3884,7 @@ mod trust_store_ipc_tests {
 
     #[test]
     fn trust_store_command_reports_fingerprints_when_loaded() {
-        let (mut mgr, mut apps, mut files, chain, creds) = env_with_trust(None);
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env_with_trust(None);
         let started_at = SystemTime::now();
         let signer = Ed25519ManifestSigner::generate();
         let mut trust = TrustStore::new();
@@ -3282,9 +3897,10 @@ mod trust_store_ipc_tests {
             &chain,
             &creds,
             Some(&trust),
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3298,6 +3914,7 @@ mod trust_store_ipc_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::type_complexity)]
 mod update_ipc_tests {
     //! Integration tests for the `update.verify` and
     //! `update.fingerprint` IPC commands. The verifier
@@ -3313,6 +3930,7 @@ mod update_ipc_tests {
     use super::{base64_decode, base64_encode, dispatch_inner};
     use aether_agent_core::AgentStatus;
     use aether_update_core::{UpdateStatus, VersionPolicy};
+    use aether_device_core::DeviceRegistry;
     use aether_application_manager::ApplicationManager;
     use aether_core::ipc::{ActorTrust, IpcRequest};
     use aether_security::audit::{AuditChain, RetentionPolicy};
@@ -3328,6 +3946,10 @@ mod update_ipc_tests {
         FileManager,
         Mutex<AuditChain>,
         Mutex<SealedStore<StaticKeyProvider>>,
+        Mutex<UpdateStatus>,
+        Mutex<VersionPolicy>,
+        Mutex<AgentStatus>,
+        Mutex<DeviceRegistry>,
     ) {
         let graph = aether_system_core::graph::DependencyGraph::new(&[]).expect("empty");
         let manager = aether_system_core::manager::ServiceManager::new(graph);
@@ -3335,7 +3957,11 @@ mod update_ipc_tests {
         let files = FileManager::new(WorkspaceConfig::from_env_or_default()).expect("workspace");
         let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
         let creds = Mutex::new(SealedStore::new(StaticKeyProvider::new([0x55u8; 32])));
-        (manager, apps, files, chain, creds)
+        let status = Mutex::new(UpdateStatus::new());
+        let policy = Mutex::new(VersionPolicy::default());
+        let agent = Mutex::new(AgentStatus::new());
+        let registry = Mutex::new(DeviceRegistry::new());
+        (manager, apps, files, chain, creds, status, policy, agent, registry)
     }
 
     fn req(command: &str, params: serde_json::Value) -> IpcRequest {
@@ -3357,7 +3983,7 @@ mod update_ipc_tests {
 
     #[test]
     fn update_fingerprint_returns_32_hex_chars() {
-        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let signer = UpdateSigner::generate();
         let pk_hex = hex_lower(&signer.public_key_bytes());
@@ -3369,9 +3995,10 @@ mod update_ipc_tests {
             &chain,
             &creds,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3383,7 +4010,7 @@ mod update_ipc_tests {
 
     #[test]
     fn update_fingerprint_rejects_bad_hex() {
-        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "update.fingerprint",
@@ -3396,9 +4023,10 @@ mod update_ipc_tests {
             &chain,
             &creds,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3413,7 +4041,7 @@ mod update_ipc_tests {
         // truncated public key. (Curve checks are
         // delegated to ed25519-dalek, which is
         // permissive; we do not duplicate that here.)
-        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "update.fingerprint",
@@ -3426,9 +4054,10 @@ mod update_ipc_tests {
             &chain,
             &creds,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3438,7 +4067,7 @@ mod update_ipc_tests {
 
     #[test]
     fn update_verify_round_trip() {
-        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let signer = UpdateSigner::generate();
         let payload = b"aether-os-image-1.2.3".to_vec();
@@ -3466,9 +4095,10 @@ mod update_ipc_tests {
             &chain,
             &creds,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3481,7 +4111,7 @@ mod update_ipc_tests {
 
     #[test]
     fn update_verify_rejects_tampered_payload() {
-        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let signer = UpdateSigner::generate();
         let payload = b"aether-os-image-1.2.3".to_vec();
@@ -3511,9 +4141,10 @@ mod update_ipc_tests {
             &chain,
             &creds,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3524,7 +4155,7 @@ mod update_ipc_tests {
 
     #[test]
     fn update_verify_rejects_wrong_signer() {
-        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let signer_a = UpdateSigner::generate();
         let signer_b = UpdateSigner::generate();
@@ -3554,9 +4185,10 @@ mod update_ipc_tests {
             &chain,
             &creds,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3567,7 +4199,7 @@ mod update_ipc_tests {
 
     #[test]
     fn update_verify_rejects_missing_field() {
-        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         // No `header` parameter.
         let r = req("update.verify", serde_json::json!({}));
@@ -3578,9 +4210,10 @@ mod update_ipc_tests {
             &chain,
             &creds,
             None,
-            &Mutex::new(UpdateStatus::new()),
-            &Mutex::new(VersionPolicy::default()),
-            &Mutex::new(AgentStatus::new()),
+            &status,
+            &policy,
+            &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3607,6 +4240,7 @@ mod update_ipc_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::type_complexity)]
 mod update_plan_ipc_tests {
     //! Integration tests for the Phase-12 update
     //! planning layer IPC commands (`update.plan`,
@@ -3629,6 +4263,7 @@ mod update_plan_ipc_tests {
     use aether_security::signed_update::{UpdateKind, UpdateSigner};
     use aether_storage::{FileManager, WorkspaceConfig};
     use aether_update_core::{UpdateStatus, VersionPolicy};
+    use aether_device_core::DeviceRegistry;
     use std::sync::Mutex;
     use std::time::SystemTime;
 
@@ -3641,6 +4276,7 @@ mod update_plan_ipc_tests {
         Mutex<UpdateStatus>,
         Mutex<VersionPolicy>,
         Mutex<AgentStatus>,
+        Mutex<DeviceRegistry>,
     ) {
         let graph = aether_system_core::graph::DependencyGraph::new(&[]).expect("empty");
         let manager = aether_system_core::manager::ServiceManager::new(graph);
@@ -3651,7 +4287,8 @@ mod update_plan_ipc_tests {
         let status = Mutex::new(UpdateStatus::new());
         let policy = Mutex::new(VersionPolicy::default());
         let agent = Mutex::new(AgentStatus::new());
-        (manager, apps, files, chain, creds, status, policy, agent)
+        let registry = Mutex::new(DeviceRegistry::new());
+        (manager, apps, files, chain, creds, status, policy, agent, registry)
     }
 
     fn req(command: &str, params: serde_json::Value) -> IpcRequest {
@@ -3721,7 +4358,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_plan_returns_plan_for_signed_upgrade() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let (signer, header) = sign_os_image("aether-os", "1.2.0");
         let r = req(
@@ -3747,6 +4384,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3766,7 +4404,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_plan_rejects_downgrade_by_default() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let (signer, header) = sign_os_image("aether-os", "0.9.0");
         let mut params = plan_params(&signer, &header, "aether-os", "0.9.0");
@@ -3784,6 +4422,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3794,7 +4433,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_plan_rejects_bad_signature() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let (signer, header) = sign_os_image("aether-os", "1.2.0");
         let mut params = plan_params(&signer, &header, "aether-os", "1.2.0");
@@ -3817,6 +4456,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3826,7 +4466,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_plan_rejects_empty_target() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         // The plan layer rejects empty target
         // *before* the signature verifier runs in
@@ -3854,6 +4494,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3873,7 +4514,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_status_reports_idle_initially() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req("update.status", serde_json::json!({}));
         let resp = dispatch_inner(
@@ -3886,6 +4527,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3898,7 +4540,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_simulate_drives_state_machine() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "update.simulate",
@@ -3914,6 +4556,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3931,6 +4574,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3943,7 +4587,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_simulate_records_failed_transition_with_note() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         // We can't pass a note through `simulate` (it
         // accepts a sequence only), so we drive the
@@ -3962,6 +4606,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3977,6 +4622,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -3986,7 +4632,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_simulate_rejects_unknown_stage() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "update.simulate",
@@ -4002,6 +4648,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -4011,7 +4658,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_history_is_empty_initially() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req("update.history", serde_json::json!({}));
         let resp = dispatch_inner(
@@ -4024,6 +4671,7 @@ mod update_plan_ipc_tests {
             &status,
             &policy,
             &agent,
+            &registry,
             started_at,
             &r,
         );
@@ -4037,6 +4685,7 @@ mod update_plan_ipc_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::type_complexity)]
 mod agent_ipc_tests {
     //! Integration tests for the Phase-13 agent
     //! planning surface IPC commands
@@ -4062,6 +4711,7 @@ mod agent_ipc_tests {
     use aether_security::credentials::{SealedStore, StaticKeyProvider};
     use aether_storage::{FileManager, WorkspaceConfig};
     use aether_update_core::{UpdateStatus, VersionPolicy};
+    use aether_device_core::DeviceRegistry;
     use std::sync::Mutex;
     use std::time::SystemTime;
 
@@ -4074,6 +4724,7 @@ mod agent_ipc_tests {
         Mutex<UpdateStatus>,
         Mutex<VersionPolicy>,
         Mutex<AgentStatus>,
+        Mutex<DeviceRegistry>,
     ) {
         let graph = aether_system_core::graph::DependencyGraph::new(&[]).expect("empty");
         let manager = aether_system_core::manager::ServiceManager::new(graph);
@@ -4084,7 +4735,8 @@ mod agent_ipc_tests {
         let status = Mutex::new(UpdateStatus::new());
         let policy = Mutex::new(VersionPolicy::default());
         let agent = Mutex::new(AgentStatus::new());
-        (manager, apps, files, chain, creds, status, policy, agent)
+        let registry = Mutex::new(DeviceRegistry::new());
+        (manager, apps, files, chain, creds, status, policy, agent, registry)
     }
 
     fn req(command: &str, params: serde_json::Value) -> IpcRequest {
@@ -4131,7 +4783,7 @@ mod agent_ipc_tests {
 
     #[test]
     fn observe_and_list_observations() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "agent.observe",
@@ -4139,14 +4791,14 @@ mod agent_ipc_tests {
         );
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp.ok, "expected ok, got: {resp:?}");
         assert_eq!(resp.result["id"], serde_json::json!("o1"));
         let r = req("agent.observations", serde_json::json!({}));
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp.ok);
         assert_eq!(resp.result["total"], serde_json::json!(1));
@@ -4154,7 +4806,7 @@ mod agent_ipc_tests {
 
     #[test]
     fn propose_requires_known_evidence() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "agent.propose",
@@ -4164,7 +4816,7 @@ mod agent_ipc_tests {
         );
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_ref().unwrap().code, "UNKNOWN_EVIDENCE");
@@ -4172,7 +4824,7 @@ mod agent_ipc_tests {
 
     #[test]
     fn propose_succeeds_when_evidence_is_known() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "agent.observe",
@@ -4180,7 +4832,7 @@ mod agent_ipc_tests {
         );
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req(
             "agent.propose",
@@ -4190,7 +4842,7 @@ mod agent_ipc_tests {
         );
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp.ok, "expected ok, got: {resp:?}");
         assert_eq!(resp.result["id"], serde_json::json!("p1"));
@@ -4199,7 +4851,7 @@ mod agent_ipc_tests {
 
     #[test]
     fn propose_rejects_low_risk_for_propose_cleanup() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "agent.observe",
@@ -4207,7 +4859,7 @@ mod agent_ipc_tests {
         );
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req(
             "agent.propose",
@@ -4217,7 +4869,7 @@ mod agent_ipc_tests {
         );
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_ref().unwrap().code, "RISK_TOO_LOW");
@@ -4225,7 +4877,7 @@ mod agent_ipc_tests {
 
     #[test]
     fn proposals_list_sorts_by_id() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "agent.observe",
@@ -4233,7 +4885,7 @@ mod agent_ipc_tests {
         );
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         for id in ["p2", "p1", "p3"] {
             let r = req(
@@ -4244,13 +4896,13 @@ mod agent_ipc_tests {
             );
             let _ = dispatch_inner(
                 &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-                &status, &policy, &agent, started_at, &r,
+                &status, &policy, &agent, &registry, started_at, &r,
             );
         }
         let r = req("agent.proposals", serde_json::json!({}));
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp.ok);
         assert_eq!(resp.result["total"], serde_json::json!(3));
@@ -4262,12 +4914,12 @@ mod agent_ipc_tests {
 
     #[test]
     fn tasks_list_is_empty_initially() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req("agent.tasks", serde_json::json!({}));
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp.ok);
         assert_eq!(resp.result["task_count"], serde_json::json!(0));
@@ -4276,7 +4928,7 @@ mod agent_ipc_tests {
 
     #[test]
     fn approve_converts_proposal_to_task() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "agent.observe",
@@ -4284,7 +4936,7 @@ mod agent_ipc_tests {
         );
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req(
             "agent.propose",
@@ -4294,12 +4946,12 @@ mod agent_ipc_tests {
         );
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req("agent.approve", serde_json::json!({ "id": "p1" }));
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp.ok, "expected ok, got: {resp:?}");
         assert_eq!(
@@ -4309,20 +4961,20 @@ mod agent_ipc_tests {
         let r = req("agent.proposals", serde_json::json!({}));
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert_eq!(resp.result["total"], serde_json::json!(0));
         let r = req("agent.tasks", serde_json::json!({}));
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert_eq!(resp.result["task_count"], serde_json::json!(1));
     }
 
     #[test]
     fn cancel_removes_live_task() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "agent.observe",
@@ -4330,7 +4982,7 @@ mod agent_ipc_tests {
         );
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req(
             "agent.propose",
@@ -4340,17 +4992,17 @@ mod agent_ipc_tests {
         );
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req("agent.approve", serde_json::json!({ "id": "p1" }));
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req("agent.cancel", serde_json::json!({ "id": "task-p1" }));
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp.ok, "expected ok, got: {resp:?}");
         assert!(resp.result["removed"].is_object());
@@ -4358,12 +5010,12 @@ mod agent_ipc_tests {
 
     #[test]
     fn cancel_unknown_task_returns_not_found() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req("agent.cancel", serde_json::json!({ "id": "no-such-task" }));
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_ref().unwrap().code, "NOT_FOUND");
@@ -4371,12 +5023,12 @@ mod agent_ipc_tests {
 
     #[test]
     fn history_starts_empty() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req("agent.history", serde_json::json!({}));
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp.ok);
         assert_eq!(resp.result["total"], serde_json::json!(0));
@@ -4384,7 +5036,7 @@ mod agent_ipc_tests {
 
     #[test]
     fn tasks_ready_filters_by_done() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "agent.observe",
@@ -4392,7 +5044,7 @@ mod agent_ipc_tests {
         );
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req(
             "agent.propose",
@@ -4402,17 +5054,17 @@ mod agent_ipc_tests {
         );
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req("agent.approve", serde_json::json!({ "id": "p1" }));
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req("agent.tasks", serde_json::json!({}));
         let resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp.ok);
         assert_eq!(resp.result["task_count"], serde_json::json!(1));
@@ -4421,7 +5073,7 @@ mod agent_ipc_tests {
 
     #[test]
     fn propose_duplicate_id_returns_existing_flag() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
         let started_at = SystemTime::now();
         let r = req(
             "agent.observe",
@@ -4429,7 +5081,7 @@ mod agent_ipc_tests {
         );
         let _ = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         let r = req(
             "agent.propose",
@@ -4439,7 +5091,7 @@ mod agent_ipc_tests {
         );
         let resp1 = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp1.ok);
         assert_eq!(resp1.result["new"], serde_json::json!(true));
@@ -4451,11 +5103,445 @@ mod agent_ipc_tests {
         );
         let resp2 = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None,
-            &status, &policy, &agent, started_at, &r,
+            &status, &policy, &agent, &registry, started_at, &r,
         );
         assert!(resp2.ok);
         assert_eq!(resp2.result["new"], serde_json::json!(false));
         // Reference TaskId for the unused-import linter.
         let _ = TaskId::new("x");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::type_complexity)]
+mod device_ipc_tests {
+    //! Integration tests for the Phase-14 multi-device
+    //! IPC surface (`device.list`, `device.register`,
+    //! `device.pair.begin`, `device.pair.complete`,
+    //! `device.revoke`, `device.unregister`).
+    //!
+    //! The shell stores a bounded registry of
+    //! registered devices and a per-peer pairing
+    //! state machine. Today the registry only
+    //! covers the typed contract; the future
+    //! `aether-device-runtime` is the only
+    //! thing allowed to actually deliver a
+    //! `RemoteObservation` or `RemoteProposal`
+    //! into the local agent.
+
+    use super::dispatch_inner;
+    use aether_application_manager::ApplicationManager;
+    use aether_core::ipc::{ActorTrust, IpcRequest};
+    use aether_device_core::{DeviceClass, DeviceRegistry, PairingState};
+    use aether_security::audit::{AuditChain, RetentionPolicy};
+    use aether_security::credentials::{SealedStore, StaticKeyProvider};
+    use aether_storage::{FileManager, WorkspaceConfig};
+    use aether_update_core::{UpdateStatus, VersionPolicy};
+    use aether_agent_core::AgentStatus;
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+
+    fn env() -> (
+        aether_system_core::manager::ServiceManager,
+        ApplicationManager,
+        FileManager,
+        Mutex<AuditChain>,
+        Mutex<SealedStore<StaticKeyProvider>>,
+        Mutex<UpdateStatus>,
+        Mutex<VersionPolicy>,
+        Mutex<AgentStatus>,
+        Mutex<DeviceRegistry>,
+    ) {
+        let graph = aether_system_core::graph::DependencyGraph::new(&[]).expect("empty");
+        let manager = aether_system_core::manager::ServiceManager::new(graph);
+        let apps = ApplicationManager::default();
+        let files = FileManager::new(WorkspaceConfig::from_env_or_default()).expect("workspace");
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
+        let creds = Mutex::new(SealedStore::new(StaticKeyProvider::new([0x66u8; 32])));
+        let status = Mutex::new(UpdateStatus::new());
+        let policy = Mutex::new(VersionPolicy::default());
+        let agent = Mutex::new(AgentStatus::new());
+        let registry = Mutex::new(DeviceRegistry::new());
+        (manager, apps, files, chain, creds, status, policy, agent, registry)
+    }
+
+    fn req(command: &str, params: serde_json::Value) -> IpcRequest {
+        IpcRequest {
+            service_id: "test".to_string(),
+            command: command.to_string(),
+            parameters: params,
+            actor_trust: ActorTrust::Trusted,
+        }
+    }
+
+    #[test]
+    fn device_list_starts_empty() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+        let r = req("device.list", serde_json::json!({}));
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(resp.ok, "expected list ok, got: {resp:?}");
+        assert_eq!(resp.result["total"], serde_json::json!(0));
+        assert_eq!(resp.result["paired_count"], serde_json::json!(0));
+    }
+
+    #[test]
+    fn device_register_then_list_round_trip() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "device.register",
+            serde_json::json!({
+                "device_id": "dev-phone",
+                "device_class": "phone",
+                "fingerprint": "11".repeat(32),
+                "grant": {
+                    "receive_observations": true,
+                    "receive_proposals": true,
+                    "execute_remote_tasks": false,
+                },
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(resp.ok, "expected register ok, got: {resp:?}");
+        assert_eq!(resp.result["id"], serde_json::json!("dev-phone"));
+        assert_eq!(resp.result["state"], serde_json::json!("available"));
+
+        let r = req("device.list", serde_json::json!({}));
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(resp.ok);
+        assert_eq!(resp.result["total"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn device_register_rejects_duplicate() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+        let params = serde_json::json!({
+            "device_id": "dev-a",
+            "device_class": "laptop",
+            "fingerprint": "22".repeat(32),
+            "grant": {
+                "receive_observations": true,
+                "receive_proposals": true,
+                "execute_remote_tasks": false,
+            },
+        });
+        let r = req("device.register", params);
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        // Re-register returns ALREADY_REGISTERED.
+        let r = req(
+            "device.register",
+            serde_json::json!({
+                "device_id": "dev-a",
+                "device_class": "laptop",
+                "fingerprint": "33".repeat(32),
+                "grant": {"receive_observations": true, "receive_proposals": true, "execute_remote_tasks": false},
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(!resp.ok, "expected duplicate register to fail");
+        assert_eq!(resp.error.as_ref().unwrap().code, "ALREADY_REGISTERED");
+    }
+
+    #[test]
+    fn device_register_rejects_bad_id() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "device.register",
+            serde_json::json!({
+                "device_id": "",
+                "device_class": "laptop",
+                "fingerprint": "33".repeat(32),
+                "grant": {"receive_observations": true, "receive_proposals": true, "execute_remote_tasks": false},
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(!resp.ok, "expected empty id rejected");
+        assert_eq!(resp.error.as_ref().unwrap().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn device_register_rejects_bad_fingerprint() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "device.register",
+            serde_json::json!({
+                "device_id": "dev-bad-fp",
+                "device_class": "laptop",
+                "fingerprint": "abcd",
+                "grant": {"receive_observations": true, "receive_proposals": true, "execute_remote_tasks": false},
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(!resp.ok, "expected bad fingerprint rejected");
+        assert_eq!(resp.error.as_ref().unwrap().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn device_pair_begin_requires_registered_peer() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "device.pair.begin",
+            serde_json::json!({
+                "device_id": "never-registered",
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn device_pair_begin_then_revoke() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+        // Register.
+        let r = req(
+            "device.register",
+            serde_json::json!({
+                "device_id": "dev-revoke",
+                "device_class": "laptop",
+                "fingerprint": "77".repeat(32),
+                "grant": {"receive_observations": true, "receive_proposals": true, "execute_remote_tasks": false},
+            }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        // Begin pairing.
+        let r = req(
+            "device.pair.begin",
+            serde_json::json!({"device_id": "dev-revoke"}),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(resp.ok, "pair.begin failed: {resp:?}");
+        assert_eq!(resp.result["state"], serde_json::json!("pairing"));
+
+        // Revoke from `Pairing` is allowed and moves to `Revoked`.
+        let r = req(
+            "device.revoke",
+            serde_json::json!({"device_id": "dev-revoke"}),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(resp.ok, "revoke failed: {resp:?}");
+        assert_eq!(resp.result["state"], serde_json::json!("revoked"));
+    }
+
+    #[test]
+    fn device_unregister_removes_entry() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "device.register",
+            serde_json::json!({
+                "device_id": "dev-bye",
+                "device_class": "phone",
+                "fingerprint": "88".repeat(32),
+                "grant": {"receive_observations": true, "receive_proposals": true, "execute_remote_tasks": false},
+            }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        let r = req(
+            "device.unregister",
+            serde_json::json!({"device_id": "dev-bye"}),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(resp.ok);
+        // First unregister removed the entry; `removed` carries the entry
+        // as a JSON object rather than a boolean.
+        assert!(resp.result["removed"].is_object());
+
+        // Unregistering again returns NOT_FOUND.
+        let r = req(
+            "device.unregister",
+            serde_json::json!({"device_id": "dev-bye"}),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            &status,
+            &policy,
+            &agent,
+            &registry,
+            started_at,
+            &r,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "NOT_FOUND");
     }
 }

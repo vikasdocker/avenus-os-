@@ -77,6 +77,7 @@ impl Display for Decision {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::{Decision, DefaultPermissionPolicy, PermissionPolicy};
     use aether_core::{Capability, CapabilityDomain, RiskLevel};

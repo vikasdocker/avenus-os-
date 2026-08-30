@@ -1417,7 +1417,7 @@ credentials, audit chain).
 
 ### Phase 14 — Multi-Device Aether
 
-**Status:** `NOT_STARTED`.
+**Status:** `PARTIAL`.
 
 **Sub-milestones:**
 
@@ -1427,6 +1427,34 @@ credentials, audit chain).
 - Security first.
 
 **Dependencies:** Phase 13.
+
+**14.1 — Cross-device typed contract (this commit)**
+
+- New crate `agent/aether-device-core`:
+  - `identity` — `DeviceId`, `DeviceClass` (Phone / Tablet / Laptop /
+    Desktop / Iot / Server / External / Other).
+  - `fingerprint` — `DeviceFingerprint` (32-byte SHA-256 of public key).
+  - `pairing` — `PairingState` (Available / Pairing / Paired /
+    Cancelled / Revoked / Expired), `PairingCode` (6 decimal digits),
+    `PairingGrant` (receive_observations / receive_proposals /
+    execute_remote_tasks), `PairingRequest` / `PairingAcceptance` /
+    `PairingError` / `validate_acceptance`.
+  - `registry` — bounded `DeviceRegistry` (256 entry limit) with
+    `register` / `get` / `devices` / `paired` / `transition` /
+    `unregister`.
+  - `remote` — `RemoteSource` (device id, fingerprint, monotonic
+    `seq`, timestamp) and `accept_remote_delivery` (validates
+    state, grant, fingerprint, seq ordering, skew window).
+- Out-of-scope shell (`aether-system-core`):
+  - Six new IPC commands: `device.list`, `device.register`,
+    `device.pair.begin`, `device.pair.complete`, `device.revoke`,
+    `device.unregister`. Pair code display, BLE / QR / NFC transport,
+    and remote observation / proposal *delivery* are deferred to
+    the future `aether-device-runtime`; the shell only stores
+    the typed state machine.
+- 8 new integration tests in `device_ipc_tests`.
+- 36 unit tests in the `aether-device-core` crate.
+- Total tests passing: 842.
 
 ---
 

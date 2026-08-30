@@ -14,6 +14,7 @@ members = [
   "system/aether-application-manager",
   "system/aether-update-core",
   "agent/aether-agent-core",
+  "agent/aether-device-core",
   "network/aether-network",
   "services/aether-agentd",
   "services/aether-supervisor",

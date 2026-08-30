@@ -1,0 +1,18 @@
+[package]
+name = "aether-device-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether Device Core - identity, pairing, and cross-device coordination contracts"
+
+[dependencies]
+aether-agent-core = { path = "../aether-agent-core" }
+aether-core = { path = "../../core/aether-core" }
+aether-security = { path = "../../security/aether-security" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[lints]
+workspace = true

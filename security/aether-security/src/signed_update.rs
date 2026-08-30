@@ -535,6 +535,7 @@ pub fn payload_sha256(payload: &[u8]) -> [u8; 32] {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

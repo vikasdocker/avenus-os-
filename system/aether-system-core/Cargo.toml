@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 aether-agent-core = { path = "../../agent/aether-agent-core" }
 aether-application-manager = { path = "../aether-application-manager" }
+aether-device-core = { path = "../../agent/aether-device-core" }
 aether-core = { path = "../../core/aether-core" }
 aether-security = { path = "../../security/aether-security" }
 aether-storage = { path = "../../storage/aether-storage" }

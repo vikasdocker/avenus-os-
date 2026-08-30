@@ -131,6 +131,7 @@ fn sig_path_for(manifest_path: &Path) -> std::path::PathBuf {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
