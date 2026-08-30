@@ -1384,10 +1384,68 @@ consent) perform a restart, and report success.
 
 ### Phase 8 — Device + Hardware Ecosystem
 
-**Status:** `NOT_STARTED`.
+**Status:** `IN_PROGRESS` (8.1 hardware service
+shipped; the future hardware service daemon
+that talks to the real HAL is Phase 10's
+real-hardware bring-up work).
 
 **Sub-milestones:**
 
+- 8.1 **Aether Hardware Service — COMPLETE**.
+  New crate `system/aether-hardware-service`
+  ships the typed model of every piece of
+  hardware Aether can see. The contract has
+  three pieces:
+  * **`DeviceKind`** — a closed taxonomy of
+    19 hardware classes: `Cpu`, `Gpu`,
+    `Display`, `ExternalDisplay`, `Keyboard`,
+    `Touchpad`, `Mouse`, `AudioOutput`,
+    `Microphone`, `Camera`, `Wifi`,
+    `Bluetooth`, `Ethernet`, `Usb`,
+    `Storage`, `Battery`, `ThermalSensor`,
+    `Printer`, `FutureSensor`. Every kind
+    has a stable kebab-case `as_str()` and a
+    human-readable `label()`.
+  * **`Device`** — a single piece of
+    hardware: `id` / `kind` / `name` /
+    `vendor` / `product` / `state` (Present /
+    Disabled / Errored / Disconnected) /
+    `power` (SelfPowered / Battery{level} /
+    PowerOff) / `capabilities: Vec<Capability>`.
+    `is_usable()` returns true only for
+    `Present`; `has_capability(&cap)`
+    pattern-matches the capability list.
+  * **`HardwareService`** — the in-memory
+    registry of all known devices. It
+    supports `upsert` (replaces on id
+    collision), `remove`, `get`, `with_kind`,
+    `find_capable` (first usable device
+    claiming a capability), `all_capable`,
+    `set_state` (returns the previous state
+    for audit), and `toggle` (Present ↔
+    Disabled).
+  * **`Capability`** — a typed verb the
+    agent / shell can ask a device to
+    exercise. The 11 variants cover
+    audio routing, mic capture, video
+    capture, Wi-Fi / Bluetooth connect,
+    storage mount / unmount, enable /
+    disable, brightness, and print. Each
+    capability has a `verb()` and a
+    `requires_consent()` flag — privacy /
+    destructive ones (capture, connect,
+    mount, print) are gated; display
+    state and enable / disable are not.
+  * **`CapabilityResult`** — the typed
+    outcome of exercising a capability
+    (`Ok { detail }` / `Refused { reason }` /
+    `InvalidState { state }` / `Timeout`).
+    `is_ok()` is the one-liner.
+  * The whole model is `Serialize` /
+    `Deserialize` so the IPC layer can
+    cross the boundary. 32 unit tests, 0
+    warnings, 0 clippy lints. Files:
+    `system/aether-hardware-service/src/lib.rs`.
 - Aether Hardware Service exposing CPU, GPU, display, keyboard, touchpad,
   mouse, audio, mic, camera, Wi-Fi, Bluetooth, Ethernet, USB, storage, battery,
   thermal, external displays, printers, future sensors.

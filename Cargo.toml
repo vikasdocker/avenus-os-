@@ -18,6 +18,7 @@ members = [
   "system/aether-diagnostics",
   "system/aether-recovery",
   "system/aether-automation",
+  "system/aether-hardware-service",
   "agent/aether-agent-core",
   "agent/aether-device-core",
   "agent/aether-background-agent",
