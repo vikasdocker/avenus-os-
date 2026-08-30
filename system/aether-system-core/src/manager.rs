@@ -470,7 +470,10 @@ mod tests {
 
     // -------- Phase 11.4 sandbox plan tests --------
 
-    fn manifest_with_sandbox(id: &str, profile: SandboxProfile) -> aether_core::manifest::ServiceManifest {
+    fn manifest_with_sandbox(
+        id: &str,
+        profile: SandboxProfile,
+    ) -> aether_core::manifest::ServiceManifest {
         let mut m = manifest(id, &[]);
         m.sandbox_profile = profile;
         m
@@ -495,8 +498,7 @@ mod tests {
 
     #[test]
     fn sandbox_plan_for_system_service_drops_dangerous_caps() {
-        let manifests =
-            vec![manifest_with_sandbox("svc", SandboxProfile::SystemService)];
+        let manifests = vec![manifest_with_sandbox("svc", SandboxProfile::SystemService)];
         let manager = build_manager(&manifests).unwrap_or_else(|e| panic!("{e}"));
         let plan = manager.sandbox_plan("svc").unwrap_or_else(|| panic!("plan missing"));
         assert_eq!(plan.profile, SandboxProfile::SystemService);
@@ -513,8 +515,7 @@ mod tests {
 
     #[test]
     fn sandbox_plan_for_restricted_app_drops_every_cap() {
-        let manifests =
-            vec![manifest_with_sandbox("svc", SandboxProfile::RestrictedService)];
+        let manifests = vec![manifest_with_sandbox("svc", SandboxProfile::RestrictedService)];
         let manager = build_manager(&manifests).unwrap_or_else(|e| panic!("{e}"));
         let plan = manager.sandbox_plan("svc").unwrap_or_else(|| panic!("plan missing"));
         assert!(plan.capabilities.is_empty(), "restricted app must drop every cap");

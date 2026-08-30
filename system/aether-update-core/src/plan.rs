@@ -158,7 +158,8 @@ pub fn plan_from_signed_update(
     // again to confirm the action lines up. Both calls
     // are cheap (no I/O, no allocation), so the
     // duplication is fine.
-    let pre = policy.evaluate(action_placeholder(&update.header.kind), installed, &update.header.version);
+    let pre =
+        policy.evaluate(action_placeholder(&update.header.kind), installed, &update.header.version);
     let action = derive_action(&update.header.kind, &pre.requirement);
     let decision = policy.evaluate(action, installed, &update.header.version);
     if !decision.allowed {
@@ -196,7 +197,9 @@ fn derive_action(kind: &UpdateKind, req: &crate::version::VersionRequirement) ->
     use crate::version::VersionRequirement;
     match (kind, req) {
         (UpdateKind::OsImage, VersionRequirement::Same) => UpdateAction::ReinstallOsImage,
-        (UpdateKind::ServiceBundle, VersionRequirement::Same) => UpdateAction::ReinstallServiceBundle,
+        (UpdateKind::ServiceBundle, VersionRequirement::Same) => {
+            UpdateAction::ReinstallServiceBundle
+        }
         (UpdateKind::OsImage, _) => UpdateAction::UpgradeOsImage,
         (UpdateKind::ServiceBundle, _) => UpdateAction::UpgradeServiceBundle,
         (UpdateKind::AgentModel, _) => UpdateAction::UpgradeAgentModel,
@@ -288,26 +291,14 @@ mod tests {
 
     #[test]
     fn plan_rejects_empty_target() {
-        let (update, _) = sign_for_test(
-            UpdateKind::OsImage,
-            "",
-            "1.0.0",
-            1,
-            b"image",
-        );
+        let (update, _) = sign_for_test(UpdateKind::OsImage, "", "1.0.0", 1, b"image");
         let err = plan_from_signed_update(&update, Some("0.9.0"), &policy_default()).unwrap_err();
         assert_eq!(err, UpdatePlanError::EmptyTarget);
     }
 
     #[test]
     fn plan_rejects_empty_version() {
-        let (update, _) = sign_for_test(
-            UpdateKind::OsImage,
-            "aether-os",
-            "",
-            1,
-            b"image",
-        );
+        let (update, _) = sign_for_test(UpdateKind::OsImage, "aether-os", "", 1, b"image");
         let err = plan_from_signed_update(&update, Some("0.9.0"), &policy_default()).unwrap_err();
         assert_eq!(err, UpdatePlanError::EmptyVersion);
     }
@@ -317,13 +308,7 @@ mod tests {
         // Sign with a non-empty payload then empty
         // it on the wire — the plan rejects zero
         // length.
-        let (mut update, _) = sign_for_test(
-            UpdateKind::OsImage,
-            "aether-os",
-            "1.0.0",
-            1,
-            b"image",
-        );
+        let (mut update, _) = sign_for_test(UpdateKind::OsImage, "aether-os", "1.0.0", 1, b"image");
         update.payload.clear();
         update.header.payload_len = 0;
         let err = plan_from_signed_update(&update, Some("0.9.0"), &policy_default()).unwrap_err();
@@ -332,13 +317,7 @@ mod tests {
 
     #[test]
     fn plan_rejects_downgrade_by_default() {
-        let (update, _) = sign_for_test(
-            UpdateKind::OsImage,
-            "aether-os",
-            "0.9.0",
-            1,
-            b"image",
-        );
+        let (update, _) = sign_for_test(UpdateKind::OsImage, "aether-os", "0.9.0", 1, b"image");
         let err = plan_from_signed_update(&update, Some("1.0.0"), &policy_default()).unwrap_err();
         match err {
             UpdatePlanError::PolicyDenied(s) => assert!(s.contains("downgrade")),
@@ -348,13 +327,7 @@ mod tests {
 
     #[test]
     fn plan_accepts_downgrade_with_flag() {
-        let (update, _) = sign_for_test(
-            UpdateKind::OsImage,
-            "aether-os",
-            "0.9.0",
-            1,
-            b"image",
-        );
+        let (update, _) = sign_for_test(UpdateKind::OsImage, "aether-os", "0.9.0", 1, b"image");
         let plan =
             plan_from_signed_update(&update, Some("1.0.0"), &policy_with_downgrade()).unwrap();
         assert_eq!(plan.action, UpdateAction::UpgradeOsImage);

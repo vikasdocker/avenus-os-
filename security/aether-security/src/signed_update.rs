@@ -273,16 +273,14 @@ pub fn verify_signed_update_with_key(
     if update.signature.len() != SIGNATURE_LEN {
         return Err(UpdateVerifyError::BadSignatureLength);
     }
-    let verifying_key = VerifyingKey::from_bytes(public_key_bytes)
-        .map_err(|_| UpdateVerifyError::BadPublicKey)?;
+    let verifying_key =
+        VerifyingKey::from_bytes(public_key_bytes).map_err(|_| UpdateVerifyError::BadPublicKey)?;
     let signed = update.signed_bytes();
     let signature = match Signature::try_from(update.signature.as_slice()) {
         Ok(s) => s,
         Err(_) => return Err(UpdateVerifyError::BadSignatureLength),
     };
-    verifying_key
-        .verify(&signed, &signature)
-        .map_err(|_| UpdateVerifyError::SignatureInvalid)?;
+    verifying_key.verify(&signed, &signature).map_err(|_| UpdateVerifyError::SignatureInvalid)?;
     Ok(())
 }
 
@@ -307,8 +305,8 @@ pub fn verify_signed_update_trusted(
     if update.signature.len() != SIGNATURE_LEN {
         return Err(UpdateVerifyError::BadSignatureLength);
     }
-    let verifying_key = VerifyingKey::from_bytes(public_key_bytes)
-        .map_err(|_| UpdateVerifyError::BadPublicKey)?;
+    let verifying_key =
+        VerifyingKey::from_bytes(public_key_bytes).map_err(|_| UpdateVerifyError::BadPublicKey)?;
     let fingerprint = Fingerprint::for_public_key(&verifying_key);
     if fingerprint.as_hex() != update.header.signer_key_id {
         return Err(UpdateVerifyError::UnknownSigner);
@@ -321,9 +319,7 @@ pub fn verify_signed_update_trusted(
         Ok(s) => s,
         Err(_) => return Err(UpdateVerifyError::BadSignatureLength),
     };
-    verifying_key
-        .verify(&signed, &signature)
-        .map_err(|_| UpdateVerifyError::SignatureInvalid)?;
+    verifying_key.verify(&signed, &signature).map_err(|_| UpdateVerifyError::SignatureInvalid)?;
     Ok(())
 }
 
@@ -404,11 +400,7 @@ impl UpdateSigner {
             buf
         };
         let signature = self.signing_key.sign(&signed_bytes);
-        SignedUpdate {
-            header,
-            payload: payload.to_vec(),
-            signature: signature.to_bytes().to_vec(),
-        }
+        SignedUpdate { header, payload: payload.to_vec(), signature: signature.to_bytes().to_vec() }
     }
 }
 
@@ -506,11 +498,7 @@ impl SignedUpdateBuilder {
     /// Returns the finished `SignedUpdate`.
     #[must_use]
     pub fn build(self) -> SignedUpdate {
-        SignedUpdate {
-            header: self.header,
-            payload: self.payload,
-            signature: self.signature,
-        }
+        SignedUpdate { header: self.header, payload: self.payload, signature: self.signature }
     }
 }
 
@@ -551,7 +539,8 @@ mod tests {
         let mut trust = UpdateTrustList::new();
         trust.trust(signer.fingerprint());
         let payload = random_payload();
-        let update = signer.sign(UpdateKind::ServiceBundle, "aether-system-core", "0.2.0", 1_000, &payload);
+        let update =
+            signer.sign(UpdateKind::ServiceBundle, "aether-system-core", "0.2.0", 1_000, &payload);
 
         let pk = signer.public_key_bytes();
         assert!(verify_signed_update_trusted(&update, &pk, &trust).is_ok());
@@ -574,8 +563,7 @@ mod tests {
         let mut trust = UpdateTrustList::new();
         trust.trust(signer.fingerprint());
         let payload = random_payload();
-        let mut update =
-            signer.sign(UpdateKind::ServiceBundle, "svc", "0.1.0", 1_000, &payload);
+        let mut update = signer.sign(UpdateKind::ServiceBundle, "svc", "0.1.0", 1_000, &payload);
         update.payload[0] ^= 0x01;
         let pk = signer.public_key_bytes();
         let err = verify_signed_update_trusted(&update, &pk, &trust).unwrap_err();
@@ -678,10 +666,7 @@ mod tests {
         // All-0xFF is not on the Ed25519 curve.
         let bad_pk = [0xFFu8; 32];
         let err = verify_signed_update_trusted(&update, &bad_pk, &trust).unwrap_err();
-        assert!(matches!(
-            err,
-            UpdateVerifyError::BadPublicKey | UpdateVerifyError::UnknownSigner
-        ));
+        assert!(matches!(err, UpdateVerifyError::BadPublicKey | UpdateVerifyError::UnknownSigner));
     }
 
     #[test]
@@ -749,10 +734,10 @@ mod tests {
             "signer public key is not a valid Ed25519 key"
         );
         assert_eq!(UpdateVerifyError::UnknownSigner.to_string(), "signer is not in the trust list");
+        assert_eq!(UpdateVerifyError::BadTarget.to_string(), "update target is empty or malformed");
         assert_eq!(
-            UpdateVerifyError::BadTarget.to_string(),
-            "update target is empty or malformed"
+            UpdateVerifyError::SignatureInvalid.to_string(),
+            "Ed25519 signature verification failed"
         );
-        assert_eq!(UpdateVerifyError::SignatureInvalid.to_string(), "Ed25519 signature verification failed");
     }
 }

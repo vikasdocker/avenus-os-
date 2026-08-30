@@ -202,10 +202,7 @@ impl TrustStore {
     /// Returns every trusted fingerprint, sorted.
     #[must_use]
     pub fn fingerprints(&self) -> Vec<Fingerprint> {
-        self.fingerprints
-            .iter()
-            .map(|s| Fingerprint(s.clone()))
-            .collect()
+        self.fingerprints.iter().map(|s| Fingerprint(s.clone())).collect()
     }
 }
 
@@ -263,9 +260,7 @@ pub fn verify_signed_manifest(
         Ok(s) => s,
         Err(_) => return Err(ManifestVerifyError::BadSignatureShape),
     };
-    public_key
-        .verify(&canonical, &signature)
-        .map_err(|_| ManifestVerifyError::SignatureInvalid)?;
+    public_key.verify(&canonical, &signature).map_err(|_| ManifestVerifyError::SignatureInvalid)?;
     Ok(())
 }
 

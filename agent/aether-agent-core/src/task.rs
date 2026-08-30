@@ -373,10 +373,7 @@ impl TaskGraph {
     /// task with no dependencies is always ready.
     #[must_use]
     pub fn ready<'a>(&'a self, done_ids: &'a [TaskId]) -> Vec<&'a AgentTask> {
-        self.tasks
-            .iter()
-            .filter(|t| t.depends_on.iter().all(|d| done_ids.contains(d)))
-            .collect()
+        self.tasks.iter().filter(|t| t.depends_on.iter().all(|d| done_ids.contains(d))).collect()
     }
 
     /// Removes a task. The caller is responsible
@@ -505,8 +502,7 @@ mod tests {
         // shape that the new task would extend.
         let mut g3 = TaskGraph::new();
         g3.insert(task("a", TaskKind::Notify)).unwrap();
-        g3.insert(task("b", TaskKind::Notify).with_dependency(TaskId::new("a").unwrap()))
-            .unwrap();
+        g3.insert(task("b", TaskKind::Notify).with_dependency(TaskId::new("a").unwrap())).unwrap();
         // No cycle possible with the current
         // edge set. The cycle check is defensive;
         // we cover it in the transitive-cycles
@@ -518,8 +514,7 @@ mod tests {
     fn graph_ready_returns_tasks_with_no_pending_deps() {
         let mut g = TaskGraph::new();
         g.insert(task("a", TaskKind::Notify)).unwrap();
-        g.insert(task("b", TaskKind::Notify).with_dependency(TaskId::new("a").unwrap()))
-            .unwrap();
+        g.insert(task("b", TaskKind::Notify).with_dependency(TaskId::new("a").unwrap())).unwrap();
         let done: Vec<TaskId> = vec![];
         let ready = g.ready(&done);
         // Only `a` is ready: `b` depends on `a`
@@ -551,10 +546,8 @@ mod tests {
     fn transitively_depends_on_detects_two_hop_chain() {
         let mut g = TaskGraph::new();
         g.insert(task("a", TaskKind::Notify)).unwrap();
-        g.insert(task("b", TaskKind::Notify).with_dependency(TaskId::new("a").unwrap()))
-            .unwrap();
-        g.insert(task("c", TaskKind::Notify).with_dependency(TaskId::new("b").unwrap()))
-            .unwrap();
+        g.insert(task("b", TaskKind::Notify).with_dependency(TaskId::new("a").unwrap())).unwrap();
+        g.insert(task("c", TaskKind::Notify).with_dependency(TaskId::new("b").unwrap())).unwrap();
         // c transitively depends on a (through b).
         let a_id = TaskId::new("a").unwrap();
         let c = g.get(&TaskId::new("c").unwrap()).unwrap();

@@ -98,10 +98,7 @@ pub fn load_manifests_with_trust(
             verify_signed_manifest(&envelope, trust_store).map_err(|e| {
                 AetherError::new(
                     ErrorKind::InvalidInput,
-                    format!(
-                        "manifest {} failed signature verification: {e}",
-                        path.display()
-                    ),
+                    format!("manifest {} failed signature verification: {e}", path.display()),
                 )
             })?;
         }

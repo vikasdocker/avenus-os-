@@ -129,10 +129,9 @@ impl std::fmt::Display for RemoteDeliveryError {
             Self::FingerprintMismatch => {
                 f.write_str("peer fingerprint does not match the registry entry")
             }
-            Self::OutOfOrder { last_seq, new_seq } => write!(
-                f,
-                "peer seq {new_seq} is older than the last seen seq {last_seq}"
-            ),
+            Self::OutOfOrder { last_seq, new_seq } => {
+                write!(f, "peer seq {new_seq} is older than the last seen seq {last_seq}")
+            }
             Self::TooOld => f.write_str("peer source is older than the skew window"),
         }
     }
@@ -187,10 +186,7 @@ pub fn accept_remote_delivery(
         }
     }
     if source.seq <= last_seq {
-        return Err(RemoteDeliveryError::OutOfOrder {
-            last_seq,
-            new_seq: source.seq,
-        });
+        return Err(RemoteDeliveryError::OutOfOrder { last_seq, new_seq: source.seq });
     }
     if now_ms.saturating_sub(source.timestamp_ms) > skew_ms {
         return Err(RemoteDeliveryError::TooOld);
@@ -203,8 +199,8 @@ pub fn accept_remote_delivery(
 mod tests {
     use super::*;
 
-    use aether_agent_core::{Observation, ObservationSeverity, Proposal, ProposalRisk, TaskKind};
     use crate::pairing::PairingGrant;
+    use aether_agent_core::{Observation, ObservationSeverity, Proposal, ProposalRisk, TaskKind};
 
     fn source(seq: u64) -> RemoteSource {
         RemoteSource {
@@ -384,20 +380,14 @@ mod tests {
 
     #[test]
     fn remote_observation_carries_observation_and_source() {
-        let r = RemoteObservation {
-            source: source(1),
-            observation: obs(),
-        };
+        let r = RemoteObservation { source: source(1), observation: obs() };
         assert_eq!(r.observation.id, "obs-1");
         assert_eq!(r.source.seq, 1);
     }
 
     #[test]
     fn remote_proposal_carries_proposal_and_source() {
-        let r = RemoteProposal {
-            source: source(1),
-            proposal: prop(),
-        };
+        let r = RemoteProposal { source: source(1), proposal: prop() };
         assert_eq!(r.proposal.id.as_str(), "prop-1");
         assert_eq!(r.source.seq, 1);
     }

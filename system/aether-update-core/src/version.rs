@@ -209,9 +209,7 @@ impl VersionPolicy {
             }
             return VersionPolicyDecision::deny(
                 VersionRequirement::Prerelease,
-                format!(
-                    "pre-release target '{target}' is not allowed by the version policy"
-                ),
+                format!("pre-release target '{target}' is not allowed by the version policy"),
             );
         }
         match installed.numeric_cmp(&target) {

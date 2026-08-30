@@ -126,12 +126,8 @@ impl DeviceRegistry {
             grant,
             last_transition_ms: now_ms,
         };
-        let entry = RegisteredDevice {
-            device_id: device_id.clone(),
-            device_class,
-            fingerprint,
-            pairing,
-        };
+        let entry =
+            RegisteredDevice { device_id: device_id.clone(), device_class, fingerprint, pairing };
         self.devices.insert(device_id, entry);
         Ok(())
     }
@@ -154,11 +150,8 @@ impl DeviceRegistry {
     /// stable order.
     #[must_use]
     pub fn paired(&self) -> Vec<&RegisteredDevice> {
-        let mut out: Vec<&RegisteredDevice> = self
-            .devices
-            .values()
-            .filter(|d| d.pairing.state.is_trusted())
-            .collect();
+        let mut out: Vec<&RegisteredDevice> =
+            self.devices.values().filter(|d| d.pairing.state.is_trusted()).collect();
         out.sort_by(|a, b| a.device_id.cmp(&b.device_id));
         out
     }
@@ -173,10 +166,7 @@ impl DeviceRegistry {
         next: PairingState,
         now_ms: u64,
     ) -> Result<(), DeviceRegistryError> {
-        let entry = self
-            .devices
-            .get_mut(id)
-            .ok_or(DeviceRegistryError::UnknownDevice)?;
+        let entry = self.devices.get_mut(id).ok_or(DeviceRegistryError::UnknownDevice)?;
         entry.pairing.state = next;
         entry.pairing.last_transition_ms = now_ms;
         Ok(())
@@ -229,22 +219,9 @@ mod tests {
     #[test]
     fn register_rejects_duplicate() {
         let mut r = DeviceRegistry::new();
-        r.register(
-            id("dev-a"),
-            DeviceClass::Laptop,
-            fp(0x11),
-            PairingGrant::default(),
-            1,
-        )
-        .unwrap();
+        r.register(id("dev-a"), DeviceClass::Laptop, fp(0x11), PairingGrant::default(), 1).unwrap();
         let err = r
-            .register(
-                id("dev-a"),
-                DeviceClass::Laptop,
-                fp(0x11),
-                PairingGrant::default(),
-                2,
-            )
+            .register(id("dev-a"), DeviceClass::Laptop, fp(0x11), PairingGrant::default(), 2)
             .unwrap_err();
         assert!(matches!(err, DeviceRegistryError::AlreadyRegistered));
     }
@@ -255,14 +232,8 @@ mod tests {
         // Fill the registry with 256 devices.
         for i in 0..DEVICE_REGISTRY_LIMIT {
             let s = format!("dev-{i:04}");
-            r.register(
-                id(&s),
-                DeviceClass::Laptop,
-                fp(i as u8),
-                PairingGrant::default(),
-                i as u64,
-            )
-            .unwrap();
+            r.register(id(&s), DeviceClass::Laptop, fp(i as u8), PairingGrant::default(), i as u64)
+                .unwrap();
         }
         assert!(r.is_full());
         // 257th must be rejected.
@@ -281,49 +252,25 @@ mod tests {
     #[test]
     fn transition_advances_state() {
         let mut r = DeviceRegistry::new();
-        r.register(
-            id("dev-a"),
-            DeviceClass::Phone,
-            fp(0x11),
-            PairingGrant::default(),
-            1,
-        )
-        .unwrap();
-        r.transition(&id("dev-a"), PairingState::Pairing, 2)
-            .unwrap();
-        assert_eq!(
-            r.get(&id("dev-a")).unwrap().pairing.state,
-            PairingState::Pairing
-        );
-        r.transition(&id("dev-a"), PairingState::Paired, 3)
-            .unwrap();
-        assert_eq!(
-            r.get(&id("dev-a")).unwrap().pairing.state,
-            PairingState::Paired
-        );
+        r.register(id("dev-a"), DeviceClass::Phone, fp(0x11), PairingGrant::default(), 1).unwrap();
+        r.transition(&id("dev-a"), PairingState::Pairing, 2).unwrap();
+        assert_eq!(r.get(&id("dev-a")).unwrap().pairing.state, PairingState::Pairing);
+        r.transition(&id("dev-a"), PairingState::Paired, 3).unwrap();
+        assert_eq!(r.get(&id("dev-a")).unwrap().pairing.state, PairingState::Paired);
         assert_eq!(r.paired().len(), 1);
     }
 
     #[test]
     fn transition_rejects_unknown_device() {
         let mut r = DeviceRegistry::new();
-        let err = r
-            .transition(&id("nope"), PairingState::Pairing, 1)
-            .unwrap_err();
+        let err = r.transition(&id("nope"), PairingState::Pairing, 1).unwrap_err();
         assert!(matches!(err, DeviceRegistryError::UnknownDevice));
     }
 
     #[test]
     fn unregister_removes_device() {
         let mut r = DeviceRegistry::new();
-        r.register(
-            id("dev-a"),
-            DeviceClass::Laptop,
-            fp(0x11),
-            PairingGrant::default(),
-            1,
-        )
-        .unwrap();
+        r.register(id("dev-a"), DeviceClass::Laptop, fp(0x11), PairingGrant::default(), 1).unwrap();
         let removed = r.unregister(&id("dev-a")).expect("removed");
         assert_eq!(removed.device_id, id("dev-a"));
         assert!(r.is_empty());
@@ -332,24 +279,9 @@ mod tests {
     #[test]
     fn paired_returns_only_paired_devices() {
         let mut r = DeviceRegistry::new();
-        r.register(
-            id("dev-a"),
-            DeviceClass::Laptop,
-            fp(0x11),
-            PairingGrant::default(),
-            1,
-        )
-        .unwrap();
-        r.register(
-            id("dev-b"),
-            DeviceClass::Phone,
-            fp(0x22),
-            PairingGrant::default(),
-            1,
-        )
-        .unwrap();
-        r.transition(&id("dev-a"), PairingState::Paired, 2)
-            .unwrap();
+        r.register(id("dev-a"), DeviceClass::Laptop, fp(0x11), PairingGrant::default(), 1).unwrap();
+        r.register(id("dev-b"), DeviceClass::Phone, fp(0x22), PairingGrant::default(), 1).unwrap();
+        r.transition(&id("dev-a"), PairingState::Paired, 2).unwrap();
         let p = r.paired();
         assert_eq!(p.len(), 1);
         assert_eq!(p[0].device_id, id("dev-a"));
@@ -359,14 +291,7 @@ mod tests {
     fn devices_returns_all_sorted_by_id() {
         let mut r = DeviceRegistry::new();
         for s in ["dev-c", "dev-a", "dev-b"] {
-            r.register(
-                id(s),
-                DeviceClass::Laptop,
-                fp(0x11),
-                PairingGrant::default(),
-                1,
-            )
-            .unwrap();
+            r.register(id(s), DeviceClass::Laptop, fp(0x11), PairingGrant::default(), 1).unwrap();
         }
         let d = r.devices();
         assert_eq!(d[0].device_id, id("dev-a"));

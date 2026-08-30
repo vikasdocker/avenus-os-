@@ -180,11 +180,7 @@ impl PairingGrant {
     /// user-owned device.
     #[must_use]
     pub fn permissive() -> Self {
-        Self {
-            receive_observations: true,
-            receive_proposals: true,
-            execute_remote_tasks: false,
-        }
+        Self { receive_observations: true, receive_proposals: true, execute_remote_tasks: false }
     }
 }
 
@@ -305,15 +301,11 @@ impl std::fmt::Display for PairingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CodeMismatch => f.write_str("pairing code does not match"),
-            Self::FingerprintMismatch => {
-                f.write_str("pairing fingerprint does not match")
-            }
+            Self::FingerprintMismatch => f.write_str("pairing fingerprint does not match"),
             Self::IdentityMismatch => f.write_str("peer identity does not match"),
             Self::RequestExpired => f.write_str("pairing request has expired"),
             Self::AlreadyPaired => f.write_str("peer is already paired"),
-            Self::TerminalState => {
-                f.write_str("peer is in a terminal state; re-register first")
-            }
+            Self::TerminalState => f.write_str("peer is in a terminal state; re-register first"),
         }
     }
 }

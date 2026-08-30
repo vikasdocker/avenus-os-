@@ -37,7 +37,7 @@
    - [Phase 12 — Self-Updating + System Lifecycle](#phase-12--self-updating--system-lifecycle) **NOT_STARTED**
    - [Phase 13 — Aether Autonomous OS](#phase-13--aether-autonomous-operating-system) **NOT_STARTED**
    - [Phase 14 — Multi-Device Aether](#phase-14--multi-device-aether) **NOT_STARTED**
-   - [Phase 15 — Production Release](#phase-15--production-release) **NOT_STARTED**
+   - [Phase 15 — Production Release](#phase-15--production-release) **PARTIAL**
 9. [Global Agent Development Rules](#9-global-agent-development-rules)
 10. [Phase Execution Protocol](#10-phase-execution-protocol)
 11. [Roadmap Governance](#11-roadmap-governance)
@@ -1460,7 +1460,7 @@ credentials, audit chain).
 
 ### Phase 15 — Production Release
 
-**Status:** `NOT_STARTED`.
+**Status:** `PARTIAL`.
 
 **Objective:** Production-ready Aether OS.
 
@@ -1485,6 +1485,93 @@ credentials, audit chain).
 
 **Acceptance:** release quality gates in [§13](#13-release-quality-gates) all
 pass.
+
+**15.1 — Release validation, performance benchmarks, security audit (this commit)**
+
+- **Release validation script** — `scripts/release-validate.sh`
+  runs 9 CI-friendly gates on every change:
+  1. `cargo build --workspace` (debug).
+  2. `cargo build --workspace --release`.
+  3. `cargo test --workspace`.
+  4. `cargo clippy --workspace --all-targets`.
+  5. `cargo fmt --all -- --check`.
+  6. `scripts/release.sh` stage (7 binaries).
+  7. Python SDK / brain test suite.
+  8. Workspace `Cargo.toml` membership check (every crate must
+     be a workspace member or it silently fails to build).
+  9. Phase 15 documentation existence
+     (`docs/RELEASE-NOTES.md`,
+      `docs/phase-15/compatibility-matrix.md`,
+      `docs/phase-15/security-audit.md`).
+
+  Optional flags: `--skip-release-build`, `--skip-python`. The
+  script is portable (POSIX `bash`) and CI-friendly. The
+  cross-platform workspace-membership check normalises
+  Windows backslashes to forward slashes so it works on both
+  `ubuntu-latest` and `windows-latest` runners.
+
+- **Micro-benchmark harness** — `tools/aether-bench` (`cargo run
+  --release --bin aether-bench`) measures the operations the
+  system-core dispatch loop hits on every IPC request:
+  audit chain record+verify, sealed-store seal/unseal,
+  pairing acceptance, device registry, and IPC
+  encode/decode. Numbers (Windows, release profile, 5000
+  iterations):
+
+  | benchmark                   | ns/op     | op/s       |
+  | --------------------------- | --------: | ---------: |
+  | audit chain record+verify   |    ~460   |  ~2.2M     |
+  | sealed store seal+unseal    |  ~1050    |  ~950K     |
+  | SHA-256 (32 B)              |    ~37    |  ~26.7M    |
+  | fingerprint from_public_key |    ~41    |  ~24.3M    |
+  | pairing validate_acceptance |    <1     |   >5G      |
+  | device registry register+get|   ~500    |  ~2.0M     |
+  | IPC encode+decode (JSON)    |  ~1180    |  ~850K     |
+
+- **Security audit** — `docs/phase-15/security-audit.md` reviews
+  the security posture of every shipping primitive: the
+  cryptographic primitives (SHA-256 fingerprinting, AES-256-GCM
+  sealed store, Ed25519 manifest signing), the key-handling
+  story (process-lifetime keys, sealed-store wrapping, no
+  persistent plaintext secrets), the capability / permission
+  policy, the audit chain integrity guarantee, IPC transport
+  security (loopback-only, no auth assumed at the socket
+  layer), cross-device security (paired-peer capability
+  gating), the supply chain (deterministic Cargo.lock, locked
+  version policy), the update mechanism (signed
+  `SignedUpdate`, version policy, rollback plan), known
+  limitations, and audit sign-off.
+
+- **Compatibility matrix** — `docs/phase-15/compatibility-matrix.md`
+  documents Tier 1 (reference: QEMU virtio_gpu, virtio_net,
+  text console, Linux host), Tier 2 (best-effort on common
+  x86_64 desktop hardware), and Tier 3 (deferred: native
+  graphics via DRM/KMS, mobile SoCs, ARM server boards).
+
+- **CI** — `.github/workflows/ci.yml` runs the build, tests,
+  clippy, rustfmt, Python tests, repository contract tests,
+  ShellCheck, and markdownlint on every push and pull
+  request, on both `ubuntu-latest` and `windows-latest`.
+
+- **Release notes** — `docs/RELEASE-NOTES.md` ships the 0.2.0
+  highlights, test results, compatibility summary, known
+  limitations, and upgrade path from 0.1.0.
+
+- **Test results at 0.2.0** — 842 Rust tests passing across 27
+  crates, 0 clippy errors, release build clean, 10 release
+  binaries, `release-validate.sh` reports 9/9.
+
+**15.2 — Bootable ISO + hardware images (future)**
+
+Stable installer, bootable ISO, hardware image templates, and
+QEMU end-to-end smoke. Out-of-scope for this commit.
+
+**15.3 — Privacy-safe telemetry (future, by design)**
+
+Telemetry is off by default. When designed, it MUST be
+opt-in, with a discoverable UI, a clean uninstall path, and
+a documented data-set; the audit chain MUST record every
+consent change.
 
 ---
 

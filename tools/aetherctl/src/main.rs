@@ -7,7 +7,7 @@
 //
 // Environment: AETHER_CONTROL (default "127.0.0.1:4747")
 
-use aether_sdk::{AetherClient, ActorTrust, IpcRequest};
+use aether_sdk::{ActorTrust, AetherClient, IpcRequest};
 use std::time::Duration;
 
 fn main() {

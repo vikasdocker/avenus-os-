@@ -365,13 +365,12 @@ mod tests {
 
     #[test]
     fn seccomp_tags_are_distinct_per_profile() {
-        let s = plan_sandbox(SandboxProfile::SystemService).seccomp.unwrap_or_else(|| {
-            panic!("system service should have a seccomp tag")
-        });
-        let r =
-            plan_sandbox(SandboxProfile::RestrictedService).seccomp.unwrap_or_else(|| {
-                panic!("restricted service should have a seccomp tag")
-            });
+        let s = plan_sandbox(SandboxProfile::SystemService)
+            .seccomp
+            .unwrap_or_else(|| panic!("system service should have a seccomp tag"));
+        let r = plan_sandbox(SandboxProfile::RestrictedService)
+            .seccomp
+            .unwrap_or_else(|| panic!("restricted service should have a seccomp tag"));
         assert_ne!(s, r, "system and restricted profiles must use different seccomp filters");
     }
 
@@ -386,8 +385,7 @@ mod tests {
     fn plan_round_trips_through_serde_json() {
         let original = plan_sandbox(SandboxProfile::SystemService);
         let text = serde_json::to_string(&original).unwrap_or_else(|e| panic!("{e}"));
-        let back: SandboxPlan =
-            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{e}"));
+        let back: SandboxPlan = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(original, back);
     }
 

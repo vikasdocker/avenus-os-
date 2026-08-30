@@ -1,0 +1,95 @@
+name: CI
+
+# Continuous integration for Aether OS.
+#
+# Mirrors the checks in `scripts/release-validate.sh` so PRs are
+# gated on the same gates a tagged release must pass.
+#
+# Triggers on push to main and on every pull request.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    name: rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build (debug)
+        run: cargo build --workspace --all-targets
+
+      - name: Build (release)
+        run: cargo build --workspace --release
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+
+  python:
+    name: python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python unit tests
+        run: |
+          PYTHONPATH="brain:sdk/python${PYTHONPATH:+:$PYTHONPATH}" \
+              python3 -m unittest discover -s tests/python -v
+      - name: Repository contract tests
+        run: |
+          PYTHONPATH="brain:sdk/python${PYTHONPATH:+:$PYTHONPATH}" \
+              python3 -m unittest discover -s tests/integration -v
+      - name: ShellCheck
+        if: hashFiles('scripts/**/*.sh') != ''
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+              shellcheck scripts/*.sh scripts/**/*.sh
+          else
+              sudo apt-get update
+              sudo apt-get install -y shellcheck
+              shellcheck scripts/*.sh scripts/**/*.sh
+          fi
+      - name: Markdown lint
+        if: hashFiles('**/*.md') != ''
+        run: |
+          if command -v markdownlint >/dev/null 2>&1; then
+              markdownlint '**/*.md'
+          fi

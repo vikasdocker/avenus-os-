@@ -2,6 +2,50 @@
 
 All notable changes to Aether OS are recorded in this file.
 
+## 0.2.0 - 2026-08-30
+
+### Added
+
+- **Cross-device contract (`aether-device-core`)** — Device identity
+  (`DeviceId`, `DeviceClass`, `DeviceFingerprint`), `DeviceRegistry`
+  with a 256-entry bounded active set, typed pairing handshake
+  (`PairingRequest` / `PairingAcceptance` / `PairingCode`), capability
+  gating (`PairingGrant`), and `RemoteObservation` / `RemoteProposal`
+  cross-device message envelopes. 60 unit tests.
+- **System-core device IPC** — Six new commands on the TCP control
+  plane: `device.list`, `device.register`, `device.pair.begin`,
+  `device.pair.complete`, `device.revoke`, `device.unregister`. 8
+  integration tests.
+- **Micro-benchmark harness (`aether-bench`)** — Six benches covering
+  audit chain throughput, sealed-store seal/unseal, SHA-256
+  fingerprinting, pairing validation, device registry, and IPC
+  request encode/decode. Run with `cargo run --release --bin
+  aether-bench`.
+- **Release validation script (`scripts/release-validate.sh`)** —
+  9-step CI-friendly gate: debug build, release build, full test
+  suite, clippy, rustfmt, release staging, Python tests, workspace
+  manifest completeness, and Phase 15 documentation existence.
+- **GitHub Actions CI (`.github/workflows/ci.yml`)** — Matrix on
+  `ubuntu-latest` and `windows-latest`. Runs the build, tests,
+  clippy, rustfmt, Python tests, repository contract tests,
+  ShellCheck, and markdownlint on every push and pull request.
+- **Phase 15 documentation** — `docs/RELEASE-NOTES.md` (0.2.0
+  highlights, compatibility, known limitations, upgrade path),
+  `docs/phase-15/compatibility-matrix.md` (Tier 1 reference,
+  Tier 2 best-effort, Tier 3 future hardware), and
+  `docs/phase-15/security-audit.md` (10-section security review
+  of cryptographic primitives, key handling, capability policy,
+  audit chain, IPC transport, cross-device security, supply
+  chain, update mechanism, known limitations, audit sign-off).
+
+### Verified
+
+- 842 Rust tests passing, 0 failing.
+- 0 clippy errors across the workspace.
+- Release build clean (10 binaries).
+- `aether-bench` runs end-to-end with reproducible numbers.
+- `release-validate.sh` reports `9/9 passed`.
+
 ## Unreleased
 
 ### Fixed

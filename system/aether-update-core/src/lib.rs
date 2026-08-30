@@ -50,7 +50,5 @@ pub mod version;
 
 pub use plan::{plan_from_signed_update, UpdateAction, UpdatePlan, UpdatePlanError};
 pub use recovery::{RecoverySnapshot, SnapshotComponent};
-pub use state::{
-    HistoryEntry, StageTransition, UpdateStage, UpdateStatus, MAX_HISTORY_ENTRIES,
-};
+pub use state::{HistoryEntry, StageTransition, UpdateStage, UpdateStatus, MAX_HISTORY_ENTRIES};
 pub use version::{VersionPolicy, VersionPolicyDecision, VersionRequirement};

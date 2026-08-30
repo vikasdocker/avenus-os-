@@ -105,15 +105,7 @@ impl Observation {
         if id.is_empty() || component.is_empty() || summary.is_empty() {
             return None;
         }
-        Some(Self {
-            id,
-            component,
-            summary,
-            detail: None,
-            severity,
-            timestamp_ms,
-            data: None,
-        })
+        Some(Self { id, component, summary, detail: None, severity, timestamp_ms, data: None })
     }
 
     /// Attaches a longer description.

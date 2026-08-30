@@ -70,5 +70,7 @@ pub use pairing::{
     PairingState,
 };
 pub use registry::{DeviceRegistry, DeviceRegistryError, RegisteredDevice};
-pub use remote::{accept_remote_delivery, RemoteDeliveryError, RemoteDeliveryKind,
-    RemoteObservation, RemoteProposal, RemoteSource};
+pub use remote::{
+    accept_remote_delivery, RemoteDeliveryError, RemoteDeliveryKind, RemoteObservation,
+    RemoteProposal, RemoteSource,
+};

@@ -75,7 +75,8 @@ impl AuditEntry {
     /// fields in declaration order, with the timestamp and
     /// index in big-endian form.
     fn canonical_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(64 + self.event.len() + self.component.len() + self.detail.len());
+        let mut buf =
+            Vec::with_capacity(64 + self.event.len() + self.component.len() + self.detail.len());
         buf.extend_from_slice(&self.index.to_be_bytes());
         buf.extend_from_slice(&self.timestamp_ms.to_be_bytes());
         buf.extend_from_slice(self.event.as_bytes());
@@ -200,22 +201,13 @@ impl AuditChain {
     /// existing entries; the new entry's `index` is set to
     /// the post-eviction length, which is the index the
     /// chain expects.
-    pub fn record(
-        &mut self,
-        timestamp_ms: u64,
-        event: &str,
-        component: &str,
-        detail: &str,
-    ) -> u64 {
+    pub fn record(&mut self, timestamp_ms: u64, event: &str, component: &str, detail: &str) -> u64 {
         if let Some(cap) = self.retention.max_entries.checked_add(1) {
             if cap != 0 && self.entries.len() >= self.retention.max_entries {
                 self.entries.remove(0);
             }
         }
-        let prev_hash = self
-            .entries
-            .last()
-            .map_or(GENESIS_PREV_HASH, |e| e.content_hash);
+        let prev_hash = self.entries.last().map_or(GENESIS_PREV_HASH, |e| e.content_hash);
         let index = self.entries.len() as u64;
         let mut entry = AuditEntry {
             index,

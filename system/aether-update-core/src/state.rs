@@ -339,11 +339,7 @@ mod tests {
         let mut s = UpdateStatus::new();
         // Push more than MAX_HISTORY_ENTRIES.
         for i in 0..(MAX_HISTORY_ENTRIES + 10) {
-            let stage = if i % 2 == 0 {
-                UpdateStage::Downloading
-            } else {
-                UpdateStage::Failed
-            };
+            let stage = if i % 2 == 0 { UpdateStage::Downloading } else { UpdateStage::Failed };
             s.transition(stage, i as u64, None);
         }
         assert_eq!(s.history().len(), MAX_HISTORY_ENTRIES);

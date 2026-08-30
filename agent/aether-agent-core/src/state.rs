@@ -237,8 +237,16 @@ mod tests {
     }
 
     fn sample_proposal(id: &str) -> Proposal {
-        Proposal::new(id, TaskKind::Notify, "title", "description", "reasoning", crate::proposal::ProposalRisk::Low, 1)
-            .expect("valid")
+        Proposal::new(
+            id,
+            TaskKind::Notify,
+            "title",
+            "description",
+            "reasoning",
+            crate::proposal::ProposalRisk::Low,
+            1,
+        )
+        .expect("valid")
     }
 
     #[test]
@@ -350,10 +358,7 @@ impl AgentStatus {
     /// `agent.approve` command uses this; the
     /// future runtime calls it directly when
     /// it schedules a task.
-    pub fn insert_task(
-        &mut self,
-        task: AgentTask,
-    ) -> Result<(), crate::task::TaskDependencyError> {
+    pub fn insert_task(&mut self, task: AgentTask) -> Result<(), crate::task::TaskDependencyError> {
         self.tasks.insert(task)
     }
 }

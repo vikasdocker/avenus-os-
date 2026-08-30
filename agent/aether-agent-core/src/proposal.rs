@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 
 use aether_core::RiskLevel;
 
-
 use crate::observation::Observation;
 use crate::task::{AgentTask, TaskId, TaskKind, TaskRisk};
 
@@ -238,10 +237,9 @@ impl std::fmt::Display for ProposalError {
             Self::IncompleteDescription => {
                 f.write_str("proposal is missing title, description, or reasoning")
             }
-            Self::UnknownEvidence { proposal, missing } => write!(
-                f,
-                "proposal '{proposal}' references unknown observation '{missing}'"
-            ),
+            Self::UnknownEvidence { proposal, missing } => {
+                write!(f, "proposal '{proposal}' references unknown observation '{missing}'")
+            }
             Self::RiskTooLowForKind { kind, risk } => write!(
                 f,
                 "proposal kind '{}' requires consent, but risk is '{}'",
@@ -272,9 +270,7 @@ pub fn validate_proposal(
     if proposal.id.as_str().is_empty() {
         return Err(ProposalError::EmptyId);
     }
-    if proposal.title.is_empty()
-        || proposal.description.is_empty()
-        || proposal.reasoning.is_empty()
+    if proposal.title.is_empty() || proposal.description.is_empty() || proposal.reasoning.is_empty()
     {
         return Err(ProposalError::IncompleteDescription);
     }
@@ -291,15 +287,10 @@ pub fn validate_proposal(
         TaskKind::RestartService | TaskKind::ProposeCleanup | TaskKind::ProposeSecurityScan => {
             ProposalRisk::Medium
         }
-        TaskKind::ProposeUpdate | TaskKind::ProposeInstall | TaskKind::Custom => {
-            ProposalRisk::High
-        }
+        TaskKind::ProposeUpdate | TaskKind::ProposeInstall | TaskKind::Custom => ProposalRisk::High,
     };
     if proposal.risk < min_risk {
-        return Err(ProposalError::RiskTooLowForKind {
-            kind: proposal.kind,
-            risk: proposal.risk,
-        });
+        return Err(ProposalError::RiskTooLowForKind { kind: proposal.kind, risk: proposal.risk });
     }
     Ok(())
 }
@@ -369,8 +360,7 @@ mod tests {
     }
 
     fn proposal(kind: TaskKind, risk: ProposalRisk) -> Proposal {
-        Proposal::new("p1", kind, "title", "description", "reasoning", risk, 1)
-            .expect("valid")
+        Proposal::new("p1", kind, "title", "description", "reasoning", risk, 1).expect("valid")
     }
 
     #[test]

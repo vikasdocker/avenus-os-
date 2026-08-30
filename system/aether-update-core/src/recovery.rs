@@ -88,11 +88,7 @@ impl RecoverySnapshot {
         taken_at_ms: u64,
         components: Vec<SnapshotComponent>,
     ) -> Self {
-        Self {
-            snapshot_id: snapshot_id.into(),
-            taken_at_ms,
-            components,
-        }
+        Self { snapshot_id: snapshot_id.into(), taken_at_ms, components }
     }
 
     /// Returns `true` if every component has a
@@ -110,10 +106,7 @@ impl RecoverySnapshot {
     /// this snapshot, if any.
     #[must_use]
     pub fn version_of(&self, target: &str) -> Option<&str> {
-        self.components
-            .iter()
-            .find(|c| c.target == target)
-            .map(|c| c.from_version.as_str())
+        self.components.iter().find(|c| c.target == target).map(|c| c.from_version.as_str())
     }
 
     /// Returns the number of components in the
@@ -140,12 +133,8 @@ mod tests {
             "snap-1",
             1_700_000_000_000,
             vec![
-                SnapshotComponent::new(
-                    "aether-os",
-                    "1.1.0",
-                    "/var/lib/aether/snapshots/snap-1/os",
-                )
-                .with_note("active partition copied to B"),
+                SnapshotComponent::new("aether-os", "1.1.0", "/var/lib/aether/snapshots/snap-1/os")
+                    .with_note("active partition copied to B"),
                 SnapshotComponent::new(
                     "aether-agentd",
                     "0.5.0",
@@ -175,11 +164,7 @@ mod tests {
 
     #[test]
     fn empty_stash_path_is_incomplete() {
-        let s = RecoverySnapshot::new(
-            "snap-1",
-            0,
-            vec![SnapshotComponent::new("a", "1", "")],
-        );
+        let s = RecoverySnapshot::new("snap-1", 0, vec![SnapshotComponent::new("a", "1", "")]);
         assert!(!s.is_complete());
     }
 

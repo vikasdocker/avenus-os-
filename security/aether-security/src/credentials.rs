@@ -247,12 +247,10 @@ impl<K: KeyProvider> SealedStore<K> {
         let mut nonce_bytes = [0u8; 12];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
         let nonce_array: Array<u8, _> = Array::from(nonce_bytes);
-        let ciphertext = cipher
-            .encrypt(&nonce_array, plaintext.as_bytes())
-            .map_err(|e| {
-                eprintln!("[aether-security] seal encrypt failed: {e:?}");
-                CredentialError::AuthenticationFailed
-            })?;
+        let ciphertext = cipher.encrypt(&nonce_array, plaintext.as_bytes()).map_err(|e| {
+            eprintln!("[aether-security] seal encrypt failed: {e:?}");
+            CredentialError::AuthenticationFailed
+        })?;
         let mut bytes = Vec::with_capacity(12 + ciphertext.len());
         bytes.extend_from_slice(&nonce_bytes);
         bytes.extend_from_slice(&ciphertext);
@@ -260,11 +258,7 @@ impl<K: KeyProvider> SealedStore<K> {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
             .unwrap_or(0);
-        let blob = SealedBlob {
-            bytes,
-            label: label.map(str::to_string),
-            sealed_at_ms,
-        };
+        let blob = SealedBlob { bytes, label: label.map(str::to_string), sealed_at_ms };
         let credential =
             Credential { name: name.to_string(), blob, plaintext_len: plaintext.len() };
         self.entries.insert(name.to_string(), credential);
@@ -276,8 +270,7 @@ impl<K: KeyProvider> SealedStore<K> {
     /// Decrypts and returns the plaintext for `name`. The
     /// returned `Secret<String>` is wiped on drop.
     pub fn unseal(&self, name: &str) -> Result<Secret<String>, CredentialError> {
-        let credential =
-            self.entries.get(name).ok_or(CredentialError::NotFound)?;
+        let credential = self.entries.get(name).ok_or(CredentialError::NotFound)?;
         let bytes = &credential.blob.bytes;
         // The wire format is `nonce(12) || ciphertext_with_tag(N+16)`,
         // so the minimum length is 12 (nonce) + 16 (empty-ciphertext tag) = 28.

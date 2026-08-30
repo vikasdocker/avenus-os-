@@ -32,16 +32,7 @@ pub struct IpcRequest {
 /// (capability risk is the only gate). `Untrusted` is the
 /// defence-in-depth knob: every request from an untrusted actor
 /// is denied regardless of risk.
-#[derive(
-    Debug,
-    Copy,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActorTrust {
     /// The actor is known and trusted (default for local IPC).
