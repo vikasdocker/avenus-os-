@@ -1251,8 +1251,9 @@ will paint the surfaces with them.
 ### Phase 7 — Aether Agent Deep System Control
 
 **Status:** `IN_PROGRESS` (7.1 system diagnostics shipped;
-7.2 self-healing, 7.3 system automation, 7.4
-background agent are the remaining work).
+7.2 self-healing shipped;
+7.3 system automation, 7.4 background agent are
+the remaining work).
 
 **Objective:** Make Aether capable of operating the entire OS.
 
@@ -1286,6 +1287,40 @@ background agent are the remaining work).
   came from diagnostics. 24 unit tests, 0
   warnings, 0 clippy lints. Files:
   `system/aether-diagnostics/src/lib.rs`.
+- 7.2 **Self-healing — COMPLETE**. New crate
+  `system/aether-recovery` ships the bounded
+  recovery-action model. The contract is *typed
+  review*: every recovery step is a
+  `RecoveryAction` variant the agent (and the
+  user) can read before execution. Eight
+  variants cover the five recovery families per
+  the ROADMAP — service (`RestartService`),
+  network (`ReconnectNetwork`), application
+  (`RestartApp`), dependency
+  (`ResolveDependency`), resource
+  (`FreeDiskCache` / `DropPageCache` /
+  `KillProcess`) — plus `InformUser` for the
+  "no auto-recovery available" case. Each
+  action exposes `subsystem()` (the
+  `Subsystem` it targets), `summary()` (a
+  single-sentence human description), and
+  `requires_consent()` — only `KillProcess` is
+  consent-gated; the rest run automatically
+  once the agent approves them. `RecoveryPlan`
+  is the ordered list of actions the agent
+  executes for a single symptom;
+  `RecoveryPolicy` is the symptom-id → recipe
+  table, with a `default_policy()` that
+  handles the six default diagnostics symptoms
+  (`cpu_overload`, `memory_pressure`,
+  `disk_full`, `service_down`,
+  `app_crash_loop`, `system_unstable`).
+  `plan_recovery(symptoms, policy)` is the
+  one-shot: give it the symptoms from a
+  `DiagnosticReport`, get back the plans
+  ready to execute. 19 unit tests, 0
+  warnings, 0 clippy lints. Files:
+  `system/aether-recovery/src/lib.rs`.
 
 **Dependencies:** Phase 2 + Phase 3 + Phase 8 (devices).
 
