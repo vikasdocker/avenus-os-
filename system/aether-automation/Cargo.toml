@@ -1,0 +1,15 @@
+[package]
+name = "aether-automation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether system automation: user-defined workflows (e.g. 'morning setup') that compile to ordered AgentTask sequences. Each Workflow is a typed, reviewable plan; the engine handles retry, error continuation, and trigger dispatch."
+
+[dependencies]
+aether-agent-core = { path = "../../agent/aether-agent-core" }
+aether-recovery = { path = "../aether-recovery" }
+serde_json = "1"
+
+[lints]
+workspace = true

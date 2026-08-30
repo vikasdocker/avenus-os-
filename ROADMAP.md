@@ -1252,8 +1252,8 @@ will paint the surfaces with them.
 
 **Status:** `IN_PROGRESS` (7.1 system diagnostics shipped;
 7.2 self-healing shipped;
-7.3 system automation, 7.4 background agent are
-the remaining work).
+7.3 system automation shipped;
+7.4 background agent is the remaining work).
 
 **Objective:** Make Aether capable of operating the entire OS.
 
@@ -1321,6 +1321,30 @@ the remaining work).
   ready to execute. 19 unit tests, 0
   warnings, 0 clippy lints. Files:
   `system/aether-recovery/src/lib.rs`.
+- 7.3 **System automation — COMPLETE**. New
+  crate `system/aether-automation` ships the
+  user-defined workflow model. A *workflow*
+  is a named, ordered list of `WorkflowStep`s
+  with a `Trigger` (Manual / TimeOfDay /
+  OnEvent). Each step is a typed `StepAction`
+  (LaunchApp / OpenFile / AgentTask /
+  RecoveryAction / Notify / Wait) with a
+  per-step `FailurePolicy` (Abort / Skip /
+  Continue / RetryThenAbort / RetryThenSkip).
+  The `WorkflowRegistry` is the named
+  collection; the runtime boots with
+  `default_registry()` (morning_setup at
+  09:00, end_of_day at 18:00, before_meeting
+  on demand) and the user can register more.
+  `compile_to_tasks(workflow, prefix, ts)` is
+  the one-shot that turns a workflow into the
+  ordered `AgentTask` list the runtime
+  executes; the failure policy and the
+  structured step payload ride along as JSON
+  arguments so the runtime can read them
+  back at execution time. 19 unit tests, 0
+  warnings, 0 clippy lints. Files:
+  `system/aether-automation/src/lib.rs`.
 
 **Dependencies:** Phase 2 + Phase 3 + Phase 8 (devices).
 
