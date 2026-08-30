@@ -1,0 +1,26 @@
+[package]
+name = "aether-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether Store - install, launch, and uninstall of signed Aether apps"
+
+[lib]
+name = "aether_store"
+path = "src/lib.rs"
+
+[dependencies]
+aether-core = { path = "../../core/aether-core" }
+aether-security = { path = "../../security/aether-security" }
+ed25519-dalek = { version = "3" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+ed25519-dalek = { version = "3" }
+tempfile = "3"
+
+[lints]
+workspace = true
