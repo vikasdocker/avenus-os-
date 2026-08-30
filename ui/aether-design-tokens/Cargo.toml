@@ -1,0 +1,12 @@
+[package]
+name = "aether-design-tokens"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether design system tokens (color, type, spacing, radius, motion, AI states) — the single source of truth for every UI surface in Aether OS."
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -28,7 +28,8 @@ members = [
   "sdk/rust/aether-sdk",
   "tools/aetherctl",
   "tools/aether-bench",
-  "agent/aether-agent-runtime"
+  "agent/aether-agent-runtime",
+  "ui/aether-design-tokens"
 ]
 
 [workspace.package]
