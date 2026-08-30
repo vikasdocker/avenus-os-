@@ -1077,13 +1077,54 @@ the audio route via a typed capability.
 
 ### Phase 9 — Application Platform
 
-**Status:** `PARTIAL` (9.2 / 9.3 / 9.4 shipped; 9.1 SDK is
-the unstarted sub-milestone; 9.4 update / rating flows are
-out of scope for the typed contract).
+**Status:** `COMPLETE` (9.1 / 9.2 / 9.3 / 9.4 all shipped;
+9.4 update / rating flows remain out of scope for the
+typed contract).
 
 **Sub-milestones:**
 
-- 9.1 Aether SDK (app, UI, Agent, IPC, capabilities, manifests) — **NOT_STARTED**.
+- 9.1 **Aether SDK (app, UI, Agent, IPC, capabilities, manifests) — COMPLETE**.
+  `sdk/rust/aether-sdk` is the developer-facing surface for
+  third-party apps. The crate now ships the packaging half
+  (the runtime `AetherClient` was already there):
+  * `manifest_builder` — `AppManifestBuilder::new(app_id, name,
+    version, publisher, payload)` with `.permission(...)`,
+    `.resources(...)`, `.depends_on(...)`, `.min_os_version(...)`,
+    `.description(...)`, `.timestamp_ms(...)`. Defaults:
+    `schema_version = APP_PACKAGE_SCHEMA_VERSION`,
+    `sandbox_profile = RestrictedService`,
+    `min_os_version = SDK.Major.Minor.0`, `binary_sha256` and
+    `payload_len` filled from the payload on `.build()`. Strict
+    validation up front: bad app id, empty name/version/
+    publisher, empty payload all surface as typed
+    `ManifestBuildError` variants.
+  * `package_builder` — `AppPackageBuilder::build_signed(manifest,
+    payload, signer)` is the one-shot. Internally it runs a
+    pre-sign `validate_manifest_pre_sign` (strict minus the
+    `publisher_key_id` check, which the signer fills in),
+    then the strict `AppManifest::validate` after the
+    fingerprint is set. The signature is computed by
+    `aether_security::app_signing::AppPackageSigner::sign_package`
+    over the manifest's canonical bytes; the resulting
+    `AppPackage` verifies against the signer's public key
+    via `AppPackageVerifier::verify_with_key`.
+  * `permissions` — re-exports `app_permission_capability`
+    as a `(permission, capability, risk_level)` tuple list
+    for SDK callers that want a pre-install consent preview
+    UI.
+  * `install` — typed IPC command builders:
+    `install_request(package_path, actor_trust)`,
+    `launch_request(app_id, instance_label, actor_trust)`,
+    `uninstall_request(app_id, actor_trust)`. All three fix
+    `service_id = "aether-store"` and the verb name; the
+    caller controls `actor_trust` so tests can assert that
+    the dispatcher denies store commands from `Untrusted`
+    actors.
+  35 new unit tests + 2 doc-tests, all green.
+  Files: `sdk/rust/aether-sdk/src/{manifest_builder,
+  package_builder, permissions, install}.rs`,
+  `sdk/rust/aether-sdk/src/lib.rs`,
+  `sdk/rust/aether-sdk/Cargo.toml`.
 - 9.2 **Application packaging (format, manifest, signing, dependencies,
   permissions, resources) — COMPLETE**. `aether_core::app` defines the
   typed `AppManifest`, `AppPackage`, and the 11-variant
@@ -1145,13 +1186,12 @@ out of scope for the typed contract).
 
 **Dependencies:** Phase 1.4, Phase 2.
 
-**Acceptance (9.2 / 9.3 / 9.4 — the install / sandbox /
-update foundation): a third-party Aether app can be
-installed, sandboxed, and updated. Update and rating
-flows are out of scope for the typed contract; the
-foundation for them (publisher trust, install receipt
-with manifest_digest, refused set, plan_digest) is in
-place.
+**Acceptance:** a third-party Aether app can be authored
+(via the SDK), signed, installed, sandboxed, launched, and
+uninstalled. Update and rating flows are out of scope for
+the typed contract; the foundation for them (publisher
+trust, install receipt with manifest_digest, refused set,
+plan_digest) is in place.
 
 ---
 
