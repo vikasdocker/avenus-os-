@@ -269,6 +269,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-ocr"
+version = "0.1.0"
+dependencies = [
+ "aether-vision-core",
+]
+
+[[package]]
 name = "aether-process-manager"
 version = "0.1.0"
 dependencies = [
@@ -422,6 +429,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-ui-detector"
+version = "0.1.0"
+dependencies = [
+ "aether-ocr",
+ "aether-vision-core",
+]
+
+[[package]]
 name = "aether-update-core"
 version = "0.1.0"
 dependencies = [
@@ -431,6 +446,10 @@ dependencies = [
  "serde_json",
  "tempfile",
 ]
+
+[[package]]
+name = "aether-vision-core"
+version = "0.1.0"
 
 [[package]]
 name = "aether-voice"

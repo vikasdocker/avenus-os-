@@ -1,0 +1,13 @@
+[package]
+name = "aether-ocr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether OCR: text extraction from a screen frame, with bounding boxes and confidence. Engine-agnostic — the runtime plugs in tesseract, easyocr, paddleocr, etc."
+
+[dependencies]
+aether-vision-core = { path = "../aether-vision-core" }
+
+[lints]
+workspace = true

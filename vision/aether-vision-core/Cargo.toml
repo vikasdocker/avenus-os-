@@ -1,0 +1,12 @@
+[package]
+name = "aether-vision-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether vision core: typed model for screen frames, regions of interest, and the universal aether_screen reference. Engine-agnostic — the runtime plugs in the actual capture and detection."
+
+[dependencies]
+
+[lints]
+workspace = true
