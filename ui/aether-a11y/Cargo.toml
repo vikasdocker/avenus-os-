@@ -1,0 +1,13 @@
+[package]
+name = "aether-a11y"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether accessibility: focus model, keyboard navigation, scaling, reduced-motion preference, contrast preference, and accessibility roles. The renderer / shell reads these values and bridges them to AT-SPI / the screen reader."
+
+[dependencies]
+aether-design-tokens = { path = "../aether-design-tokens" }
+
+[lints]
+workspace = true

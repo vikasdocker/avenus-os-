@@ -1206,8 +1206,31 @@ The complete UI/UX direction is in [§12 — Aether UI / UX Design Direction](#1
   reads is the Y value at the supplied X. 28
   unit tests, 0 warnings, 0 clippy lints. Files:
   `ui/aether-animation/src/lib.rs`.
-- 6.9 Accessibility (contrast, keyboard nav, scaling, reduced motion, focus
-  rings).
+- 6.9 **Accessibility — COMPLETE**. New crate
+  `ui/aether-a11y` ships the accessibility model
+  every Aether surface composes. The crate
+  defines: 12 `Role`s (Button / TextInput / List /
+  ListItem / Nav / Tab / Dialog / Status /
+  ProgressBar / Tile / Heading / Region) that the
+  AT-SPI / screen-reader bridge uses to announce
+  surfaces; a `Description` value (label + detail
+  + state + shortcut) that the screen reader
+  reads; a `Focusable` value (id + role +
+  description + disabled) and a `KeyboardNav`
+  chain (`push`, `focus_next`, `focus_prev`,
+  `focused_id`, `enabled_count`) that
+  implements tab navigation with disabled-skip
+  and wrap; `MotionPreference` (`Standard` /
+  `Reduced`) with an `apply_motion_preference
+  (d, pref)` helper that zeros out any duration
+  > 100 ms when the user has the OS-level
+  "Reduce motion" toggle on; `ContrastPreference`
+  (`Standard` / `High`) for the OS-level
+  "Increase contrast" toggle; and a `Scale`
+  value (1..=4) that the renderer multiplies
+  into every `Spacing` and `TypeScale` value.
+  26 unit tests, 0 warnings, 0 clippy lints.
+  Files: `ui/aether-a11y/src/lib.rs`.
 
 **Dependencies:** Phase 1.9 (graphical OS) and Phase 3 (conversational
 Aether) for AI surfaces.

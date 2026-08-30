@@ -38,6 +38,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-a11y"
+version = "0.1.0"
+dependencies = [
+ "aether-design-tokens",
+]
+
+[[package]]
 name = "aether-agent-core"
 version = "0.1.0"
 dependencies = [
