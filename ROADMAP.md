@@ -1632,8 +1632,8 @@ hardware profile; recovery path is exercisable.
 **Status:** `PARTIAL` (capability/policy/audit/hash-chain/sealed
 credentials/signed manifests/signed updates/kernel sandboxing
 and the tamper-evident boot-measurement chain are all
-present; Phase 11.1 prompt-injection defences are still
-in-progress; remaining defence-in-depth items live in
+present; Phase 11.1 prompt-injection defences
+shipped; remaining defence-in-depth items live in
 future phases).
 
 **Sub-milestones:**

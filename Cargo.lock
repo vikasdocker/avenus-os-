@@ -81,6 +81,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-ai-defense"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aether-animation"
 version = "0.1.0"
 dependencies = [
