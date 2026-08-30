@@ -454,7 +454,13 @@ mod tests {
     fn chain_verifies_after_many_inserts() {
         let mut chain = BootMeasurementChain::new(BootRetention::last_n(200));
         for i in 0..100u64 {
-            chain.record(10_000 + i, BootStage::InitramfsComponent, format!("comp-{i}"), "", [i as u8; 32]);
+            chain.record(
+                10_000 + i,
+                BootStage::InitramfsComponent,
+                format!("comp-{i}"),
+                "",
+                [i as u8; 32],
+            );
         }
         assert_eq!(chain.len(), 100);
         assert!(chain.verify_chain_lenient().is_ok());
@@ -464,7 +470,13 @@ mod tests {
     fn detect_content_tampering() {
         let mut chain = BootMeasurementChain::new(BootRetention::last_n(10));
         for i in 0..5u64 {
-            chain.record(1000 + i, BootStage::InitramfsComponent, format!("c-{i}"), "", [i as u8; 32]);
+            chain.record(
+                1000 + i,
+                BootStage::InitramfsComponent,
+                format!("c-{i}"),
+                "",
+                [i as u8; 32],
+            );
         }
         chain.entries[2].payload = [0xAB; 32];
         let status = chain.verify_chain_lenient().unwrap_err();
@@ -475,7 +487,13 @@ mod tests {
     fn detect_broken_link_tampering() {
         let mut chain = BootMeasurementChain::new(BootRetention::last_n(10));
         for i in 0..5u64 {
-            chain.record(1000 + i, BootStage::InitramfsComponent, format!("c-{i}"), "", [i as u8; 32]);
+            chain.record(
+                1000 + i,
+                BootStage::InitramfsComponent,
+                format!("c-{i}"),
+                "",
+                [i as u8; 32],
+            );
         }
         chain.entries[3].prev_hash = [0xCD; 32];
         let status = chain.verify_chain_lenient().unwrap_err();
@@ -486,7 +504,13 @@ mod tests {
     fn detect_index_gap_tampering() {
         let mut chain = BootMeasurementChain::new(BootRetention::last_n(10));
         for i in 0..5u64 {
-            chain.record(1000 + i, BootStage::InitramfsComponent, format!("c-{i}"), "", [i as u8; 32]);
+            chain.record(
+                1000 + i,
+                BootStage::InitramfsComponent,
+                format!("c-{i}"),
+                "",
+                [i as u8; 32],
+            );
         }
         chain.entries[2].index = 99;
         let status = chain.verify_chain_lenient().unwrap_err();
@@ -517,7 +541,13 @@ mod tests {
     fn record_evicts_oldest_when_at_capacity() {
         let mut chain = BootMeasurementChain::new(BootRetention::last_n(3));
         for i in 0..5u64 {
-            chain.record(1000 + i, BootStage::InitramfsComponent, format!("c-{i}"), "", [i as u8; 32]);
+            chain.record(
+                1000 + i,
+                BootStage::InitramfsComponent,
+                format!("c-{i}"),
+                "",
+                [i as u8; 32],
+            );
         }
         assert_eq!(chain.len(), 3);
         let entries = chain.entries();
@@ -527,7 +557,8 @@ mod tests {
 
     #[test]
     fn prune_drops_expired_and_rewrites_head() {
-        let mut chain = BootMeasurementChain::new(BootRetention { max_entries: 100, max_age_ms: 2_500 });
+        let mut chain =
+            BootMeasurementChain::new(BootRetention { max_entries: 100, max_age_ms: 2_500 });
         chain.record(1_000, BootStage::InitramfsComponent, "c-0", "", [0; 32]);
         chain.record(2_000, BootStage::InitramfsComponent, "c-1", "", [1; 32]);
         chain.record(3_000, BootStage::InitramfsComponent, "c-2", "", [2; 32]);

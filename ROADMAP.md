@@ -1181,8 +1181,10 @@ hardware profile; recovery path is exercisable.
 
 **Status:** `PARTIAL` (capability/policy/audit/hash-chain/sealed
 credentials/signed manifests/signed updates/kernel sandboxing
-present; tamper-evident root-of-trust boot is deferred to this
-phase).
+and the tamper-evident boot-measurement chain are all
+present; Phase 11.1 prompt-injection defences are still
+in-progress; remaining defence-in-depth items live in
+future phases).
 
 **Sub-milestones:**
 
@@ -1313,6 +1315,30 @@ phase).
   daemon. Evidence: `security/aether-security/src/signed_update.rs`
   (14 unit tests) and the `update_ipc_tests` module in the
   system-core main.
+- 11.9 **Tamper-evident boot-measurement chain — COMPLETE**.
+  `security/aether-security/src/boot_measure.rs` is the
+  root-of-trust companion to `AuditChain`. The
+  `BootMeasurementChain` records the boot-time artifacts
+  in the order they are encountered, so a verifier
+  reading the chain from the start can answer "did the
+  kernel cmdline, the loaded initramfs, the active kernel
+  modules, and the registered service manifests match
+  the last-known-good state?". Stages are typed:
+  `KernelCommandLine`, `InitramfsComponent`,
+  `KernelModule`, `ServiceManifest`, `BootComplete`.
+  The `BootComplete` marker carries the audit-chain
+  genesis hash so the boot chain binds to the runtime
+  chain. `verify_chain` is strict (requires the
+  `BootComplete` marker); `verify_chain_lenient` accepts
+  in-progress chains. The chain is content-addressed:
+  every entry's `content_hash` is SHA-256 over a
+  canonical byte buffer; the verifier recomputes and
+  rejects on mismatch, broken link, or index gap.
+  `kernel_cmdline_digest` is a canonical SHA-256 over
+  the kernel command line, sorted by argument so two
+  cmdlines that differ only in argument order hash to
+  the same digest. 18 new unit tests. File:
+  `security/aether-security/src/boot_measure.rs`.
 - Kernel primitives where appropriate: Linux capabilities, namespaces, cgroups,
   seccomp, MAC policy, sandboxing, signed applications, signed updates,
   credential protection, secret storage, audit retention, policy management.
