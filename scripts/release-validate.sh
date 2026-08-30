@@ -93,7 +93,8 @@ case "$(uname -s 2>/dev/null || echo Windows)" in
     MINGW*|MSYS*|CYGWIN*|Windows*) exe_suffix=".exe" ;;
 esac
 for bin in aether-init aether-system-core aether-application-manager \
-           aethersh aether-supervisor aether-agentd aetherctl; do
+           aethersh aether-supervisor aether-agentd aetherctl \
+           aether-sandbox; do
     if [[ -x "target/release/${bin}${exe_suffix}" ]]; then
         cp "target/release/${bin}${exe_suffix}" "$STAGE/bin/"
         bins+=("$bin")

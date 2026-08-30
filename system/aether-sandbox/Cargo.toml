@@ -1,0 +1,32 @@
+[package]
+name = "aether-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether sandbox enforcement binary: applies a declarative SandboxPlan via Linux prctl/unshare/cgroupfs/seccomp. Linux-only."
+
+[[bin]]
+name = "aether-sandbox"
+path = "src/main.rs"
+
+[dependencies]
+aether-core = { path = "../../core/aether-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+# This binary calls prctl(2)/unshare(2)/capset(2)/execvp(2) on
+# Linux. unsafe_code is forbidden at the workspace level; we
+# override it locally for the enforcement layer. The crate is
+# intentionally small and the unsafe blocks are individually
+# justified in src/linux.rs.
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = "deny"
+unwrap_used = "allow"
+expect_used = "allow"

@@ -178,6 +178,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-sandbox"
+version = "0.1.0"
+dependencies = [
+ "aether-core",
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aether-sdk"
 version = "0.1.0"
 dependencies = [

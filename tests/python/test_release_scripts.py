@@ -133,5 +133,49 @@ class QemuIsoScriptTests(unittest.TestCase):
         self.assertIn("-cdrom", self.text)
 
 
+class ReleaseScriptStageTests(unittest.TestCase):
+    """`scripts/release.sh` stages every Aether binary, including
+    the new `aether-sandbox` kernel-enforcement binary."""
+
+    def setUp(self) -> None:
+        self.path = REPO_ROOT / "scripts" / "release.sh"
+        self.text = self.path.read_text(encoding="utf-8")
+
+    def test_exists(self) -> None:
+        self.assertTrue(self.path.is_file(), f"missing: {self.path}")
+
+    def test_has_bash_shebang(self) -> None:
+        _assert_bash_shebang(self, self.text)
+
+    def test_stages_aether_sandbox(self) -> None:
+        self.assertIn(
+            "aether-sandbox",
+            self.text,
+            "aether-sandbox must be staged by scripts/release.sh",
+        )
+
+
+class InitramfsBuildTests(unittest.TestCase):
+    """`scripts/iso/build-initramfs.sh` copies every Aether binary
+    into the initramfs tree, including the new `aether-sandbox`."""
+
+    def setUp(self) -> None:
+        self.path = REPO_ROOT / "scripts" / "iso" / "build-initramfs.sh"
+        self.text = self.path.read_text(encoding="utf-8")
+
+    def test_exists(self) -> None:
+        self.assertTrue(self.path.is_file(), f"missing: {self.path}")
+
+    def test_has_bash_shebang(self) -> None:
+        _assert_bash_shebang(self, self.text)
+
+    def test_copies_aether_sandbox(self) -> None:
+        self.assertIn(
+            "aether-sandbox",
+            self.text,
+            "aether-sandbox must be copied into the initramfs",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

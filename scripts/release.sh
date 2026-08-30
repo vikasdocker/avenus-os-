@@ -12,7 +12,8 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/bin" "$STAGE/services.d"
 
 for bin in aether-init aether-system-core aether-application-manager \
-           aethersh aether-supervisor aether-agentd aetherctl; do
+           aethersh aether-supervisor aether-agentd aetherctl \
+           aether-sandbox; do
     cp "target/release/$bin" "$STAGE/bin/"
 done
 

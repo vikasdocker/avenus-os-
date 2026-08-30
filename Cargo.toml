@@ -13,6 +13,7 @@ members = [
   "system/aether-system-core",
   "system/aether-application-manager",
   "system/aether-update-core",
+  "system/aether-sandbox",
   "agent/aether-agent-core",
   "agent/aether-device-core",
   "network/aether-network",

@@ -32,7 +32,7 @@ chmod 1777 "$STAGE/tmp"
 # 1. Aether binaries.
 cargo build --release $TARGET_ARGS -p aether-init -p aether-system-core \
     -p aetherctl -p aether-shell -p aether-graphical-shell -p aether-agentd \
-    -p aether-calculator -p aether-notes
+    -p aether-calculator -p aether-notes -p aether-sandbox
 
 copy_binary() {
     local src="$1" dst="$2" tries=0
@@ -54,6 +54,7 @@ copy_binary "$BIN_DIR/aether-graphical-shell" "$STAGE/bin/"
 copy_binary "$BIN_DIR/aether-calculator"     "$STAGE/bin/"
 copy_binary "$BIN_DIR/aether-notes"          "$STAGE/bin/"
 copy_binary "$BIN_DIR/aether-agentd"         "$STAGE/sbin/"
+copy_binary "$BIN_DIR/aether-sandbox"         "$STAGE/bin/"
 
 # Fail loudly if a dynamic binary slipped through: the initramfs has no loader.
 if file "$STAGE/init" | grep -q "dynamically linked"; then
