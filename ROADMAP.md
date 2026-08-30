@@ -1002,10 +1002,11 @@ through a typed capability (not screen-scraped shell calls).
 
 ### Phase 6 — Aether UI / UX
 
-**Status:** `IN_PROGRESS` (6.1 design tokens and 6.2 component
-library shipped; 6.3–6.5 AI surfaces, 6.6 AI states, 6.7
-iconography, 6.8 animation bindings, 6.9 accessibility are
-the remaining work).
+**Status:** `IN_PROGRESS` (6.1 design tokens, 6.2 component
+library, and 6.3 Aether Launcher shipped; 6.4 AI Command
+Bar, 6.5 AI Assistant Panel + Agent Workspace + Task View,
+6.6 AI states, 6.7 iconography, 6.8 animation bindings,
+6.9 accessibility are the remaining work).
 
 **Objective:** Define and implement the final Aether graphical identity. The
 entire OS must share one design system.
@@ -1065,7 +1066,30 @@ The complete UI/UX direction is in [§12 — Aether UI / UX Design Direction](#1
   index). 98 unit tests, 0 warnings, 0 clippy lints.
   Files: `ui/aether-ui-components/src/{lib, button, card,
   list, dialog, panel, nav, taskbar, launcher}.rs`.
-- 6.3 Aether Launcher (AI-first central UI).
+- 6.3 **Aether Launcher (AI-first central UI) — COMPLETE**.
+  New crate `ui/aether-launcher` composes the central
+  surface from the component library primitives. The
+  surface has three regions: a 64-px-wide vertical mode
+  rail (Apps / Files / AI) on the left, a 40-px-tall
+  search box on the top-right (with a mode-aware
+  placeholder: "Search apps" / "Search files" / "Ask
+  Aether"), and the tile grid below it. The launcher
+  carries three layers of state: `LauncherMode` (the
+  three modes plus their label, placeholder, and accent
+  color), `LauncherContent` (the pure resolver that
+  joins installed + catalog tiles by mode + query —
+  prefix matches outrank substring matches, and a no-
+  match query falls back to the store catalog), and
+  `LauncherView` (the resolved state for one frame,
+  with an `apply(ViewAction)` state machine for
+  type / backspace / clear / move-up/down/left/right /
+  switch-mode / submit / close). The launcher is
+  *non-painting*: `LauncherView` is what the renderer
+  consumes, and the same value drives the headless test
+  renderer, the accessibility auditor, and the snapshot
+  tests. 59 unit tests, 0 warnings, 0 clippy lints.
+  Files: `ui/aether-launcher/src/{lib, mode, content,
+  view}.rs`.
 - 6.4 AI Command Bar.
 - 6.5 AI Assistant Panel + AI Agent Workspace + AI Task View.
 - 6.6 AI visual states (IDLE, LISTENING, THINKING, PLANNING, WORKING,
