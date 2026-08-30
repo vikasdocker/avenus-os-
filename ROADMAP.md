@@ -1002,7 +1002,10 @@ through a typed capability (not screen-scraped shell calls).
 
 ### Phase 6 — Aether UI / UX
 
-**Status:** `IN_PROGRESS` (foundation only; full design system is the goal).
+**Status:** `IN_PROGRESS` (6.1 design tokens shipped; 6.2
+component library, 6.3–6.5 AI surfaces, 6.6 AI states, 6.7
+iconography, 6.8 animation bindings, 6.9 accessibility are
+the remaining work).
 
 **Objective:** Define and implement the final Aether graphical identity. The
 entire OS must share one design system.
@@ -1011,16 +1014,40 @@ The complete UI/UX direction is in [§12 — Aether UI / UX Design Direction](#1
 
 **Sub-milestones:**
 
-- 6.1 Design tokens (color, type, spacing, radius, motion).
+- 6.1 **Design tokens (color, type, spacing, radius, motion) — COMPLETE**.
+  New crate `ui/aether-design-tokens` is the typed, code-readable
+  version of §12. Six modules: `color` (the warm-white +
+  cream surfaces, the 6 pastels in default + deep forms,
+  the INK 900/700/400 text ramp, soft shadow, hairline; the
+  `Role` enum and `Color::role(Role::...)` semantic accessor
+  that every surface must use), `spacing` (4 px base, Xs..Xxxl),
+  `radius` (Sm..Xl + Pill, with Lg=18 the §12 default for
+  panels and AI cards), `type_scale` (Display..Micro with
+  size, weight, line-height — the family is platform-
+  specific), `motion` (DurationMs + Easing + the standard
+  constants TAP=150, HOVER=180, NAV=240, WINDOW_STATE=400,
+  AI_CROSSFADE=600), `ai_state` (the 9 §12 AI states with
+  their kebab-case wire form and pastel colors:
+  Idle=lavender, Listening=pink, Thinking=blue, Planning=
+  lavender, Working=mint, WaitingForPermission=yellow,
+  Completed=mint-deep, Error=peach-deep, Recovering=peach).
+  58 unit tests. The role indirection means a re-skin is a
+  one-file change. Files:
+  `ui/aether-design-tokens/src/{lib, color, spacing,
+  radius, type_scale, motion, ai_state}.rs`.
 - 6.2 Component library (button, card, list, dialog, panel, nav, taskbar,
   launcher).
 - 6.3 Aether Launcher (AI-first central UI).
 - 6.4 AI Command Bar.
 - 6.5 AI Assistant Panel + AI Agent Workspace + AI Task View.
 - 6.6 AI visual states (IDLE, LISTENING, THINKING, PLANNING, WORKING,
-  WAITING_FOR_PERMISSION, COMPLETED, ERROR, RECOVERING).
+  WAITING_FOR_PERMISSION, COMPLETED, ERROR, RECOVERING) — the
+  state colors are now in `aether-design-tokens` (6.1); this
+  sub-milestone covers the surfaces that consume them.
 - 6.7 Iconography (rounded-square, soft gradients, custom Aether language).
-- 6.8 Animation system (150–300 ms; smooth, premium, non-aggressive).
+- 6.8 Animation system (150–300 ms; smooth, premium, non-aggressive) — the
+  durations and easings are in `aether-design-tokens` (6.1);
+  this sub-milestone covers the runtime animation engine.
 - 6.9 Accessibility (contrast, keyboard nav, scaling, reduced motion, focus
   rings).
 
@@ -1032,6 +1059,8 @@ passes; accessibility checks pass.
 
 **Known limitations:** today `aether-graphical-shell` uses a dark
 monospace-painted UI; the pastel / premium identity in §12 is the target.
+6.1 ships the tokens; the next sub-milestones (6.2 components onward)
+will paint the surfaces with them.
 
 ---
 
