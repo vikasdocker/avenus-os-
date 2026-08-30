@@ -1,0 +1,13 @@
+[package]
+name = "aether-animation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether animation runtime: typed Animation values (duration + easing + curve) and a pure progress function (no time, no thread — the shell provides ticks). The renderer / shell drives the animation by calling advance(elapsed_ms) and reading progress()."
+
+[dependencies]
+aether-design-tokens = { path = "../aether-design-tokens" }
+
+[lints]
+workspace = true

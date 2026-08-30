@@ -34,7 +34,8 @@ members = [
   "ui/aether-launcher",
   "ui/aether-command-bar",
   "ui/aether-assistant",
-  "ui/aether-icons"
+  "ui/aether-icons",
+  "ui/aether-animation"
 ]
 
 [workspace.package]

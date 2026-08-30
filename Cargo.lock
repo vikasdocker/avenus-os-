@@ -74,6 +74,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-animation"
+version = "0.1.0"
+dependencies = [
+ "aether-design-tokens",
+]
+
+[[package]]
 name = "aether-application-manager"
 version = "0.1.0"
 dependencies = [

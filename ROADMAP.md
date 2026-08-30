@@ -1004,9 +1004,9 @@ through a typed capability (not screen-scraped shell calls).
 
 **Status:** `IN_PROGRESS` (6.1 design tokens, 6.2 component
 library, 6.3 Aether Launcher, 6.4 AI Command Bar,
-6.5 AI Assistant surfaces, 6.7 iconography shipped;
-6.6 AI states, 6.8 animation bindings, 6.9
-accessibility are the remaining work).
+6.5 AI Assistant surfaces, 6.6 AI state consumers,
+6.7 iconography, 6.8 animation runtime shipped;
+6.9 accessibility is the remaining work).
 
 **Objective:** Define and implement the final Aether graphical identity. The
 entire OS must share one design system.
@@ -1180,9 +1180,32 @@ The complete UI/UX direction is in [§12 — Aether UI / UX Design Direction](#1
   `RoundedSquare` / `Circle`. 22 unit tests, 0
   warnings, 0 clippy lints. Files:
   `ui/aether-icons/src/lib.rs`.
-- 6.8 Animation system (150–300 ms; smooth, premium, non-aggressive) — the
-  durations and easings are in `aether-design-tokens` (6.1);
-  this sub-milestone covers the runtime animation engine.
+- 6.8 **Animation system — COMPLETE**. New crate
+  `ui/aether-animation` ships the runtime engine
+  for the §12 motion vocabulary. The runtime is
+  intentionally minimal and deterministic — there
+  is no timer thread, no `Instant::now()`, no
+  platform-specific code. The shell drives every
+  animation by calling `AnimationQueue::advance
+  (delta_ms)` once per frame and reading
+  `progress(name)`. The `Animation` value carries
+  a `DurationMs` + `Easing` + `from` / `to`; the
+  `AnimationQueue` is a small fixed-capacity list
+  of named animations. The crate ships 5
+  pre-baked constructors that map to the §12
+  vocabulary — `Animation::tap()` (150 ms /
+  Standard), `Animation::hover()` (180 ms /
+  Standard), `Animation::nav()` (240 ms /
+  Standard), `Animation::window_state()` (400 ms
+  / Standard), and `Animation::ai_crossfade()`
+  (600 ms / Emphasized, the curve the AI surfaces
+  use to "settle" into a new state). The
+  `apply_easing` function implements Newton-method
+  inverse-axis sampling of the cubic-bezier
+  control points, so the curve value the caller
+  reads is the Y value at the supplied X. 28
+  unit tests, 0 warnings, 0 clippy lints. Files:
+  `ui/aether-animation/src/lib.rs`.
 - 6.9 Accessibility (contrast, keyboard nav, scaling, reduced motion, focus
   rings).
 
