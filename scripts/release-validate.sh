@@ -13,20 +13,24 @@
 #   7.  Python unit tests + repository contract tests pass
 #   8.  workspace manifest lists every crate directory
 #   9.  Phase 15 compatibility matrix + security audit docs exist
+#   10. bootable ISO assembles (Linux-only: xorriso + grub-mkrescue)
 #
 # Optional flags:
 #   --skip-release-build   skip `cargo build --release` (faster local)
 #   --skip-python          skip Python test discovery
+#   --skip-iso             skip bootable ISO assembly (Linux-only)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 SKIP_RELEASE_BUILD=0
 SKIP_PYTHON=0
+SKIP_ISO=0
 for arg in "$@"; do
     case "$arg" in
         --skip-release-build) SKIP_RELEASE_BUILD=1 ;;
         --skip-python)        SKIP_PYTHON=1 ;;
+        --skip-iso)           SKIP_ISO=1 ;;
         *) echo "release-validate: unknown flag '$arg'" >&2; exit 2 ;;
     esac
 done
@@ -104,7 +108,7 @@ fi
 if [[ $SKIP_PYTHON -eq 0 ]]; then
     step "7. python tests"
     if command -v python3 >/dev/null 2>&1; then
-        PYTHONPATH="brain:sdk/python${PYTHONPATH:+:$PYTHONPATH}" \
+        PYTHONPATH="${PWD}/brain:${PWD}/sdk/python${PYTHONPATH:+:$PYTHONPATH}" \
             python3 -m unittest discover -s tests/python -v >/dev/null 2>&1
         report "python unit tests" $?
     else
@@ -147,6 +151,29 @@ for doc in docs/RELEASE-NOTES.md \
         report "doc exists: $doc" 1
     fi
 done
+
+step "10. bootable ISO"
+if [[ $SKIP_ISO -eq 1 ]]; then
+    printf '  [SKIP] --skip-iso set\n'
+elif [[ "$(uname -s 2>/dev/null || echo Windows)" == "Windows"* \
+     || "$(uname -s 2>/dev/null || echo Windows)" == "MINGW"* \
+     || "$(uname -s 2>/dev/null || echo Windows)" == "MSYS"* \
+     || "$(uname -s 2>/dev/null || echo Windows)" == "CYGWIN"* ]]; then
+    # ISO assembly is Linux-only by design (xorriso / grub-mkrescue).
+    # The Windows CI lane reports skip; the Linux lane reports the
+    # real build.
+    printf '  [SKIP] ISO assembly is Linux-only\n'
+elif ! command -v xorriso >/dev/null 2>&1 \
+   || ! command -v grub-mkrescue >/dev/null 2>&1; then
+    printf '  [SKIP] xorriso / grub-mkrescue not installed\n'
+else
+    if bash scripts/iso/build-iso.sh >/dev/null 2>&1; then
+        # The script prints `iso: <path> (<size> MiB)` on success.
+        report "bootable ISO assembly" 0
+    else
+        report "bootable ISO assembly" 1
+    fi
+fi
 
 step "summary"
 printf '  passed: %d\n  failed: %d\n' "$PASS" "$FAIL"

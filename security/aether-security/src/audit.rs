@@ -370,7 +370,7 @@ impl Default for AuditChain {
 mod tests {
     use super::*;
 
-    fn entry_at(index: u64, timestamp: u64) -> (String, String, String) {
+    fn entry_at(index: u64, _timestamp: u64) -> (String, String, String) {
         (format!("event-{index}"), "system-core".to_string(), format!("detail-{index}"))
     }
 
@@ -531,12 +531,11 @@ mod tests {
     #[test]
     fn restore_from_rejects_tampered_chain() {
         let mut chain = AuditChain::new(RetentionPolicy::last_n(10));
-        let mut entries = Vec::new();
         for i in 0..3 {
             let (event, component, detail) = entry_at(i, 1000 + i);
             chain.record(1000 + i, &event, &component, &detail);
         }
-        entries = chain.entries().to_vec();
+        let mut entries = chain.entries().to_vec();
         entries[1].detail = "tampered".to_string();
         let res = chain.restore_from(entries);
         assert!(matches!(res, Err(ChainStatus::ContentMismatch { index: 1 })));

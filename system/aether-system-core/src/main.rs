@@ -4739,7 +4739,7 @@ mod device_ipc_tests {
             },
         });
         let r = req("device.register", params);
-        let resp = dispatch_inner(
+        let _resp = dispatch_inner(
             &mut mgr, &mut apps, &mut files, &chain, &creds, None, &status, &policy, &agent,
             &registry, started_at, &r,
         );

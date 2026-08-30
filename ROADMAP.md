@@ -36,7 +36,7 @@
    - [Phase 11 — Security + Trusted AI](#phase-11--security--trusted-ai) **PARTIAL**
    - [Phase 12 — Self-Updating + System Lifecycle](#phase-12--self-updating--system-lifecycle) **NOT_STARTED**
    - [Phase 13 — Aether Autonomous OS](#phase-13--aether-autonomous-operating-system) **NOT_STARTED**
-   - [Phase 14 — Multi-Device Aether](#phase-14--multi-device-aether) **NOT_STARTED**
+   - [Phase 14 — Multi-Device Aether](#phase-14--multi-device-aether) **PARTIAL**
    - [Phase 15 — Production Release](#phase-15--production-release) **PARTIAL**
 9. [Global Agent Development Rules](#9-global-agent-development-rules)
 10. [Phase Execution Protocol](#10-phase-execution-protocol)
@@ -1561,10 +1561,39 @@ pass.
   crates, 0 clippy errors, release build clean, 10 release
   binaries, `release-validate.sh` reports 9/9.
 
-**15.2 — Bootable ISO + hardware images (future)**
+**15.2 — Bootable ISO pipeline (this commit)**
 
-Stable installer, bootable ISO, hardware image templates, and
-QEMU end-to-end smoke. Out-of-scope for this commit.
+- **ISO assembly** — `scripts/iso/build-iso.sh` produces
+  a hybrid ISO from the existing initramfs and the host
+  kernel. The script is Linux-only: it requires
+  `xorriso` and `grub-mkrescue` (from
+  `grub-pc-bin` / `grub-efi-amd64-bin` /
+  `grub-common`). Output:
+  `build/aether-os-<version>.iso`, bootable from
+  optical media or from USB via `dd` / Ventoy /
+  Rufus-DD.
+- **GRUB config** — Default boot, verbose boot, and
+  recovery shell (`init=/bin/sh`) entries; the kernel
+  command line matches the one the QEMU-from-initramfs
+  runner uses so the two boot paths behave identically.
+- **QEMU-from-ISO runner** — `scripts/run/qemu-iso.sh`
+  picks the freshest `build/aether-os-*.iso` (or
+  honours `AETHER_ISO`) and supports the same
+  `--smoke` headless gate as
+  `scripts/run/qemu.sh`.
+- **Release validation** — A tenth step in
+  `release-validate.sh` runs the ISO build on Linux
+  runners and skips it on Windows runners (and with
+  `--skip-iso`).
+- **Contract tests** —
+  `tests/python/test_release_scripts.py` (19 tests)
+  asserts that every new script exists, is executable
+  on POSIX, carries a bash shebang, and exposes the
+  documented CLI flags.
+- **Out of scope for this commit** — Hardware image
+  templates for real laptop / desktop / IoT boards
+  (covered by Phase 10 Real Hardware Bring-up) and a
+  full installer (deferred to 15.4).
 
 **15.3 — Privacy-safe telemetry (future, by design)**
 
@@ -1572,6 +1601,12 @@ Telemetry is off by default. When designed, it MUST be
 opt-in, with a discoverable UI, a clean uninstall path, and
 a documented data-set; the audit chain MUST record every
 consent change.
+
+**15.4 — Installer (future)**
+
+Stable installer with disk partitioning (GPT + ESP),
+Aether partition, recovery partition, and rollback
+images. Out-of-scope for this commit.
 
 ---
 

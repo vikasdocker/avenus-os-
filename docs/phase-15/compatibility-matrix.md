@@ -47,12 +47,13 @@ measurement, not a regression gate.
 
 | Operation                         | Iterations | ns / op     | op / s        |
 | --------------------------------- | ---------- | ----------- | ------------- |
-| audit chain record + verify       | 5,000      | ~590        | ~1.7 M        |
-| sealed store seal + unseal        | 5,000      | ~1,340      | ~750 k        |
-| SHA-256 over a 32-byte public key | 5,000      | ~47         | ~21 M         |
-| pairing `validate_acceptance`     | 5,000      | <1          | >3 G          |
-| device registry register + get    | 256        | ~750        | ~1.3 M        |
-| IPC request encode + decode       | 5,000      | ~1,530      | ~650 k        |
+| audit chain record + verify       | 5,000      | ~460        | ~2.2 M        |
+| sealed store seal + unseal        | 5,000      | ~1,050      | ~950 k        |
+| SHA-256 over a 32-byte public key | 5,000      | ~37         | ~27 M         |
+| `fingerprint::from_public_key`    | 5,000      | ~41         | ~24 M         |
+| pairing `validate_acceptance`     | 5,000      | <1          | >5 G          |
+| device registry register + get    | 256        | ~500        | ~2.0 M        |
+| IPC request encode + decode       | 5,000      | ~1,180      | ~850 k        |
 
 ## Versions of components Aether 0.2.0 is built against
 
@@ -69,7 +70,7 @@ measurement, not a regression gate.
 1. Workspace debug build.
 2. Workspace release build.
 3. Full test suite.
-4. Clippy with `-D warnings`.
+4. `cargo clippy --workspace --all-targets`.
 5. `cargo fmt --all -- --check`.
 6. Release staging (`scripts/release.sh`).
 7. Python unit tests.

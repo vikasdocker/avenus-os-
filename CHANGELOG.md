@@ -2,6 +2,62 @@
 
 All notable changes to Aether OS are recorded in this file.
 
+## 0.2.1 - 2026-08-30
+
+### Added
+
+- **Bootable ISO pipeline** — `scripts/iso/build-iso.sh`
+  assembles a hybrid ISO (`build/aether-os-<version>.iso`)
+  using `grub-mkrescue` and `xorriso`. The ISO is bootable
+  from optical media and from a USB stick via `dd` /
+  Ventoy / Rufus-DD. The script builds the initramfs if
+  it is missing, stages the kernel + initramfs into an
+  isolinux tree, and writes a GRUB config with three
+  menu entries (default boot, verbose boot, recovery
+  shell). It is Linux-only by design: it requires
+  `xorriso` and `grub-mkrescue` from
+  `grub-pc-bin` / `grub-efi-amd64-bin` /
+  `grub-common`.
+- **QEMU-from-ISO runner** — `scripts/run/qemu-iso.sh`
+  boots the freshly-built ISO under QEMU. It picks
+  the most recent `build/aether-os-*.iso` if
+  `AETHER_ISO` is not set, and supports the same
+  `--smoke` headless gate the kernel+initramfs runner
+  uses.
+- **ISO assembly step in `release-validate.sh`** —
+  A tenth gate that runs the ISO builder on Linux
+  runners and skips it on Windows runners (and with
+  `--skip-iso`). A pure-bash test confirms the new
+  scripts exist, are executable on POSIX, carry the
+  expected shebang, and expose the documented CLI.
+- **Python release-script contract tests** —
+  `tests/python/test_release_scripts.py` (19 tests)
+  verifies the release pipeline scripts and the
+  bootable-ISO contract.
+- **Compatibility matrix refresh** —
+  `docs/phase-15/compatibility-matrix.md` updated to
+  the actual `aether-bench` numbers (audit chain
+  ~2.2 M op/s, sealed store ~950 k op/s, SHA-256
+  ~27 M op/s, fingerprint helper ~24 M op/s, pairing
+  validate >5 G op/s, device registry ~2 M op/s, IPC
+  ~850 k op/s). Removed the obsolete
+  `clippy -D warnings` reference.
+- **Workspace lint cleanup** — Replaced an unused
+  test helper parameter in `aether-security::audit`
+  with `_timestamp`, removed a never-read
+  intermediate `Vec` in the tampered-chain test, and
+  silenced a stale `let resp = ...` in a system-core
+  duplicate-register test so the workspace is fully
+  warning-clean.
+
+### Verified
+
+- 842 Rust tests passing, 0 failing.
+- 25 Python tests passing, 0 failing.
+- 0 clippy warnings across the workspace.
+- `release-validate.sh` reports 10/10 (ISO step
+  skips cleanly on Windows runners).
+
 ## 0.2.0 - 2026-08-30
 
 ### Added
