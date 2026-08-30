@@ -9,7 +9,7 @@ pub mod manager;
 pub mod policy;
 
 pub use graph::{DependencyGraph, GraphError};
-pub use loader::load_manifests_from_dir;
+pub use loader::{load_manifests_from_dir, load_manifests_with_trust};
 pub use manager::{build_manager, ServiceExecutor, ServiceHandle, ServiceManager};
 pub use policy::{command_to_capability, evaluate, PolicyVerdict};
 

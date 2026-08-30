@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 
 pub mod audit;
 pub mod credentials;
+pub mod manifest_signing;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Decision {
