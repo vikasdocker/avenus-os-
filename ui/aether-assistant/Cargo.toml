@@ -1,0 +1,15 @@
+[package]
+name = "aether-assistant"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether AI Assistant surfaces: Assistant Panel (sidebar), Agent Workspace (full work area with steps), and Task View (focused single-task view). All three consume AiVisualState from aether-design-tokens."
+
+[dependencies]
+aether-design-tokens = { path = "../aether-design-tokens" }
+aether-ui-components = { path = "../aether-ui-components" }
+aether-launcher = { path = "../aether-launcher" }
+
+[lints]
+workspace = true

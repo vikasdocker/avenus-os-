@@ -92,6 +92,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-assistant"
+version = "0.1.0"
+dependencies = [
+ "aether-design-tokens",
+ "aether-launcher",
+ "aether-ui-components",
+]
+
+[[package]]
 name = "aether-bench"
 version = "0.1.0"
 dependencies = [
