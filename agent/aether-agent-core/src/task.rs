@@ -67,6 +67,7 @@ impl From<RiskLevel> for TaskRisk {
 /// serialises it as a kebab-case string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum TaskKind {
     /// Restart a service that has failed repeatedly.
     RestartService,
@@ -82,6 +83,22 @@ pub enum TaskKind {
     ProposeCleanup,
     /// Propose running a security scan.
     ProposeSecurityScan,
+    /// Control a hardware device (route audio,
+    /// enable Wi-Fi, mount a USB stick). The
+    /// runtime looks up the `target_device_id`
+    /// in the hardware service.
+    DeviceControl,
+    /// Control a display (set brightness, change
+    /// resolution, mirror to an external).
+    DisplayControl,
+    /// Control system power (suspend, hibernate,
+    /// restart, shutdown). Always requires user
+    /// consent.
+    PowerControl,
+    /// Apply a security action (revoke a peer,
+    /// rotate a credential, lock the screen).
+    /// Always requires user consent.
+    SecurityControl,
     /// Custom task kind, kept for forward
     /// compatibility. The shell accepts it; the
     /// future executor decides whether to handle it.
@@ -99,6 +116,10 @@ impl TaskKind {
             Self::ProposeInstall => "propose-install",
             Self::ProposeCleanup => "propose-cleanup",
             Self::ProposeSecurityScan => "propose-security-scan",
+            Self::DeviceControl => "device-control",
+            Self::DisplayControl => "display-control",
+            Self::PowerControl => "power-control",
+            Self::SecurityControl => "security-control",
             Self::Custom => "custom",
         }
     }
@@ -118,6 +139,10 @@ impl TaskKind {
             Self::ProposeInstall => TaskRisk::High,
             Self::ProposeCleanup => TaskRisk::Medium,
             Self::ProposeSecurityScan => TaskRisk::Medium,
+            Self::DeviceControl => TaskRisk::Medium,
+            Self::DisplayControl => TaskRisk::Low,
+            Self::PowerControl => TaskRisk::Critical,
+            Self::SecurityControl => TaskRisk::High,
             Self::Custom => TaskRisk::High,
         }
     }
@@ -415,6 +440,10 @@ mod tests {
         assert_eq!(TaskKind::ProposeInstall.as_str(), "propose-install");
         assert_eq!(TaskKind::ProposeCleanup.as_str(), "propose-cleanup");
         assert_eq!(TaskKind::ProposeSecurityScan.as_str(), "propose-security-scan");
+        assert_eq!(TaskKind::DeviceControl.as_str(), "device-control");
+        assert_eq!(TaskKind::DisplayControl.as_str(), "display-control");
+        assert_eq!(TaskKind::PowerControl.as_str(), "power-control");
+        assert_eq!(TaskKind::SecurityControl.as_str(), "security-control");
         assert_eq!(TaskKind::Custom.as_str(), "custom");
     }
 
@@ -426,6 +455,10 @@ mod tests {
         assert_eq!(TaskKind::ProposeInstall.default_risk(), TaskRisk::High);
         assert_eq!(TaskKind::ProposeCleanup.default_risk(), TaskRisk::Medium);
         assert_eq!(TaskKind::ProposeSecurityScan.default_risk(), TaskRisk::Medium);
+        assert_eq!(TaskKind::DeviceControl.default_risk(), TaskRisk::Medium);
+        assert_eq!(TaskKind::DisplayControl.default_risk(), TaskRisk::Low);
+        assert_eq!(TaskKind::PowerControl.default_risk(), TaskRisk::Critical);
+        assert_eq!(TaskKind::SecurityControl.default_risk(), TaskRisk::High);
         assert_eq!(TaskKind::Custom.default_risk(), TaskRisk::High);
     }
 

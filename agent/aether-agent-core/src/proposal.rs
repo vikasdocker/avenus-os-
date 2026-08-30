@@ -283,11 +283,17 @@ pub fn validate_proposal(
         }
     }
     let min_risk = match proposal.kind {
-        TaskKind::Notify => ProposalRisk::Low,
-        TaskKind::RestartService | TaskKind::ProposeCleanup | TaskKind::ProposeSecurityScan => {
-            ProposalRisk::Medium
-        }
-        TaskKind::ProposeUpdate | TaskKind::ProposeInstall | TaskKind::Custom => ProposalRisk::High,
+        TaskKind::Notify | TaskKind::DisplayControl => ProposalRisk::Low,
+        TaskKind::RestartService
+        | TaskKind::ProposeCleanup
+        | TaskKind::ProposeSecurityScan
+        | TaskKind::DeviceControl => ProposalRisk::Medium,
+        TaskKind::ProposeUpdate
+        | TaskKind::ProposeInstall
+        | TaskKind::SecurityControl
+        | TaskKind::PowerControl
+        | TaskKind::Custom => ProposalRisk::High,
+        _ => ProposalRisk::Medium,
     };
     if proposal.risk < min_risk {
         return Err(ProposalError::RiskTooLowForKind { kind: proposal.kind, risk: proposal.risk });
