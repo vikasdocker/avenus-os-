@@ -1,0 +1,13 @@
+[package]
+name = "aether-retry-policy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether retry policy: the typed model for how the agent runtime retries failed tasks. Bounded retries, exponential backoff, fallback tasks, circuit breakers, and a unified PolicyEngine that consumes a failure stream and produces the next action."
+
+[dependencies]
+aether-agent-core = { path = "../aether-agent-core" }
+
+[lints]
+workspace = true

@@ -23,6 +23,7 @@ members = [
   "agent/aether-agent-core",
   "agent/aether-device-core",
   "agent/aether-background-agent",
+  "agent/aether-retry-policy",
   "network/aether-network",
   "services/aether-agentd",
   "services/aether-supervisor",
