@@ -1120,8 +1120,10 @@ hardware profile; recovery path is exercisable.
 
 ### Phase 11 — Security + Trusted AI
 
-**Status:** `PARTIAL` (capability/policy/audit present; kernel sandboxing
-deferred to this phase).
+**Status:** `PARTIAL` (capability/policy/audit/hash-chain/sealed
+credentials/signed manifests/signed updates present; kernel
+sandboxing and tamper-evident root-of-trust boot are deferred to
+this phase).
 
 **Sub-milestones:**
 
@@ -1178,6 +1180,69 @@ deferred to this phase).
   `system/aether-system-core/src/manager.rs` (5 unit tests covering
   every profile, the unknown-service `None` return, and the
   `all_sandbox_plans` iterator).
+- 11.5 **Audit log with hash-chain integrity — COMPLETE**. Every IPC
+  dispatch through the system-core daemon writes a tamper-evident
+  `AuditEntry` to a SHA-256 hash-chained `AuditChain`. Each entry's
+  `content_hash` covers `(prev_hash || timestamp || event ||
+  component || detail)`; `verify_chain()` detects content mutation,
+  broken links, and index gaps. Retention is bounded by both
+  `max_entries` and `max_age_ms`. The chain is exposed via three
+  IPC commands — `audit.recent` (last N entries), `audit.verify`
+  (whole-chain integrity check), and `audit.prune` (apply
+  retention). Evidence: `security/aether-security/src/audit.rs`
+  (18 unit tests) and `system/aether-system-core/src/main.rs`
+  (`record_audit`, the audit IPC commands, the `AuditChain` /
+  `RetentionPolicy` / `ChainStatus` JSON conversions).
+- 11.6 **Sealed credential storage — COMPLETE**. Secrets are sealed
+  with AES-256-GCM under a process-lifetime key, with a
+  `RandomKeyProvider` and a `StaticKeyProvider` behind a common
+  `KeyProvider` trait. The `Secret<T>` wrapper zeroes its inner
+  value on `Drop`. The `SealedStore` supports `seal` / `unseal` /
+  `remove` / `clear` / `get` / `contains` / `names` / `len` /
+  `is_empty`, with a per-credential `force` flag for explicit
+  overwrite. Wire format is `nonce(12) || ciphertext_with_tag`
+  (the AES-GCM tag is appended to the ciphertext by `aes-gcm`).
+  IPC: `credentials.seal`, `credentials.unseal`,
+  `credentials.list`, `credentials.remove`, `credentials.metadata`.
+  Evidence: `security/aether-security/src/credentials.rs` (16 unit
+  tests including round-trip, tamper-detection, duplicate, and
+  wrong-key rejection) and the `credentials.*` test module in
+  `system/aether-system-core/src/main.rs`.
+- 11.7 **Signed service manifests (Ed25519) — COMPLETE**. Every
+  service manifest can be shipped alongside a `.json.sig` envelope
+  containing the manifest bytes, the signer's public key, and an
+  Ed25519 signature. The system-core daemon's
+  `load_manifests_with_trust(dir, &trust)` rejects: missing
+  signature files, signatures from untrusted signers, and
+  tampered manifests (either the bytes or the signature have
+  been mutated). Backward compatibility is preserved —
+  `load_manifests_from_dir` continues to load unsigned manifests
+  for dev / test. A new `manifest.trust_store` IPC command
+  reports the currently-loaded trust list to the operator.
+  Evidence: `security/aether-security/src/manifest_signing.rs`
+  (12 unit tests), `system/aether-system-core/src/loader.rs`
+  (5 trust-aware loader tests), and the `trust_store_ipc_tests`
+  module in the system-core main.
+- 11.8 **Signed Aether updates (out-of-scope shell) — COMPLETE**.
+  `security/aether-security/src/signed_update.rs` defines a
+  `SignedUpdate` envelope (header + payload + 64-byte Ed25519
+  signature) and a verifier that pins to a single trusted
+  public key plus a fingerprint trust list. Update kinds:
+  `os-image`, `service-bundle`, `agent-model`. The
+  `UpdateSigner` produces envelopes; `UpdateVerifier` (via
+  `verify_signed_update_trusted`) rejects: bad magic, empty
+  target, payload-length mismatch, bad signature length,
+  unknown signer, fingerprint not in trust list, and bad
+  signature. The IPC layer exposes `update.verify` (the
+  caller hands a JSON header + base64 payload + base64
+  signature + hex public key; the daemon returns
+  `ok: true|false`) and `update.fingerprint` (compute the
+  manifest-signing fingerprint for a hex public key).
+  Delivery, journaling, and atomic apply are out of scope
+  for this phase and live in the future `aether-update-agent`
+  daemon. Evidence: `security/aether-security/src/signed_update.rs`
+  (14 unit tests) and the `update_ipc_tests` module in the
+  system-core main.
 - Kernel primitives where appropriate: Linux capabilities, namespaces, cgroups,
   seccomp, MAC policy, sandboxing, signed applications, signed updates,
   credential protection, secret storage, audit retention, policy management.

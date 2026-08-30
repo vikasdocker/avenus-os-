@@ -98,6 +98,109 @@ fn credential_error_response(command: &str, err: &CredentialError) -> IpcRespons
     IpcResponse::err(command, IpcError { code, message })
 }
 
+/// Decodes 64 hex chars into a 32-byte array. Returns
+/// `None` for any malformed input.
+fn decode_hex_32(s: &str) -> Option<[u8; 32]> {
+    if s.len() != 64 {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        let hi = (bytes[2 * i] as char).to_digit(16)?;
+        let lo = (bytes[2 * i + 1] as char).to_digit(16)?;
+        out[i] = u8::try_from(hi * 16 + lo).ok()?;
+    }
+    Some(out)
+}
+
+/// Decodes a base64 string into bytes. Accepts both
+/// standard alphabet (with `+`/`/`) and URL-safe
+/// alphabet (with `-`/`_`); padding is optional. This
+/// is a small, dependency-free implementation that
+/// covers the inputs the IPC layer emits.
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    // Normalise URL-safe to standard, then strip
+    // padding before decoding.
+    let mut normalised = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '-' => normalised.push('+'),
+            '_' => normalised.push('/'),
+            '=' => {} // drop, we add it back
+            other => normalised.push(other),
+        }
+    }
+    let remainder = normalised.len() % 4;
+    if remainder == 1 {
+        return None;
+    }
+    let pad = if remainder == 0 { 0 } else { 4 - remainder };
+    for _ in 0..pad {
+        normalised.push('=');
+    }
+    let bytes = normalised.as_bytes();
+    let mut out = Vec::with_capacity(normalised.len() / 4 * 3);
+    let mut buf: u32 = 0;
+    let mut bits: u32 = 0;
+    for &b in bytes {
+        if b == b'=' {
+            break;
+        }
+        let v = match b {
+            b'A'..=b'Z' => u32::from(b - b'A'),
+            b'a'..=b'z' => u32::from(b - b'a') + 26,
+            b'0'..=b'9' => u32::from(b - b'0') + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        buf = (buf << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(u8::try_from((buf >> bits) & 0xFF).ok()?);
+        }
+    }
+    Some(out)
+}
+
+/// Encodes bytes as standard base64 with `=` padding.
+/// Used by the tests to round-trip payloads through
+/// the IPC boundary; not exposed via the IPC contract.
+#[cfg(test)]
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHA: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut i = 0;
+    while i + 3 <= bytes.len() {
+        let n = ((u32::from(bytes[i])) << 16)
+            | ((u32::from(bytes[i + 1])) << 8)
+            | (u32::from(bytes[i + 2]));
+        out.push(ALPHA[((n >> 18) & 0x3F) as usize] as char);
+        out.push(ALPHA[((n >> 12) & 0x3F) as usize] as char);
+        out.push(ALPHA[((n >> 6) & 0x3F) as usize] as char);
+        out.push(ALPHA[(n & 0x3F) as usize] as char);
+        i += 3;
+    }
+    let rem = bytes.len() - i;
+    if rem == 1 {
+        let n = u32::from(bytes[i]) << 16;
+        out.push(ALPHA[((n >> 18) & 0x3F) as usize] as char);
+        out.push(ALPHA[((n >> 12) & 0x3F) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if rem == 2 {
+        let n = (u32::from(bytes[i]) << 16) | (u32::from(bytes[i + 1]) << 8);
+        out.push(ALPHA[((n >> 18) & 0x3F) as usize] as char);
+        out.push(ALPHA[((n >> 12) & 0x3F) as usize] as char);
+        out.push(ALPHA[((n >> 6) & 0x3F) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
 /// Creates a new sealing key by drawing 32 random bytes
 /// from the OS RNG. The key is unique per process; the
 /// `StaticKeyProvider` zeroes it on `Drop` (when the
@@ -1426,6 +1529,199 @@ fn dispatch_inner(
                 ),
             }
         }
+        "update.verify" => {
+            // The caller hands us a JSON SignedUpdate.
+            // We pull the header / payload / signature
+            // fields out and hand them to the verifier.
+            // The public key bytes are passed alongside
+            // (32 bytes, hex-encoded) so the verifier
+            // does not need its own key store.
+            let header_val = match req.parameters.get("header") {
+                Some(v) => v,
+                None => {
+                    return IpcResponse::err(
+                        "update.verify",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'header' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let payload_b64 = match req.parameters.get("payload_b64").and_then(|v| v.as_str()) {
+                Some(v) => v,
+                None => {
+                    return IpcResponse::err(
+                        "update.verify",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'payload_b64' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let signature_b64 = match req.parameters.get("signature_b64").and_then(|v| v.as_str())
+            {
+                Some(v) => v,
+                None => {
+                    return IpcResponse::err(
+                        "update.verify",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'signature_b64' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let public_key_hex = match req.parameters.get("public_key_hex").and_then(|v| v.as_str())
+            {
+                Some(v) => v,
+                None => {
+                    return IpcResponse::err(
+                        "update.verify",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'public_key_hex' is required (64 hex chars)".to_string(),
+                        },
+                    );
+                }
+            };
+            // Decode the public key (64 hex chars -> 32 bytes).
+            let public_key_bytes: [u8; 32] = match decode_hex_32(public_key_hex) {
+                Some(b) => b,
+                None => {
+                    return IpcResponse::err(
+                        "update.verify",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: format!(
+                                "public_key_hex is not 64 valid hex chars: {public_key_hex}"
+                            ),
+                        },
+                    );
+                }
+            };
+            // Decode the payload and signature (base64).
+            let payload = match base64_decode(payload_b64) {
+                Some(b) => b,
+                None => {
+                    return IpcResponse::err(
+                        "update.verify",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "payload_b64 is not valid base64".to_string(),
+                        },
+                    );
+                }
+            };
+            let signature = match base64_decode(signature_b64) {
+                Some(b) => b,
+                None => {
+                    return IpcResponse::err(
+                        "update.verify",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "signature_b64 is not valid base64".to_string(),
+                        },
+                    );
+                }
+            };
+            // Parse the header back into a typed struct.
+            let header: aether_security::signed_update::UpdateHeader =
+                match serde_json::from_value(header_val.clone()) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        return IpcResponse::err(
+                            "update.verify",
+                            IpcError {
+                                code: "INVALID_INPUT".to_string(),
+                                message: format!("header is not a valid UpdateHeader: {e}"),
+                            },
+                        );
+                    }
+                };
+            let update = aether_security::signed_update::SignedUpdate {
+                header,
+                payload,
+                signature,
+            };
+            match aether_security::signed_update::verify_signed_update_with_key(
+                &update,
+                &public_key_bytes,
+            ) {
+                Ok(()) => IpcResponse::ok(
+                    "update.verify",
+                    serde_json::json!({
+                        "ok": true,
+                        "kind": update.header.kind,
+                        "target": update.header.target,
+                        "version": update.header.version,
+                        "timestamp_ms": update.header.timestamp_ms,
+                        "payload_len": update.header.payload_len,
+                    }),
+                ),
+                Err(e) => IpcResponse::ok(
+                    "update.verify",
+                    serde_json::json!({
+                        "ok": false,
+                        "error": e.to_string(),
+                        "kind": update.header.kind,
+                        "target": update.header.target,
+                        "version": update.header.version,
+                    }),
+                ),
+            }
+        }
+        "update.fingerprint" => {
+            // Helper: take a 64-char hex public key and
+            // return its manifest-signing fingerprint
+            // (32 hex chars). Useful for the operator
+            // to add a new trust entry.
+            let public_key_hex = match req.parameters.get("public_key_hex").and_then(|v| v.as_str())
+            {
+                Some(v) => v,
+                None => {
+                    return IpcResponse::err(
+                        "update.fingerprint",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'public_key_hex' is required (64 hex chars)".to_string(),
+                        },
+                    );
+                }
+            };
+            let public_key_bytes: [u8; 32] = match decode_hex_32(public_key_hex) {
+                Some(b) => b,
+                None => {
+                    return IpcResponse::err(
+                        "update.fingerprint",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: format!(
+                                "public_key_hex is not 64 valid hex chars: {public_key_hex}"
+                            ),
+                        },
+                    );
+                }
+            };
+            let vk = match ed25519_dalek::VerifyingKey::from_bytes(&public_key_bytes) {
+                Ok(k) => k,
+                Err(e) => {
+                    return IpcResponse::err(
+                        "update.fingerprint",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: format!("public key is not a valid Ed25519 key: {e}"),
+                        },
+                    );
+                }
+            };
+            let fp = Fingerprint::for_public_key(&vk);
+            IpcResponse::ok(
+                "update.fingerprint",
+                serde_json::json!({ "fingerprint": fp.as_hex() }),
+            )
+        }
         other => IpcResponse::err(
             other,
             IpcError {
@@ -2193,5 +2489,291 @@ mod trust_store_ipc_tests {
         let fps = resp.result["fingerprints"].as_array().unwrap();
         assert_eq!(fps.len(), 1);
         assert_eq!(fps[0], serde_json::json!(signer.fingerprint().as_hex()));
+    }
+}
+
+#[cfg(test)]
+mod update_ipc_tests {
+    //! Integration tests for the `update.verify` and
+    //! `update.fingerprint` IPC commands. The verifier
+    //! is the out-of-scope shell for Phase 11.8 — the
+    //! daemon only exposes the verification path, not
+    //! delivery.
+    //!
+    //! Tests sign a real `SignedUpdate`, ship the
+    //! header / payload / signature across the IPC
+    //! boundary, and confirm the daemon accepts good
+    //! inputs and rejects tampered ones.
+
+    use super::{base64_decode, base64_encode, dispatch_inner};
+    use aether_application_manager::ApplicationManager;
+    use aether_core::ipc::{ActorTrust, IpcRequest};
+    use aether_security::audit::{AuditChain, RetentionPolicy};
+    use aether_security::credentials::{SealedStore, StaticKeyProvider};
+    use aether_security::signed_update::{UpdateKind, UpdateSigner};
+    use aether_storage::{FileManager, WorkspaceConfig};
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+
+    fn env() -> (
+        aether_system_core::manager::ServiceManager,
+        ApplicationManager,
+        FileManager,
+        Mutex<AuditChain>,
+        Mutex<SealedStore<StaticKeyProvider>>,
+    ) {
+        let graph = aether_system_core::graph::DependencyGraph::new(&[]).expect("empty");
+        let manager = aether_system_core::manager::ServiceManager::new(graph);
+        let apps = ApplicationManager::default();
+        let files = FileManager::new(WorkspaceConfig::from_env_or_default()).expect("workspace");
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
+        let creds = Mutex::new(SealedStore::new(StaticKeyProvider::new([0x55u8; 32])));
+        (manager, apps, files, chain, creds)
+    }
+
+    fn req(command: &str, params: serde_json::Value) -> IpcRequest {
+        IpcRequest {
+            service_id: "test".to_string(),
+            command: command.to_string(),
+            parameters: params,
+            actor_trust: ActorTrust::Trusted,
+        }
+    }
+
+    fn hex_lower(bytes: &[u8; 32]) -> String {
+        let mut out = String::with_capacity(64);
+        for byte in bytes {
+            out.push_str(&format!("{byte:02x}"));
+        }
+        out
+    }
+
+    #[test]
+    fn update_fingerprint_returns_32_hex_chars() {
+        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let started_at = SystemTime::now();
+        let signer = UpdateSigner::generate();
+        let pk_hex = hex_lower(&signer.public_key_bytes());
+        let r = req("update.fingerprint", serde_json::json!({ "public_key_hex": pk_hex }));
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            started_at,
+            &r,
+        );
+        assert!(resp.ok);
+        let fp = resp.result["fingerprint"].as_str().expect("fp string");
+        assert_eq!(fp.len(), 32);
+        assert_eq!(fp, signer.fingerprint().as_hex());
+    }
+
+    #[test]
+    fn update_fingerprint_rejects_bad_hex() {
+        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "update.fingerprint",
+            serde_json::json!({ "public_key_hex": "not-hex" }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            started_at,
+            &r,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn update_fingerprint_rejects_wrong_length_hex() {
+        // The hex length check is a hard requirement;
+        // the IPC layer must not accept a 32-byte
+        // truncated public key. (Curve checks are
+        // delegated to ed25519-dalek, which is
+        // permissive; we do not duplicate that here.)
+        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "update.fingerprint",
+            serde_json::json!({ "public_key_hex": "deadbeef" }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            started_at,
+            &r,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn update_verify_round_trip() {
+        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let started_at = SystemTime::now();
+        let signer = UpdateSigner::generate();
+        let payload = b"aether-os-image-1.2.3".to_vec();
+        let update = signer.sign(
+            UpdateKind::OsImage,
+            "aether-os",
+            "1.2.3",
+            1_700_000_000_000,
+            &payload,
+        );
+        let header = serde_json::to_value(&update.header).expect("header -> json");
+        let r = req(
+            "update.verify",
+            serde_json::json!({
+                "header": header,
+                "payload_b64": base64_encode(&update.payload),
+                "signature_b64": base64_encode(&update.signature),
+                "public_key_hex": hex_lower(&signer.public_key_bytes()),
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            started_at,
+            &r,
+        );
+        assert!(resp.ok, "update.verify should accept signed payload: {resp:?}");
+        assert_eq!(resp.result["ok"], serde_json::json!(true));
+        assert_eq!(resp.result["target"], serde_json::json!("aether-os"));
+        assert_eq!(resp.result["version"], serde_json::json!("1.2.3"));
+        assert_eq!(resp.result["kind"], serde_json::json!("os-image"));
+    }
+
+    #[test]
+    fn update_verify_rejects_tampered_payload() {
+        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let started_at = SystemTime::now();
+        let signer = UpdateSigner::generate();
+        let payload = b"aether-os-image-1.2.3".to_vec();
+        let mut update = signer.sign(
+            UpdateKind::OsImage,
+            "aether-os",
+            "1.2.3",
+            1_700_000_000_000,
+            &payload,
+        );
+        // Tamper with the payload AFTER signing.
+        update.payload[0] ^= 0x01;
+        let header = serde_json::to_value(&update.header).expect("header -> json");
+        let r = req(
+            "update.verify",
+            serde_json::json!({
+                "header": header,
+                "payload_b64": base64_encode(&update.payload),
+                "signature_b64": base64_encode(&update.signature),
+                "public_key_hex": hex_lower(&signer.public_key_bytes()),
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            started_at,
+            &r,
+        );
+        assert!(resp.ok, "update.verify should return ok:false, not an error: {resp:?}");
+        assert_eq!(resp.result["ok"], serde_json::json!(false));
+        assert!(resp.result["error"].as_str().unwrap().contains("signature"));
+    }
+
+    #[test]
+    fn update_verify_rejects_wrong_signer() {
+        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let started_at = SystemTime::now();
+        let signer_a = UpdateSigner::generate();
+        let signer_b = UpdateSigner::generate();
+        let payload = b"aether-os-image-1.2.3".to_vec();
+        let update = signer_a.sign(
+            UpdateKind::ServiceBundle,
+            "svc",
+            "0.1.0",
+            1_700_000_000_000,
+            &payload,
+        );
+        let header = serde_json::to_value(&update.header).expect("header -> json");
+        // Ship signer A's update but verify with signer B's key.
+        let r = req(
+            "update.verify",
+            serde_json::json!({
+                "header": header,
+                "payload_b64": base64_encode(&update.payload),
+                "signature_b64": base64_encode(&update.signature),
+                "public_key_hex": hex_lower(&signer_b.public_key_bytes()),
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            started_at,
+            &r,
+        );
+        assert!(resp.ok);
+        assert_eq!(resp.result["ok"], serde_json::json!(false));
+        assert!(resp.result["error"].as_str().unwrap().contains("signature"));
+    }
+
+    #[test]
+    fn update_verify_rejects_missing_field() {
+        let (mut mgr, mut apps, mut files, chain, creds) = env();
+        let started_at = SystemTime::now();
+        // No `header` parameter.
+        let r = req("update.verify", serde_json::json!({}));
+        let resp = dispatch_inner(
+            &mut mgr,
+            &mut apps,
+            &mut files,
+            &chain,
+            &creds,
+            None,
+            started_at,
+            &r,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn base64_decode_round_trips_known_string() {
+        // RFC 4648 §10 test vector.
+        let encoded = "SGVsbG8sIFdvcmxkIQ==";
+        let decoded = base64_decode(encoded).expect("decodes");
+        assert_eq!(decoded, b"Hello, World!".to_vec());
+    }
+
+    #[test]
+    fn base64_decode_handles_url_safe() {
+        // URL-safe alphabet without padding; decoder
+        // must accept it.
+        let encoded = "SGVsbG8sIFdvcmxkIQ";
+        let decoded = base64_decode(encoded).expect("decodes");
+        assert_eq!(decoded, b"Hello, World!".to_vec());
     }
 }

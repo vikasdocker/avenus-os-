@@ -219,6 +219,7 @@ dependencies = [
  "aether-core",
  "aether-security",
  "aether-storage",
+ "ed25519-dalek",
  "rand",
  "serde",
  "serde_json",
