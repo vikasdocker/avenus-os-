@@ -1,0 +1,12 @@
+[package]
+name = "aether-tts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether text-to-speech (TTS): turn text into an AudioBuffer with rate, pitch, and voice control. Engine-agnostic — the runtime plugs in a real model."
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -123,6 +123,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-audio"
+version = "0.1.0"
+dependencies = [
+ "aether-stt",
+]
+
+[[package]]
 name = "aether-automation"
 version = "0.1.0"
 dependencies = [
@@ -364,6 +371,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-stt"
+version = "0.1.0"
+
+[[package]]
 name = "aether-supervisor"
 version = "0.1.0"
 dependencies = [
@@ -400,6 +411,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-tts"
+version = "0.1.0"
+
+[[package]]
 name = "aether-ui-components"
 version = "0.1.0"
 dependencies = [
@@ -420,6 +435,18 @@ dependencies = [
 [[package]]
 name = "aether-voice"
 version = "0.1.0"
+dependencies = [
+ "aether-stt",
+ "aether-tts",
+ "aether-wake-word",
+]
+
+[[package]]
+name = "aether-wake-word"
+version = "0.1.0"
+dependencies = [
+ "aether-stt",
+]
 
 [[package]]
 name = "aether-wm"

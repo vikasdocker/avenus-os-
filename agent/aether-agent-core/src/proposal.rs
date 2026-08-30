@@ -284,10 +284,6 @@ pub fn validate_proposal(
     }
     let min_risk = match proposal.kind {
         TaskKind::Notify | TaskKind::DisplayControl => ProposalRisk::Low,
-        TaskKind::RestartService
-        | TaskKind::ProposeCleanup
-        | TaskKind::ProposeSecurityScan
-        | TaskKind::DeviceControl => ProposalRisk::Medium,
         TaskKind::ProposeUpdate
         | TaskKind::ProposeInstall
         | TaskKind::SecurityControl

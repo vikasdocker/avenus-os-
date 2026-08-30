@@ -1,0 +1,12 @@
+[package]
+name = "aether-stt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether speech-to-text: the typed model for converting an AudioBuffer into a Transcript. Engine-agnostic — the runtime injects the actual model."
+
+[dependencies]
+
+[lints]
+workspace = true

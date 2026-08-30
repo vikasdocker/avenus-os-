@@ -1,0 +1,13 @@
+[package]
+name = "aether-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether audio service: routes capture (mic) and playback (speaker/headphone) through the hardware service. Owns the audio policy and exposes a typed bridge to the voice orchestrator."
+
+[dependencies]
+aether-stt = { path = "../aether-stt" }
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "aether-wake-word"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether wake-word detection: configurable keyword spotting with confidence scoring, false-positive control, and an energy gate. Engine-agnostic — the runtime plugs in a real model."
+
+[dependencies]
+aether-stt = { path = "../aether-stt" }
+
+[lints]
+workspace = true

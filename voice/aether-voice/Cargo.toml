@@ -4,8 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Voice domain contracts for Aether OS"
+description = "Aether voice orchestrator: ties wake-word detection, STT, agent thinking, and TTS into a single VoiceSession state machine: Idle -> Listening -> Thinking -> Speaking -> Idle."
+
+[dependencies]
+aether-stt = { path = "../aether-stt" }
+aether-tts = { path = "../aether-tts" }
+aether-wake-word = { path = "../aether-wake-word" }
 
 [lints]
 workspace = true
-
