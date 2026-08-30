@@ -52,6 +52,5 @@ pub mod store;
 pub use fs::{LocalFs, MemoryFs, StoreFs};
 pub use registry::{PublisherTrust, TrustedPublisherRegistry};
 pub use store::{
-    AppInstallRecord, InstalledApp, LaunchOutcome, Store, StoreError, StoreResult,
-    UntrustedReason,
+    AppInstallRecord, InstalledApp, LaunchOutcome, Store, StoreError, StoreResult, UntrustedReason,
 };

@@ -116,8 +116,7 @@ impl TrustedPublisherRegistry {
     /// # Errors
     /// Returns `Err` on I/O failure.
     pub fn save(&self, fs: &mut dyn StoreFs) -> Result<(), String> {
-        let json = serde_json::to_vec_pretty(self)
-            .map_err(|e| format!("encode trust: {e}"))?;
+        let json = serde_json::to_vec_pretty(self).map_err(|e| format!("encode trust: {e}"))?;
         fs.write(TRUST_FILE, &json)
     }
 

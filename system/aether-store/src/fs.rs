@@ -83,10 +83,7 @@ impl StoreFs for MemoryFs {
 
     fn read(&self, path: &str) -> Result<Vec<u8>, String> {
         let files = self.files.lock().map_err(|e| format!("lock poisoned: {e}"))?;
-        files
-            .get(path)
-            .cloned()
-            .ok_or_else(|| format!("no such file: {path}"))
+        files.get(path).cloned().ok_or_else(|| format!("no such file: {path}"))
     }
 
     fn write(&mut self, path: &str, bytes: &[u8]) -> Result<(), String> {

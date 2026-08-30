@@ -31,7 +31,7 @@
    - [Phase 6 — Aether UI / UX](#phase-6--aether-ui--ux) **IN_PROGRESS (foundation only)**
    - [Phase 7 — Aether Agent Deep System Control](#phase-7--aether-agent-deep-system-control) **NOT_STARTED**
    - [Phase 8 — Device + Hardware Ecosystem](#phase-8--device--hardware-ecosystem) **NOT_STARTED**
-   - [Phase 9 — Application Platform](#phase-9--application-platform) **NOT_STARTED**
+   - [Phase 9 — Application Platform](#phase-9--application-platform) **PARTIAL**
    - [Phase 10 — Real Hardware Bring-up](#phase-10--real-hardware-bring-up) **NOT_STARTED**
    - [Phase 11 — Security + Trusted AI](#phase-11--security--trusted-ai) **PARTIAL**
    - [Phase 12 — Self-Updating + System Lifecycle](#phase-12--self-updating--system-lifecycle) **NOT_STARTED**
@@ -1077,22 +1077,81 @@ the audio route via a typed capability.
 
 ### Phase 9 — Application Platform
 
-**Status:** `NOT_STARTED`.
+**Status:** `PARTIAL` (9.2 / 9.3 / 9.4 shipped; 9.1 SDK is
+the unstarted sub-milestone; 9.4 update / rating flows are
+out of scope for the typed contract).
 
 **Sub-milestones:**
 
-- 9.1 Aether SDK (app, UI, Agent, IPC, capabilities, manifests).
-- 9.2 Application packaging (format, manifest, signing, dependencies,
-  permissions, resources).
-- 9.3 Application security (sandbox, filesystem scopes, network scopes,
-  device scopes, process limits).
-- 9.4 Aether Store (discovery, install, updates, ratings, permissions,
-  publisher, signatures).
+- 9.1 Aether SDK (app, UI, Agent, IPC, capabilities, manifests) — **NOT_STARTED**.
+- 9.2 **Application packaging (format, manifest, signing, dependencies,
+  permissions, resources) — COMPLETE**. `aether_core::app` defines the
+  typed `AppManifest`, `AppPackage`, and the 11-variant
+  `AppPermission` enum (ReadUserFiles, WriteUserFiles,
+  NetworkEgress, NetworkListen, ReadPersonalData, Notify,
+  CaptureScreen, Camera, Microphone, Location, PairDevices).
+  `is_valid_app_id` validates reverse-DNS identifiers,
+  `app_cgroup_slice` derives the per-app cgroup slice name,
+  `AppResourceLimits` carries cgroup v2-shaped budgets.
+  `aether_security::app_signing` is the Ed25519 layer
+  (`AppPackageSigner` signs the canonical manifest bytes;
+  `AppPackageVerifier` recomputes the payload SHA-256, checks
+  the publisher fingerprint, and verifies the signature). 26
+  new unit tests. Files: `core/aether-core/src/app.rs`,
+  `security/aether-security/src/app_signing.rs`.
+- 9.3 **Application security (sandbox, filesystem scopes, network scopes,
+  device scopes, process limits) — COMPLETE**.
+  `aether_security::app_security` is the bridge: it maps every
+  `AppPermission` to a typed `Capability` with a chosen risk
+  level (CaptureScreen at Critical so the DefaultPermissionPolicy
+  requires consent even after install-time approval), builds
+  the persistent `AppConsentRecord` (publisher fingerprint
+  bound to the manifest, monotonic version, sorted grants),
+  drives the install-time flow through `AppInstaller` (validates
+  the manifest, rejects unrequested grants, derives the
+  refused set, writes the `app.install` audit log line), and
+  serves the runtime `AppPermissionGate` (pure function: app_id
+  + capability → allow/deny verdict against the consent
+  record). `sandbox_plan_for_app` derives a
+  `RestrictedService` plan for an `AppManifest` with the
+  cgroup slice renamed to the app's own slice and the
+  manifest's memory_max_bytes copied into the plan.
+  `verify_consent_for_package` protects against payload-swap
+  attacks by requiring both `app_id` and `publisher_key_id`
+  to match between the consent record and the on-disk
+  package. 22 new unit tests. File:
+  `security/aether-security/src/app_security.rs`.
+- 9.4 **Aether Store (discovery, install, updates, ratings,
+  permissions, publisher, signatures) — COMPLETE**. New crate
+  `system/aether-store` ships the user-facing install /
+  launch / uninstall state machine. Three sub-modules:
+  * `fs` — `StoreFs` trait with a `MemoryFs` (tests) and
+    `LocalFs` (production) implementation.
+  * `registry` — `TrustedPublisherRegistry`: sorted,
+    deduplicated list of trusted fingerprints persisted
+    to `trust.json` via `StoreFs`. A missing file is the
+    safe default (every install rejected); a malformed
+    file is treated as evidence of tampering.
+  * `store` — the state machine. `install_signed` runs the
+    full chain (manifest validate → trust check → grant
+    subset check → no-overwrite check → consent + plan +
+    install receipt + audit log). `launch` verifies the
+    consent record still matches the on-disk manifest
+    before handing the payload to the injected `Launcher`
+    (production = `aether-sandbox`). `uninstall` clears
+    the in-memory record and the payload cache. The
+    `StoreError` enum is a 10-variant typed result with
+    unique Display per variant. 36 new unit tests.
 
 **Dependencies:** Phase 1.4, Phase 2.
 
-**Acceptance:** third-party Aether app can be installed, sandboxed, and
-updated.
+**Acceptance (9.2 / 9.3 / 9.4 — the install / sandbox /
+update foundation): a third-party Aether app can be
+installed, sandboxed, and updated. Update and rating
+flows are out of scope for the typed contract; the
+foundation for them (publisher trust, install receipt
+with manifest_digest, refused set, plan_digest) is in
+place.
 
 ---
 

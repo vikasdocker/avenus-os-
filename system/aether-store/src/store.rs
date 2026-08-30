@@ -301,8 +301,7 @@ impl<L: Launcher> Store<L> {
         // publisher. The store accepts the package's
         // `AppPackageVerifier` configured with the trust
         // list.
-        let verifier =
-            AppPackageVerifier::new(vec![fingerprint.clone()]);
+        let verifier = AppPackageVerifier::new(vec![fingerprint.clone()]);
         // The verifier needs a public key. The trust
         // registry does not yet carry public keys; the
         // caller's `verify_signature` path is the one that
@@ -313,9 +312,7 @@ impl<L: Launcher> Store<L> {
         // `verify_signature` below. The shape check is
         // "exactly 88 base64 characters": the signature
         // is 64 raw bytes, base64 expands to 88 chars.
-        if package.signature.len() != 88
-            || package.signature.bytes().any(|b| !is_base64_char(b))
-        {
+        if package.signature.len() != 88 || package.signature.bytes().any(|b| !is_base64_char(b)) {
             return Err(UntrustedReason::BadSignature { fingerprint });
         }
         let _ = verifier; // shape check done; the verifier is consulted in `verify_signature`.
@@ -380,10 +377,7 @@ impl<L: Launcher> Store<L> {
         //    registry. If the caller has not called
         //    `verify_signature` first, the manifest
         //    validation still runs (defence in depth).
-        package
-            .manifest
-            .validate()
-            .map_err(StoreError::BadManifest)?;
+        package.manifest.validate().map_err(StoreError::BadManifest)?;
 
         // 2. Trust check: the publisher must be in the
         //    registry. (The application manager's caller
@@ -414,18 +408,21 @@ impl<L: Launcher> Store<L> {
 
         // 5. Run the Phase 9.3 install-time flow.
         let mut installer = AppInstaller::new(&mut self.audit);
-        let decision = installer
-            .install(package.manifest.clone(), user_consent, now_ms)
-            .map_err(|e| match e.as_str() {
+        let decision = installer.install(package.manifest.clone(), user_consent, now_ms).map_err(
+            |e| match e.as_str() {
                 // AppInstaller surfaces manifest failures
                 // as plain strings; map the ones we
                 // recognise to typed variants.
-                s if s.contains("schema_version") || s.contains("app_id") || s.contains("publisher") => {
+                s if s.contains("schema_version")
+                    || s.contains("app_id")
+                    || s.contains("publisher") =>
+                {
                     StoreError::BadManifest(s.to_string())
                 }
                 s if s.contains("did not request") => StoreError::UnrequestedGrant(s.to_string()),
                 _ => StoreError::BadManifest(e),
-            })?;
+            },
+        )?;
 
         // 6. Build the install record.
         let plan_json = serde_json::to_vec(&decision.plan)
@@ -464,8 +461,7 @@ impl<L: Launcher> Store<L> {
 
         // 7. Persist: consent record, install record,
         //    manifest. Payload stays in memory.
-        self.persist_install(&package, &decision, &record)
-            .map_err(StoreError::Persistence)?;
+        self.persist_install(&package, &decision, &record).map_err(StoreError::Persistence)?;
 
         // 8. Audit: the install is already logged by
         //    `AppInstaller::install`; the store appends
@@ -477,10 +473,7 @@ impl<L: Launcher> Store<L> {
             now_ms,
             "store.install",
             "aether-store",
-            &format!(
-                "version={} plan_digest={}",
-                record.receipt_version, record.plan_digest_hex
-            ),
+            &format!("version={} plan_digest={}", record.receipt_version, record.plan_digest_hex),
         );
 
         // 9. Cache the payload for launch.
@@ -513,11 +506,10 @@ impl<L: Launcher> Store<L> {
             .get(app_id)
             .ok_or_else(|| StoreError::NotInstalled { app_id: app_id.to_string() })?
             .clone();
-        let payload = self
-            .payloads
-            .get(app_id)
-            .cloned()
-            .ok_or_else(|| StoreError::Persistence(format!("no cached payload for {app_id}")))?;
+        let payload =
+            self.payloads.get(app_id).cloned().ok_or_else(|| {
+                StoreError::Persistence(format!("no cached payload for {app_id}"))
+            })?;
         // Reconstruct a synthetic AppPackage from the
         // cached manifest + payload so the consent-mismatch
         // check can reuse the existing function.
@@ -547,9 +539,7 @@ impl<L: Launcher> Store<L> {
             "aether-store",
             &format!(
                 "version={} instance_id={} plan_digest={}",
-                installed.record.receipt_version,
-                instance_id,
-                installed.record.plan_digest_hex
+                installed.record.receipt_version, instance_id, installed.record.plan_digest_hex
             ),
         );
         Ok(LaunchOutcome { app_id: app_id.to_string(), instance_id, ..outcome })
@@ -591,8 +581,8 @@ impl<L: Launcher> Store<L> {
             .map_err(|e| format!("encode consent: {e}"))?;
         self.fs.write(&format!("{app_id}/consent.json"), &consent_json)?;
         // Install receipt
-        let install_json = serde_json::to_vec_pretty(record)
-            .map_err(|e| format!("encode install: {e}"))?;
+        let install_json =
+            serde_json::to_vec_pretty(record).map_err(|e| format!("encode install: {e}"))?;
         self.fs.write(&format!("{app_id}/install.json"), &install_json)?;
         Ok(())
     }
@@ -767,16 +757,15 @@ mod tests {
         // bytes (the signing key is private, but
         // public_key_bytes is not).
         let bytes = signer.public_key_bytes();
-        let vk = ed25519_dalek::VerifyingKey::from_bytes(&bytes)
-            .expect("public key bytes are 32 bytes");
+        let vk =
+            ed25519_dalek::VerifyingKey::from_bytes(&bytes).expect("public key bytes are 32 bytes");
         (signed, vk)
     }
 
     fn trust_for(signer_fp: &str) -> TrustedPublisherRegistry {
         let mut t = TrustedPublisherRegistry::empty();
         t.add(
-            crate::registry::PublisherTrust::new(signer_fp.to_string())
-                .with_display_name("Acme"),
+            crate::registry::PublisherTrust::new(signer_fp.to_string()).with_display_name("Acme"),
         );
         t
     }
@@ -784,15 +773,14 @@ mod tests {
     fn fresh_store(trust: TrustedPublisherRegistry) -> Store<TestLauncher> {
         let fs: Box<dyn StoreFs> = Box::new(MemoryFs::new());
         let mut store = Store::new(fs, TestLauncher::default());
-        store
-            .set_trust(trust, 1_700_000_000_000)
-            .expect("set_trust");
+        store.set_trust(trust, 1_700_000_000_000).expect("set_trust");
         store
     }
 
     #[test]
     fn fresh_store_has_no_installed_apps() {
-        let store: Store<TestLauncher> = Store::new(Box::new(MemoryFs::new()), TestLauncher::default());
+        let store: Store<TestLauncher> =
+            Store::new(Box::new(MemoryFs::new()), TestLauncher::default());
         assert!(store.installed_apps().is_empty());
         assert!(!store.is_installed("com.example.calc"));
     }
@@ -878,9 +866,7 @@ mod tests {
         let signer_fp = pkg.manifest.publisher_key_id.clone();
         let mut store = fresh_store(trust_for(&signer_fp));
         store.verify_signature(&pkg, &vk).expect("verify");
-        store
-            .install_signed(pkg.clone(), &[AppPermission::Notify], 1)
-            .expect("first install");
+        store.install_signed(pkg.clone(), &[AppPermission::Notify], 1).expect("first install");
         let err = store
             .install_signed(pkg, &[AppPermission::Notify], 2)
             .expect_err("second install is rejected");
@@ -908,9 +894,7 @@ mod tests {
         let signer_fp = pkg.manifest.publisher_key_id.clone();
         let mut store = fresh_store(trust_for(&signer_fp));
         store.verify_signature(&pkg, &vk).expect("verify");
-        store
-            .install_signed(pkg, &[AppPermission::Notify], 1_700_000_000_000)
-            .expect("install");
+        store.install_signed(pkg, &[AppPermission::Notify], 1_700_000_000_000).expect("install");
         let outcome = store.launch("com.example.calc", 1_700_000_000_500).expect("launch");
         assert_eq!(outcome.app_id, "com.example.calc");
         assert_eq!(outcome.cgroup_slice, "aether.slice/app.com_example_calc.slice");
@@ -921,12 +905,8 @@ mod tests {
         // The audit log captures the install + launch
         // events instead, which is the production-grade
         // verification path.
-        let events: Vec<String> = store
-            .audit()
-            .recent(10)
-            .into_iter()
-            .map(|e| e.event.clone())
-            .collect();
+        let events: Vec<String> =
+            store.audit().recent(10).into_iter().map(|e| e.event.clone()).collect();
         assert!(events.contains(&"store.install".to_string()));
         assert!(events.contains(&"store.launch".to_string()));
     }
@@ -949,12 +929,8 @@ mod tests {
         assert!(store.is_installed("com.example.calc"));
         store.uninstall("com.example.calc", 2).expect("uninstall");
         assert!(!store.is_installed("com.example.calc"));
-        let events: Vec<String> = store
-            .audit()
-            .recent(10)
-            .into_iter()
-            .map(|e| e.event.clone())
-            .collect();
+        let events: Vec<String> =
+            store.audit().recent(10).into_iter().map(|e| e.event.clone()).collect();
         assert!(events.contains(&"store.uninstall".to_string()));
     }
 
@@ -1086,9 +1062,7 @@ mod tests {
         let signer_fp = pkg.manifest.publisher_key_id.clone();
         let mut store = fresh_store(trust_for(&signer_fp));
         store.verify_signature(&pkg, &vk).expect("verify");
-        let _ = store
-            .install_signed(pkg, &[AppPermission::Notify], 1)
-            .expect("install");
+        let _ = store.install_signed(pkg, &[AppPermission::Notify], 1).expect("install");
         let installed = &store.installed_apps()[0];
         // The manifest requested [Notify, NetworkEgress];
         // the user granted only Notify; the receipt

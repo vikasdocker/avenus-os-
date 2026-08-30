@@ -236,12 +236,7 @@ impl<'a> AppInstaller<'a> {
             plan.seccomp.as_ref().map(|t| t.as_str()).unwrap_or("none"),
             plan.resources.cgroup_slice,
         );
-        self.audit_chain.record(
-            granted_at_ms,
-            "app.install",
-            "app-installer",
-            &detail,
-        );
+        self.audit_chain.record(granted_at_ms, "app.install", "app-installer", &detail);
 
         Ok(AppInstallDecision { manifest, consent, plan, refused })
     }
@@ -306,10 +301,7 @@ impl<'r> AppPermissionGate<'r> {
             return GateVerdict::allow("system capability not gated by user consent");
         };
         if self.consent.grants(permission) {
-            GateVerdict::allow(format!(
-                "user granted '{}' at install time",
-                permission.as_str()
-            ))
+            GateVerdict::allow(format!("user granted '{}' at install time", permission.as_str()))
         } else {
             GateVerdict::deny(format!(
                 "user did not grant '{}' (capability {} at {:?} risk)",
@@ -368,12 +360,8 @@ pub fn app_permission_capability(permission: AppPermission) -> Capability {
         AppPermission::WriteUserFiles => {
             (CapabilityDomain::Filesystem, "user.write", RiskLevel::High)
         }
-        AppPermission::NetworkEgress => {
-            (CapabilityDomain::Network, "egress", RiskLevel::High)
-        }
-        AppPermission::NetworkListen => {
-            (CapabilityDomain::Network, "listen", RiskLevel::High)
-        }
+        AppPermission::NetworkEgress => (CapabilityDomain::Network, "egress", RiskLevel::High),
+        AppPermission::NetworkListen => (CapabilityDomain::Network, "listen", RiskLevel::High),
         AppPermission::ReadPersonalData => {
             (CapabilityDomain::Identity, "personal.read", RiskLevel::High)
         }
@@ -382,9 +370,7 @@ pub fn app_permission_capability(permission: AppPermission) -> Capability {
             (CapabilityDomain::Application, "screen.capture", RiskLevel::Critical)
         }
         AppPermission::Camera => (CapabilityDomain::Application, "camera", RiskLevel::High),
-        AppPermission::Microphone => {
-            (CapabilityDomain::Application, "microphone", RiskLevel::High)
-        }
+        AppPermission::Microphone => (CapabilityDomain::Application, "microphone", RiskLevel::High),
         AppPermission::Location => (CapabilityDomain::Application, "location", RiskLevel::High),
         AppPermission::PairDevices => {
             (CapabilityDomain::Application, "pair.devices", RiskLevel::Medium)
@@ -402,14 +388,10 @@ pub fn app_permission_capability(permission: AppPermission) -> Capability {
 /// as "not gated by user consent" and allows by default.
 #[must_use]
 pub fn app_permission_for_capability(capability: &Capability) -> Option<AppPermission> {
-    if capability.domain == CapabilityDomain::Filesystem
-        && capability.name == "user.read"
-    {
+    if capability.domain == CapabilityDomain::Filesystem && capability.name == "user.read" {
         return Some(AppPermission::ReadUserFiles);
     }
-    if capability.domain == CapabilityDomain::Filesystem
-        && capability.name == "user.write"
-    {
+    if capability.domain == CapabilityDomain::Filesystem && capability.name == "user.write" {
         return Some(AppPermission::WriteUserFiles);
     }
     if capability.domain == CapabilityDomain::Network && capability.name == "egress" {
@@ -418,37 +400,25 @@ pub fn app_permission_for_capability(capability: &Capability) -> Option<AppPermi
     if capability.domain == CapabilityDomain::Network && capability.name == "listen" {
         return Some(AppPermission::NetworkListen);
     }
-    if capability.domain == CapabilityDomain::Identity
-        && capability.name == "personal.read"
-    {
+    if capability.domain == CapabilityDomain::Identity && capability.name == "personal.read" {
         return Some(AppPermission::ReadPersonalData);
     }
-    if capability.domain == CapabilityDomain::Application
-        && capability.name == "notify"
-    {
+    if capability.domain == CapabilityDomain::Application && capability.name == "notify" {
         return Some(AppPermission::Notify);
     }
-    if capability.domain == CapabilityDomain::Application
-        && capability.name == "screen.capture"
-    {
+    if capability.domain == CapabilityDomain::Application && capability.name == "screen.capture" {
         return Some(AppPermission::CaptureScreen);
     }
     if capability.domain == CapabilityDomain::Application && capability.name == "camera" {
         return Some(AppPermission::Camera);
     }
-    if capability.domain == CapabilityDomain::Application
-        && capability.name == "microphone"
-    {
+    if capability.domain == CapabilityDomain::Application && capability.name == "microphone" {
         return Some(AppPermission::Microphone);
     }
-    if capability.domain == CapabilityDomain::Application
-        && capability.name == "location"
-    {
+    if capability.domain == CapabilityDomain::Application && capability.name == "location" {
         return Some(AppPermission::Location);
     }
-    if capability.domain == CapabilityDomain::Application
-        && capability.name == "pair.devices"
-    {
+    if capability.domain == CapabilityDomain::Application && capability.name == "pair.devices" {
         return Some(AppPermission::PairDevices);
     }
     None
@@ -579,11 +549,7 @@ mod tests {
         let r = AppConsentRecord::new(
             "com.example.calc",
             "k".repeat(64),
-            vec![
-                AppPermission::Notify,
-                AppPermission::ReadUserFiles,
-                AppPermission::NetworkEgress,
-            ],
+            vec![AppPermission::Notify, AppPermission::ReadUserFiles, AppPermission::NetworkEgress],
             1,
         );
         let sorted = r.sorted_grants();
@@ -641,9 +607,7 @@ mod tests {
         let mut manifest = sample_manifest();
         manifest.app_id = String::new();
         let mut installer = AppInstaller::new(&mut chain);
-        let err = installer
-            .install(manifest, &[], 1)
-            .expect_err("invalid manifest is rejected");
+        let err = installer.install(manifest, &[], 1).expect_err("invalid manifest is rejected");
         assert!(!err.is_empty());
         assert_eq!(chain.len(), 0);
     }
@@ -652,22 +616,17 @@ mod tests {
     fn installer_derives_app_specific_cgroup_slice() {
         let mut chain = AuditChain::default();
         let mut installer = AppInstaller::new(&mut chain);
-        let decision = installer
-            .install(sample_manifest(), &[AppPermission::Notify], 1)
-            .expect("install");
-        assert_eq!(
-            decision.plan.resources.cgroup_slice,
-            "aether.slice/app.com_example_calc.slice"
-        );
+        let decision =
+            installer.install(sample_manifest(), &[AppPermission::Notify], 1).expect("install");
+        assert_eq!(decision.plan.resources.cgroup_slice, "aether.slice/app.com_example_calc.slice");
     }
 
     #[test]
     fn installer_copies_memory_max_into_plan() {
         let mut chain = AuditChain::default();
         let mut installer = AppInstaller::new(&mut chain);
-        let decision = installer
-            .install(sample_manifest(), &[AppPermission::Notify], 1)
-            .expect("install");
+        let decision =
+            installer.install(sample_manifest(), &[AppPermission::Notify], 1).expect("install");
         // The manifest requested 64 MiB; the plan carries
         // it through so the launcher can write it into
         // cgroupfs.
@@ -680,9 +639,7 @@ mod tests {
         let mut installer = AppInstaller::new(&mut chain);
         let manifest = sample_manifest();
         let all = manifest.permissions.clone();
-        let decision = installer
-            .install(manifest, &all, 1)
-            .expect("install");
+        let decision = installer.install(manifest, &all, 1).expect("install");
         assert!(decision.refused.is_empty());
         // The consent record's granted set equals the
         // manifest's permissions set.
@@ -692,11 +649,7 @@ mod tests {
     }
 
     fn manifest_permissions_for_test() -> Vec<AppPermission> {
-        vec![
-            AppPermission::ReadUserFiles,
-            AppPermission::Notify,
-            AppPermission::NetworkEgress,
-        ]
+        vec![AppPermission::ReadUserFiles, AppPermission::Notify, AppPermission::NetworkEgress]
     }
 
     #[test]
@@ -708,10 +661,8 @@ mod tests {
             1,
         );
         let gate = AppPermissionGate::new(&r);
-        let verdict = gate.evaluate(
-            "com.example.calc",
-            &app_permission_capability(AppPermission::Notify),
-        );
+        let verdict =
+            gate.evaluate("com.example.calc", &app_permission_capability(AppPermission::Notify));
         assert!(verdict.allowed);
         assert!(verdict.reason.contains("notify"));
     }
@@ -725,10 +676,8 @@ mod tests {
             1,
         );
         let gate = AppPermissionGate::new(&r);
-        let verdict = gate.evaluate(
-            "com.example.calc",
-            &app_permission_capability(AppPermission::NetworkEgress),
-        );
+        let verdict = gate
+            .evaluate("com.example.calc", &app_permission_capability(AppPermission::NetworkEgress));
         assert!(!verdict.allowed);
         assert!(verdict.reason.contains("network-egress"));
     }
@@ -742,10 +691,8 @@ mod tests {
             1,
         );
         let gate = AppPermissionGate::new(&r);
-        let verdict = gate.evaluate(
-            "com.example.other",
-            &app_permission_capability(AppPermission::Notify),
-        );
+        let verdict =
+            gate.evaluate("com.example.other", &app_permission_capability(AppPermission::Notify));
         assert!(!verdict.allowed);
     }
 
@@ -758,11 +705,7 @@ mod tests {
             1,
         );
         let gate = AppPermissionGate::new(&r);
-        let system_cap = Capability::new(
-            CapabilityDomain::Application,
-            "list",
-            RiskLevel::Low,
-        );
+        let system_cap = Capability::new(CapabilityDomain::Application, "list", RiskLevel::Low);
         let verdict = gate.evaluate("com.example.calc", &system_cap);
         assert!(verdict.allowed);
     }
@@ -835,9 +778,7 @@ mod tests {
         let mut chain = AuditChain::default();
         let mut installer = AppInstaller::new(&mut chain);
         let manifest = sample_manifest();
-        let decision = installer
-            .install(manifest, &[AppPermission::Notify], 1)
-            .expect("install");
+        let decision = installer.install(manifest, &[AppPermission::Notify], 1).expect("install");
         // A second package signed by a different publisher
         // cannot reuse the consent record.
         let mut swapped = sample_manifest();
@@ -858,9 +799,8 @@ mod tests {
         let mut chain = AuditChain::default();
         let mut installer = AppInstaller::new(&mut chain);
         let manifest = sample_manifest();
-        let decision = installer
-            .install(manifest.clone(), &[AppPermission::Notify], 1)
-            .expect("install");
+        let decision =
+            installer.install(manifest.clone(), &[AppPermission::Notify], 1).expect("install");
         let pkg = aether_core::app::AppPackage {
             manifest,
             signature: "sig".to_string(),
@@ -875,9 +815,7 @@ mod tests {
         let mut chain = AuditChain::default();
         let mut installer = AppInstaller::new(&mut chain);
         let manifest = sample_manifest();
-        let decision = installer
-            .install(manifest, &[AppPermission::Notify], 1)
-            .expect("install");
+        let decision = installer.install(manifest, &[AppPermission::Notify], 1).expect("install");
         let mut other = sample_manifest();
         other.app_id = "com.example.other".to_string();
         let pkg = aether_core::app::AppPackage {
@@ -896,11 +834,7 @@ mod tests {
         // The seccomp filter tag for the restricted profile
         // is `restricted-app-v1`; the launcher reads this
         // name to look up the compiled policy.
-        let seccomp = plan
-            .seccomp
-            .as_ref()
-            .map(|t| t.as_str().to_string())
-            .unwrap_or_default();
+        let seccomp = plan.seccomp.as_ref().map(|t| t.as_str().to_string()).unwrap_or_default();
         assert_eq!(seccomp, "restricted-app-v1");
         // No new privileges is set.
         assert!(plan.no_new_privs);

@@ -240,6 +240,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-store"
+version = "0.1.0"
+dependencies = [
+ "aether-core",
+ "aether-security",
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
 name = "aether-supervisor"
 version = "0.1.0"
 dependencies = [

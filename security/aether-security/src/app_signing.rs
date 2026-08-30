@@ -41,10 +41,7 @@ impl AppSignature {
         // encoded form is always 88 characters; we validate
         // the length before decoding.
         if self.0.len() != 88 {
-            return Err(format!(
-                "signature must be 88 base64 characters (got {})",
-                self.0.len()
-            ));
+            return Err(format!("signature must be 88 base64 characters (got {})", self.0.len()));
         }
         base64_decode(&self.0)
     }
@@ -88,10 +85,7 @@ impl AppPackageSigner {
     /// Sign a manifest. The payload is hashed separately by the
     /// verifier (we record its length and the SHA-256 in the
     /// manifest before signing).
-    pub fn sign_package(
-        &self,
-        mut package: AppPackage,
-    ) -> Result<AppPackage, String> {
+    pub fn sign_package(&self, mut package: AppPackage) -> Result<AppPackage, String> {
         // 1. Re-hash the payload so the manifest reflects the
         //    bytes we're about to commit to.
         let mut hasher = Sha256::new();
@@ -139,11 +133,7 @@ impl AppPackageVerifier {
         package.manifest.validate()?;
 
         // 2. Publisher is in the trust store.
-        if !self
-            .trusted_fingerprints
-            .iter()
-            .any(|fp| fp == &package.manifest.publisher_key_id)
-        {
+        if !self.trusted_fingerprints.iter().any(|fp| fp == &package.manifest.publisher_key_id) {
             return Err(format!(
                 "publisher '{}' is not in the trusted-publisher registry",
                 package.manifest.publisher_key_id
@@ -175,10 +165,8 @@ impl AppPackageVerifier {
         if sig_bytes.len() != 64 {
             return Err("signature is not 64 bytes".to_string());
         }
-        let sig_array: [u8; 64] = sig_bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| "signature is not 64 bytes".to_string())?;
+        let sig_array: [u8; 64] =
+            sig_bytes.as_slice().try_into().map_err(|_| "signature is not 64 bytes".to_string())?;
         let sig = Signature::from_bytes(&sig_array);
 
         // The publisher's public key is *not* shipped in the
@@ -233,11 +221,7 @@ impl AppPackageVerifier {
         public_key: &VerifyingKey,
     ) -> Result<String, String> {
         package.manifest.validate()?;
-        if !self
-            .trusted_fingerprints
-            .iter()
-            .any(|fp| fp == &package.manifest.publisher_key_id)
-        {
+        if !self.trusted_fingerprints.iter().any(|fp| fp == &package.manifest.publisher_key_id) {
             return Err(format!(
                 "publisher '{}' is not in the trusted-publisher registry",
                 package.manifest.publisher_key_id
@@ -253,10 +237,8 @@ impl AppPackageVerifier {
             return Err("payload SHA-256 mismatch".to_string());
         }
         let sig_bytes = AppSignature(package.signature.clone()).to_bytes()?;
-        let sig_array: [u8; 64] = sig_bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| "signature is not 64 bytes".to_string())?;
+        let sig_array: [u8; 64] =
+            sig_bytes.as_slice().try_into().map_err(|_| "signature is not 64 bytes".to_string())?;
         let sig = Signature::from_bytes(&sig_array);
         public_key
             .verify(&package.canonical_manifest_bytes()?, &sig)
@@ -286,8 +268,7 @@ fn base64_encode(bytes: &[u8]) -> String {
     // crate, but the signatures are 64 bytes, so a tiny
     // hand-rolled encoder is enough and keeps the dependency
     // surface small.
-    const ALPHA: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     let mut i = 0;
     while i + 3 <= bytes.len() {
@@ -322,8 +303,7 @@ fn base64_encode(bytes: &[u8]) -> String {
 }
 
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
-    const ALPHA: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut table = [255u8; 256];
     for (i, &c) in ALPHA.iter().enumerate() {
         table[c as usize] = i as u8;
@@ -423,13 +403,9 @@ mod tests {
 
         let verifier = AppPackageVerifier::new(vec![signer.public_key_fingerprint_hex()]);
         let vk = signer.signing_key.verifying_key();
-        let err = verifier
-            .verify_with_key(&signed, &vk)
-            .expect_err("tampered payload must be rejected");
-        assert!(
-            err.contains("SHA-256"),
-            "expected SHA-256 mismatch, got: {err}"
-        );
+        let err =
+            verifier.verify_with_key(&signed, &vk).expect_err("tampered payload must be rejected");
+        assert!(err.contains("SHA-256"), "expected SHA-256 mismatch, got: {err}");
     }
 
     #[test]
@@ -447,9 +423,8 @@ mod tests {
 
         let verifier = AppPackageVerifier::new(vec![signer.public_key_fingerprint_hex()]);
         let vk = signer.signing_key.verifying_key();
-        let err = verifier
-            .verify_with_key(&signed, &vk)
-            .expect_err("tampered manifest must be rejected");
+        let err =
+            verifier.verify_with_key(&signed, &vk).expect_err("tampered manifest must be rejected");
         assert!(
             err.contains("signature") || err.contains("verification"),
             "expected signature error, got: {err}"

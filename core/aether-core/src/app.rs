@@ -187,10 +187,7 @@ impl AppManifest {
             return Err("app_id is required".to_string());
         }
         if !is_valid_app_id(&self.app_id) {
-            return Err(format!(
-                "app_id '{}' is not a valid reverse-DNS identifier",
-                self.app_id
-            ));
+            return Err(format!("app_id '{}' is not a valid reverse-DNS identifier", self.app_id));
         }
         if self.name.is_empty() {
             return Err("name is required".to_string());
@@ -297,10 +294,8 @@ pub fn is_valid_app_id(id: &str) -> bool {
 pub fn app_cgroup_slice(app_id: &str) -> String {
     // Strip the dot separators to make a valid cgroup path
     // component (cgroupfs does not allow `.` in leaf names).
-    let sanitised: String = app_id
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
+    let sanitised: String =
+        app_id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
     format!("aether.slice/app.{sanitised}.slice")
 }
 
