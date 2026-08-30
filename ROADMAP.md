@@ -1256,20 +1256,108 @@ tests that exercise the defenses.
 
 ### Phase 12 — Self-Updating + System Lifecycle
 
-**Status:** `NOT_STARTED`.
+**Status:** `PARTIAL` (planning layer + state machine + IPC shipped;
+delivery, atomic-apply, and rollback execution deferred to
+`aether-update-agent`).
 
 **Sub-milestones:**
 
-- OS update system.
-- Application updates.
-- Rollback.
-- Recovery environment.
-- Version management.
-- Signed update verification.
-- Atomic updates where practical.
-- Safe boot / recovery.
+- 12.1 **Update planning layer — COMPLETE**. New
+  `system/aether-update-core` crate defines the
+  declarative contract a future update-agent daemon
+  will operate on:
+    * `UpdatePlan` — target, kind, action (upgrade vs
+      reinstall), version, timestamp, signer
+      fingerprint, payload length, and the
+      `VersionPolicyDecision` that allowed it.
+    * `UpdateAction` — the five canonical actions:
+      `upgrade-os-image`, `reinstall-os-image`,
+      `upgrade-service-bundle`,
+      `reinstall-service-bundle`,
+      `upgrade-agent-model`.
+    * `plan_from_signed_update` — the bridge from a
+      verified `aether_security::signed_update::SignedUpdate`
+      to an `UpdatePlan`. Rejects empty target,
+      empty version, empty payload, and any update
+      denied by the version policy. Tests cover
+      every rejection path and the upgrade /
+      reinstall / downgrade branches.
+    * `VersionPolicy` — pure-logic policy with two
+      flags: `allow_downgrade` and
+      `allow_prerelease`. Recognises four
+      requirement categories (`Upgrade`,
+      `Downgrade`, `Same`, `Prerelease`). Allows
+      reinstalls of `os-image` and `service-bundle`
+      at the same version; rejects reinstalls of
+      `agent-model` (a model downgrade must use
+      `allow_downgrade`).
+  Evidence: `system/aether-update-core/src/plan.rs`
+  and `system/aether-update-core/src/version.rs`
+  (32 unit tests across both modules).
+- 12.2 **Update state machine — COMPLETE**. `UpdateStatus`
+  is the in-memory record of "where is the current
+  update, if any, and what happened the last time we
+  tried one?" Eight stages: `Idle | Downloading |
+  Verifying | Staging | Applying | Done | Failed |
+  RolledBack`. The status carries a bounded
+  `HistoryEntry` log (max 64 entries, oldest dropped
+  on overflow) of every transition. The state
+  machine is driven via `UpdateStatus::transition` —
+  the future update-agent daemon is the only thing
+  that calls it; the IPC layer's `update.simulate`
+  command is a thin wrapper for tests and operator
+  smoke-tests. Tests cover every stage, attempt
+  increment / reset, last-error clearing, history
+  bounding, and plan attach / clear. Evidence:
+  `system/aether-update-core/src/state.rs` (10 unit
+  tests).
+- 12.3 **Recovery snapshot — COMPLETE**. The
+  `RecoverySnapshot` type describes "the pre-update
+  state" that rollback restores from. A snapshot
+  carries an id, a wall-clock timestamp, and a list
+  of `SnapshotComponent` records (target, from
+  version, stash path, optional note). The shell
+  includes `is_complete`, `version_of`, `component_count`,
+  and `targets` helpers. The future daemon writes
+  the actual data; this type only describes *what*
+  was snapshotted, not *where the bytes live*.
+  Evidence: `system/aether-update-core/src/recovery.rs`
+  (8 unit tests).
+- 12.4 **IPC surface for the planning layer — COMPLETE**.
+  The system-core daemon now exposes four new
+  commands (gated by the Phase 11.3 policy as
+  low-risk `System` capabilities):
+    * `update.plan` — accepts a JSON header + base64
+      payload + base64 signature + hex public key +
+      optional `installed_version`. Re-verifies the
+      signature against the supplied public key,
+      then runs `plan_from_signed_update`. Returns
+      the resulting `UpdatePlan` on success, or
+      `VERIFICATION_FAILED` / `POLICY_DENIED` /
+      `INVALID_INPUT` on the various failure paths.
+    * `update.status` — returns the live
+      `UpdateStatus` (stage, attempt counter, last
+      error, current plan).
+    * `update.history` — returns the bounded
+      transition log.
+    * `update.simulate` — operator / test helper
+      that drives the state machine through a
+      comma-separated stage sequence.
+  Evidence: `system/aether-system-core/src/main.rs`
+  (the four new commands) and the
+  `update_plan_ipc_tests` module (9 integration
+  tests including plan-on-upgrade, downgrade
+  rejection, bad-signature rejection, status,
+  history, simulate, and unknown-stage rejection).
+- **Out of scope (lives in the future `aether-update-agent`
+  daemon):** actual download, stage, atomic-apply,
+  rollback execution, and reboot coordination. The
+  planning layer is the contract; the I/O code is a
+  separate daemon that drives the state machine
+  against this contract.
 
-**Dependencies:** Phase 11.
+**Dependencies:** Phase 11 (signed updates, sealed
+credentials, audit chain).
 
 ---
 

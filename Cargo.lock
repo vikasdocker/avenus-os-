@@ -219,8 +219,20 @@ dependencies = [
  "aether-core",
  "aether-security",
  "aether-storage",
+ "aether-update-core",
  "ed25519-dalek",
  "rand",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "aether-update-core"
+version = "0.1.0"
+dependencies = [
+ "aether-core",
+ "aether-security",
  "serde",
  "serde_json",
  "tempfile",

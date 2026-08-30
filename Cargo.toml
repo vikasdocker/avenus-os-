@@ -12,6 +12,7 @@ members = [
   "system/aether-init",
   "system/aether-system-core",
   "system/aether-application-manager",
+  "system/aether-update-core",
   "network/aether-network",
   "services/aether-agentd",
   "services/aether-supervisor",

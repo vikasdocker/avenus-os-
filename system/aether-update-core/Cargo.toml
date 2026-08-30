@@ -1,0 +1,23 @@
+[package]
+name = "aether-update-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether Update Core - planning layer + state machine for Aether self-updates (out-of-scope shell for Phase 12)"
+
+[lib]
+name = "aether_update_core"
+path = "src/lib.rs"
+
+[dependencies]
+aether-core = { path = "../../core/aether-core" }
+aether-security = { path = "../../security/aether-security" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

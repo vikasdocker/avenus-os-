@@ -19,6 +19,7 @@ aether-application-manager = { path = "../aether-application-manager" }
 aether-core = { path = "../../core/aether-core" }
 aether-security = { path = "../../security/aether-security" }
 aether-storage = { path = "../../storage/aether-storage" }
+aether-update-core = { path = "../aether-update-core" }
 ed25519-dalek = "3"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
