@@ -1121,9 +1121,9 @@ hardware profile; recovery path is exercisable.
 ### Phase 11 — Security + Trusted AI
 
 **Status:** `PARTIAL` (capability/policy/audit/hash-chain/sealed
-credentials/signed manifests/signed updates present; kernel
-sandboxing and tamper-evident root-of-trust boot are deferred to
-this phase).
+credentials/signed manifests/signed updates/kernel sandboxing
+present; tamper-evident root-of-trust boot is deferred to this
+phase).
 
 **Sub-milestones:**
 
@@ -1153,9 +1153,9 @@ this phase).
   `system/aether-system-core/Cargo.toml` (depends on
   `aether-security`). 7 dispatch-policy unit tests cover trusted /
   untrusted / low-risk / high-risk / critical combinations.
-- 11.4 **Declarative kernel-sandbox plan — PARTIAL (planning layer shipped,
-  enforcement deferred to `aether-sandbox` binary)**. `core/aether-core/src/sandbox.rs`
-  defines a typed `SandboxPlan` for each `SandboxProfile`:
+- 11.4 **Declarative kernel-sandbox plan + enforcement — COMPLETE**.
+  `core/aether-core/src/sandbox.rs` defines a typed `SandboxPlan`
+  for each `SandboxProfile`:
     * `Internal` — no kernel primitives (in-process).
     * `SystemService` — user+mount+uts namespaces, no_new_privs, the
       minimum Linux capabilities the service actually needs (no
@@ -1171,15 +1171,26 @@ this phase).
   `all_sandbox_plans` expose the plan for one (or every) service;
   a new `sandbox.plan` IPC command (gated by the Phase 11.3 policy
   as a low-risk System capability) returns the plan as JSON.
-  **The actual prctl(2) / unshare(2) / cgroupfs write / seccomp(2)
-  invocation lives in a future `aether-sandbox` binary that runs on
-  the Aether OS image; this layer is the declarative contract.**
-  Evidence: `core/aether-core/src/sandbox.rs` (9 unit tests covering
-  determinism, serde round-trip, distinct cgroup slices, distinct
-  seccomp tags, missing-capability safety), and
-  `system/aether-system-core/src/manager.rs` (5 unit tests covering
-  every profile, the unknown-service `None` return, and the
-  `all_sandbox_plans` iterator).
+  **The Linux enforcement binary `aether-sandbox` is now live**:
+  `system/aether-sandbox/src/main.rs` parses the plan, validates
+  it (forbidden capabilities, cgroup slice policy, weight bounds),
+  and `src/linux.rs` applies the primitives in deterministic order
+  — `prctl(PR_SET_NO_NEW_PRIVS)`, `unshare(CLONE_NEW*)`, cgroup
+  v2 slice write, `capset()` to keep only the whitelist — then
+  `execvp()`s the child. The non-Linux build is a clear-error
+  stub; the contract is never silently weakened on a non-Linux
+  target. The seccomp filter is *tagged* by this binary and
+  *installed* by the supervisor before user code runs.
+  Evidence: `core/aether-core/src/sandbox.rs` (9 unit tests
+  covering determinism, serde round-trip, distinct cgroup
+  slices, distinct seccomp tags, missing-capability safety),
+  `system/aether-system-core/src/manager.rs` (5 unit tests),
+  `system/aether-sandbox/src/main.rs` (10 unit tests covering
+  plan validation, plan resolution, CLI surface, and profile
+  handling), `system/aether-sandbox/src/linux.rs` (3 unit tests
+  covering `CLONE_NEW*` flag mapping, `CAP_*` numbering, and
+  capability-coverage exhaustiveness). 13 new Rust tests in
+  total; 855 Rust tests passing project-wide.
 - 11.5 **Audit log with hash-chain integrity — COMPLETE**. Every IPC
   dispatch through the system-core daemon writes a tamper-evident
   `AuditEntry` to a SHA-256 hash-chained `AuditChain`. Each entry's
