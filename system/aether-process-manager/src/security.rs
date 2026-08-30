@@ -43,11 +43,7 @@ pub struct SecurityViolation {
 
 impl std::fmt::Display for SecurityViolation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} on pid {}: {}",
-            self.kind, self.process_id, self.detail
-        )
+        write!(f, "{} on pid {}: {}", self.kind, self.process_id, self.detail)
     }
 }
 
@@ -122,10 +118,7 @@ pub struct ProcessGuard {
 
 impl ProcessGuard {
     pub fn new(policy: ProcessPolicy) -> Self {
-        Self {
-            policy,
-            violations: Vec::new(),
-        }
+        Self { policy, violations: Vec::new() }
     }
 
     /// Validates spawning a new executable as `user`. Returns Err with a recorded violation.
@@ -169,10 +162,7 @@ impl ProcessGuard {
             return Err(self.record(
                 ViolationKind::ResourceLimit,
                 process_id,
-                format!(
-                    "user {user} at process limit ({})",
-                    self.policy.max_processes_per_user
-                ),
+                format!("user {user} at process limit ({})", self.policy.max_processes_per_user),
                 timestamp_ms,
             ));
         }
@@ -199,12 +189,7 @@ impl ProcessGuard {
         detail: String,
         timestamp_ms: u64,
     ) -> AetherError {
-        let violation = SecurityViolation {
-            kind,
-            process_id,
-            detail,
-            timestamp_ms,
-        };
+        let violation = SecurityViolation { kind, process_id, detail, timestamp_ms };
         let err = AetherError::permission_denied(violation.to_string());
         self.violations.push(violation);
         err

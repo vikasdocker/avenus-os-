@@ -24,15 +24,9 @@ struct Region {
 
 impl Region {
     fn open(rect: aether_surface::Rect) -> Result<Self, String> {
-        let file = OpenOptions::new()
-            .write(true)
-            .open("/dev/fb0")
-            .map_err(|e| format!("fb0: {e}"))?;
-        Ok(Self {
-            file,
-            stride: read_stride()?,
-            rect,
-        })
+        let file =
+            OpenOptions::new().write(true).open("/dev/fb0").map_err(|e| format!("fb0: {e}"))?;
+        Ok(Self { file, stride: read_stride()?, rect })
     }
 
     fn put(&mut self, dx: u32, dy: u32, w: u32, h: u32, rgb: &[u8; 3]) -> Result<(), String> {
@@ -130,13 +124,7 @@ fn draw_panel(fb: &mut Region, display: &str) -> Result<(), String> {
                     let Ok(bits) = u8::from_str_radix(row_bits, 2) else { continue };
                     for rx in 0..5usize {
                         if (bits >> (4 - rx)) & 1 == 1 {
-                            fb.put(
-                                bx + 28 + rx as u32 * 4,
-                                by + 18 + ry as u32 * 4,
-                                4,
-                                4,
-                                &FG,
-                            )?;
+                            fb.put(bx + 28 + rx as u32 * 4, by + 18 + ry as u32 * 4, 4, 4, &FG)?;
                         }
                     }
                 }
@@ -214,8 +202,7 @@ fn run() -> Result<(), String> {
             if closed.load(std::sync::atomic::Ordering::SeqCst) {
                 break;
             }
-            let snapshot =
-                display_state.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            let snapshot = display_state.lock().unwrap_or_else(|p| p.into_inner()).clone();
             if let Err(e) = draw_panel(&mut region, &snapshot) {
                 eprintln!("[calculator][FAIL] {e}");
                 closed.store(true, std::sync::atomic::Ordering::SeqCst);

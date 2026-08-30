@@ -105,9 +105,7 @@ impl CursorManager {
     /// Updates the virtual screen bounds used for clamping.
     pub fn set_screen_bounds(&mut self, width: u32, height: u32) -> Result<(), GraphicsError> {
         if width == 0 || height == 0 {
-            return Err(GraphicsError::Output(
-                "Screen bounds must be non-zero".to_string(),
-            ));
+            return Err(GraphicsError::Output("Screen bounds must be non-zero".to_string()));
         }
         self.screen_width = width;
         self.screen_height = height;
@@ -122,8 +120,7 @@ mod tests {
     #[test]
     fn movement_clamps_to_screen() {
         let mut cm = CursorManager::new(800, 600);
-        cm.move_by(-10_000, 10_000)
-            .unwrap_or_else(|e| panic!("{e}"));
+        cm.move_by(-10_000, 10_000).unwrap_or_else(|e| panic!("{e}"));
         let c = cm.cursor();
         assert_eq!((c.x, c.y), (0, 599));
     }
@@ -131,8 +128,7 @@ mod tests {
     #[test]
     fn hidden_shape_hides_cursor() {
         let mut cm = CursorManager::new(800, 600);
-        cm.set_shape(CursorShape::Hidden)
-            .unwrap_or_else(|e| panic!("{e}"));
+        cm.set_shape(CursorShape::Hidden).unwrap_or_else(|e| panic!("{e}"));
         assert!(!cm.cursor().visible);
     }
 

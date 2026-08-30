@@ -16,11 +16,12 @@
 // daemon holds; everything else lives behind it.
 
 use crate::action::Action;
-use crate::audit::{AuditEventType, AuditLog};
+use crate::audit::{AuditEntry, AuditEventType, AuditLog};
 use crate::cancellation::CancellationToken;
 use crate::errors::AgentError;
 use crate::events::AgentEvent;
 use crate::executor::ActionExecutor;
+use crate::memory_store::{decode_persisted, encode_persisted, MemoryStore, MemoryStoreError};
 use crate::observation::{Observation, ObservationType};
 use crate::request::{RequestActor, RequestId, UserRequest};
 use crate::session::{AgentSession, SessionActor, SessionId, SessionState};
@@ -644,6 +645,42 @@ impl AgentRuntimeHost {
         self.published_event_count
     }
 
+    /// Persists the most recent `count` audit entries to the
+    /// supplied `MemoryStore` under the well-known name
+    /// `audit_recent`. The payload is wrapped in a `Persisted<T>`
+    /// envelope (version, timestamp, content checksum) so a later
+    /// reader can detect format drift, partial writes, and tampered
+    /// blobs. The store name is validated by the trait, so the
+    /// filesystem is never touched with a user-controlled path.
+    pub fn persist_audit_recent(
+        &self,
+        store: &dyn MemoryStore,
+        count: usize,
+    ) -> Result<usize, MemoryStoreError> {
+        let entries = self.audit.snapshot_recent(count);
+        let n = entries.len();
+        let bytes = encode_persisted(&entries)?;
+        store.save("audit_recent", &bytes)?;
+        Ok(n)
+    }
+
+    /// Restores the most recent audit entries from the supplied
+    /// `MemoryStore`. Returns the number of entries actually
+    /// retained, or `Ok(0)` if no persisted state was present.
+    /// Corrupt blobs are surfaced as `MemoryStoreError::Corrupt`
+    /// rather than silently swallowed — the caller can decide to log
+    /// a warning and continue with an empty ring.
+    pub fn restore_audit_recent(
+        &mut self,
+        store: &dyn MemoryStore,
+    ) -> Result<usize, MemoryStoreError> {
+        let Some(bytes) = store.load("audit_recent")? else {
+            return Ok(0);
+        };
+        let entries: Vec<AuditEntry> = decode_persisted(&bytes)?;
+        Ok(self.audit.restore_recent(entries))
+    }
+
     /// Stops the host, transitioning to Stopped. Idempotent.
     pub fn stop(&mut self) -> Result<(), AgentError> {
         if self.state == HostState::Stopped {
@@ -860,6 +897,23 @@ impl From<String> for AgentError {
 mod tests {
     use super::*;
     use crate::action::{ActionVariant, ApplicationLaunchParams};
+
+    /// Test-only panic-on-failure helper. See the same macro in
+    /// `memory_store.rs` for the rationale.
+    macro_rules! bust {
+        ($expr:expr) => {
+            match $expr {
+                Ok(v) => v,
+                Err(e) => panic!("bust! on Err: {e:?}"),
+            }
+        };
+        ($expr:expr, $msg:expr) => {
+            match $expr {
+                Ok(v) => v,
+                Err(e) => panic!("bust!({}): {e:?}", $msg),
+            }
+        };
+    }
 
     fn test_actor() -> RequestActor {
         RequestActor {
@@ -1081,5 +1135,59 @@ mod tests {
         assert!(outcome.error.is_some());
         let entries = h.audit_for(&id.to_string());
         assert!(entries.iter().any(|e| e["event_type"] == "action.failed"));
+    }
+
+    #[test]
+    fn host_persist_audit_recent_round_trip() {
+        use crate::memory_store::InMemoryStore;
+        let mut h = host();
+        // Create a session and submit an action so the audit log
+        // has a few real entries.
+        let id = h.create_session(session_actor()).unwrap_or_else(|e| panic!("{e}"));
+        let action = Action::new(&id.to_string(), ActionVariant::SystemStatus, "user asked");
+        let _ = h.submit_action(&id, &test_actor(), action);
+        let before = h.audit_recent(10);
+        assert!(!before.is_empty(), "expected some audit entries");
+
+        let store = InMemoryStore::new();
+        let n = bust!(h.persist_audit_recent(&store, 10));
+        assert_eq!(n, before.len());
+        assert!(bust!(store.load("audit_recent")).is_some());
+
+        // New host, fresh ring. Restore from the store and confirm
+        // the recent view matches.
+        let mut h2 = host();
+        assert!(h2.audit_recent(10).is_empty());
+        let kept = bust!(h2.restore_audit_recent(&store));
+        assert_eq!(kept, before.len());
+        let after = h2.audit_recent(10);
+        assert_eq!(after.len(), before.len());
+        // Same event_type in same order.
+        for (a, b) in after.iter().zip(before.iter()) {
+            assert_eq!(a["event_type"], b["event_type"]);
+        }
+    }
+
+    #[test]
+    fn host_restore_audit_recent_with_no_persisted_state_is_zero() {
+        use crate::memory_store::InMemoryStore;
+        let mut h = host();
+        let store = InMemoryStore::new();
+        let kept = bust!(h.restore_audit_recent(&store));
+        assert_eq!(kept, 0);
+    }
+
+    #[test]
+    fn host_restore_audit_recent_with_corrupt_store_returns_corrupt_error() {
+        use crate::memory_store::InMemoryStore;
+        let mut h = host();
+        let store = InMemoryStore::new();
+        // Save something that is not a valid Persisted envelope.
+        bust!(store.save("audit_recent", b"not an envelope"));
+        let result = h.restore_audit_recent(&store);
+        match result {
+            Err(crate::memory_store::MemoryStoreError::Corrupt(_)) => {}
+            other => panic!("expected Corrupt, got: {other:?}"),
+        }
     }
 }

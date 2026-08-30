@@ -154,9 +154,9 @@ impl Command for NetworkCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::ShellHistory;
     use crate::output::OutputFormatter;
     use crate::session::ShellSession;
-    use crate::history::ShellHistory;
 
     async fn run(args: &[&str]) -> anyhow::Result<()> {
         let cmd = NetworkCommand;

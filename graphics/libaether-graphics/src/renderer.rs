@@ -22,7 +22,12 @@ pub trait RenderBackend {
     fn name(&self) -> &str;
 
     /// Prepares the backend to render into a framebuffer of the given geometry.
-    fn configure(&mut self, width: u32, height: u32, format: PixelFormat) -> Result<(), GraphicsError>;
+    fn configure(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+    ) -> Result<(), GraphicsError>;
 
     /// Performs a full-frame clear using the given RGBA color.
     fn clear(&mut self, rgba: [u8; 4]) -> Result<(), GraphicsError>;
@@ -40,10 +45,7 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new() -> Self {
-        Self {
-            target: None,
-            frames_rendered: 0,
-        }
+        Self { target: None, frames_rendered: 0 }
     }
 
     /// Returns the number of successfully submitted frames.
@@ -68,7 +70,12 @@ impl RenderBackend for Renderer {
         "aether-softpipe"
     }
 
-    fn configure(&mut self, width: u32, height: u32, format: PixelFormat) -> Result<(), GraphicsError> {
+    fn configure(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+    ) -> Result<(), GraphicsError> {
         if width == 0 || height == 0 {
             return Err(GraphicsError::InvalidParameter(
                 "Render target dimensions must be non-zero".to_string(),
@@ -134,8 +141,7 @@ mod tests {
     #[test]
     fn configure_and_submit_frame() {
         let mut r = Renderer::new();
-        r.configure(64, 32, PixelFormat::Rgba8888)
-            .unwrap_or_else(|e| panic!("{e}"));
+        r.configure(64, 32, PixelFormat::Rgba8888).unwrap_or_else(|e| panic!("{e}"));
         r.clear([10, 20, 30, 255]).unwrap_or_else(|e| panic!("{e}"));
         let stats = r.submit().unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(stats.frame_number, 1);

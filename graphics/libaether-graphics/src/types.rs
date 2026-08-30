@@ -90,13 +90,7 @@ impl Framebuffer {
         let bpp = format.bytes_per_pixel();
         let stride = width * bpp;
         let size = (stride as usize) * (height as usize);
-        Self {
-            width,
-            height,
-            stride,
-            data: vec![0u8; size].into_boxed_slice(),
-            format,
-        }
+        Self { width, height, stride, data: vec![0u8; size].into_boxed_slice(), format }
     }
 
     /// Returns true if the buffer size matches width/height/format expectations.

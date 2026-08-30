@@ -37,10 +37,7 @@ pub fn notify_close(clients: &Clients, id: u64) {
     }
 }
 
-pub fn spawn(
-    port: u16,
-    server: SurfaceServer,
-) -> Result<(), String> {
+pub fn spawn(port: u16, server: SurfaceServer) -> Result<(), String> {
     let listener =
         TcpListener::bind(("0.0.0.0", port)).map_err(|e| format!("bind :{port}: {e}"))?;
     eprintln!("[surface] listening on 0.0.0.0:{port}");
@@ -147,9 +144,7 @@ pub fn spawn(
                                     let _ = tx.send(SurfaceCommand::Close(wid));
                                     respond(&json!({ "ok": true, "closed": wid }));
                                 }
-                                None => {
-                                    respond(&json!({ "ok": false, "error": "no such window" }))
-                                }
+                                None => respond(&json!({ "ok": false, "error": "no such window" })),
                             }
                         }
                         _ => respond(&json!({
@@ -171,9 +166,5 @@ pub fn spawn(
 
 fn find_by_app(wm: &Arc<Mutex<WindowManager>>, app: &str) -> Option<u64> {
     let guard = wm.lock().unwrap_or_else(|p| p.into_inner());
-    guard
-        .stacked()
-        .into_iter()
-        .find(|w| w.app_id == app)
-        .map(|w| w.id)
+    guard.stacked().into_iter().find(|w| w.app_id == app).map(|w| w.id)
 }

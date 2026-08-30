@@ -51,11 +51,7 @@ impl fmt::Display for ErrorKind {
 
 impl AetherError {
     pub fn new(code: ErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-            details: Vec::new(),
-        }
+        Self { code, message: message.into(), details: Vec::new() }
     }
 
     pub fn with_detail(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
@@ -83,10 +79,7 @@ impl AetherError {
     }
 
     pub fn symlink_escape(path: &str, target: &str) -> Self {
-        Self::new(
-            ErrorKind::SymlinkEscape,
-            format!("Symlink escape detected: {path} -> {target}"),
-        )
+        Self::new(ErrorKind::SymlinkEscape, format!("Symlink escape detected: {path} -> {target}"))
     }
 
     pub fn resource_exhausted(kind: &str) -> Self {
@@ -102,10 +95,7 @@ impl AetherError {
     }
 
     pub fn service_failed(service: &str, reason: &str) -> Self {
-        Self::new(
-            ErrorKind::ServiceFailed,
-            format!("Service {service} failed: {reason}"),
-        )
+        Self::new(ErrorKind::ServiceFailed, format!("Service {service} failed: {reason}"))
     }
 
     pub fn internal(msg: impl Into<String>) -> Self {

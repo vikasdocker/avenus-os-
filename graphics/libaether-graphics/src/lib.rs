@@ -2,32 +2,32 @@
 // This crate provides shared types for the entire graphics pipeline:
 // display, renderer, compositor, input, window, cursor, output, session, workspace, IPC, security.
 
-pub mod types;
+pub mod compositor;
+pub mod cursor;
+pub mod desktop_shell;
+pub mod display;
 pub mod error;
+pub mod input;
 pub mod ipc;
+pub mod output;
+pub mod renderer;
 pub mod security;
 pub mod session;
-pub mod workspace;
-pub mod display;
-pub mod renderer;
-pub mod input;
+pub mod types;
 pub mod window;
-pub mod cursor;
-pub mod output;
-pub mod compositor;
-pub mod desktop_shell;
+pub mod workspace;
 
-pub use types::*;
+pub use compositor::Compositor;
+pub use cursor::CursorManager;
+pub use desktop_shell::DesktopShell;
+pub use display::DisplayManager;
 pub use error::GraphicsError;
+pub use input::InputManager;
 pub use ipc::{GraphicsCommand, GraphicsCommandType, GraphicsIpc, GraphicsResponse};
+pub use output::OutputManager;
+pub use renderer::Renderer;
 pub use security::GraphicsSecurity;
 pub use session::GraphicsSessionManager;
-pub use workspace::WorkspaceManager;
-pub use display::DisplayManager;
-pub use renderer::Renderer;
-pub use input::InputManager;
+pub use types::*;
 pub use window::WindowManager;
-pub use cursor::CursorManager;
-pub use output::OutputManager;
-pub use compositor::Compositor;
-pub use desktop_shell::DesktopShell;
+pub use workspace::WorkspaceManager;

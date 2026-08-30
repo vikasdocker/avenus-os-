@@ -71,25 +71,19 @@ pub struct GraphicsIpcClient {
 
 impl GraphicsIpcClient {
     pub fn new(socket_path: &str) -> Self {
-        Self {
-            socket_path: socket_path.to_string(),
-        }
+        Self { socket_path: socket_path.to_string() }
     }
 }
 
 impl GraphicsIpc for GraphicsIpcClient {
     fn send_command(&self, _cmd: GraphicsCommand) -> Result<GraphicsResponse, GraphicsError> {
         // Placeholder implementation
-        Err(GraphicsError::NotImplemented(
-            "IPC Client implementation not yet complete".to_string(),
-        ))
+        Err(GraphicsError::NotImplemented("IPC Client implementation not yet complete".to_string()))
     }
 
     fn listen(&self) -> Result<(), GraphicsError> {
         // Placeholder implementation
-        Err(GraphicsError::NotImplemented(
-            "IPC Client listening not yet complete".to_string(),
-        ))
+        Err(GraphicsError::NotImplemented("IPC Client listening not yet complete".to_string()))
     }
 }
 
@@ -112,9 +106,7 @@ mod tests {
     fn workspace_command_variants() {
         let cmds = [
             GraphicsCommandType::WorkspaceList,
-            GraphicsCommandType::WorkspaceCreate {
-                name: "Dev".to_string(),
-            },
+            GraphicsCommandType::WorkspaceCreate { name: "Dev".to_string() },
             GraphicsCommandType::WorkspaceDestroy { id: 1 },
             GraphicsCommandType::WorkspaceActivate { id: 2 },
         ];
@@ -136,9 +128,6 @@ mod tests {
         };
         let json = serde_json::to_string(&cmd).unwrap();
         let decoded: GraphicsCommand = serde_json::from_str(&json).unwrap();
-        assert!(matches!(
-            decoded.command,
-            GraphicsCommandType::DesktopStatus
-        ));
+        assert!(matches!(decoded.command, GraphicsCommandType::DesktopStatus));
     }
 }

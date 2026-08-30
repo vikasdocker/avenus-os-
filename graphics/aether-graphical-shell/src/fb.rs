@@ -41,10 +41,7 @@ impl Screen {
             .next()
             .and_then(|v| v.trim().parse::<u32>().ok())
             .ok_or_else(|| format!("bad virtual_size '{virtual_size}'"))?;
-        let stride = stride
-            .trim()
-            .parse::<u32>()
-            .map_err(|_| "bad stride".to_string())?;
+        let stride = stride.trim().parse::<u32>().map_err(|_| "bad stride".to_string())?;
         if bpp.trim() != "32" {
             return Err(format!("unsupported bpp {bpp}"));
         }
@@ -52,13 +49,7 @@ impl Screen {
     }
 
     pub fn new(file: File, width: u32, height: u32, stride: u32) -> Self {
-        Self {
-            buf: vec![0; (stride * height) as usize],
-            file,
-            width,
-            height,
-            stride,
-        }
+        Self { buf: vec![0; (stride * height) as usize], file, width, height, stride }
     }
 
     pub fn fill(&mut self, c: Rgb) {
@@ -88,13 +79,7 @@ impl Screen {
                 let Ok(bits) = u8::from_str_radix(row, 2) else { continue };
                 for rx in 0..5usize {
                     if (bits >> (4 - rx)) & 1 == 1 {
-                        self.rect(
-                            x + (rx as u32 * s) as i64,
-                            y + (ry as u32 * s) as i64,
-                            s,
-                            s,
-                            c,
-                        );
+                        self.rect(x + (rx as u32 * s) as i64, y + (ry as u32 * s) as i64, s, s, c);
                     }
                 }
             }

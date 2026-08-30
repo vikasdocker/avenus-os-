@@ -1,7 +1,7 @@
 // Shell history management
+use anyhow::Result;
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use anyhow::Result;
 
 pub struct ShellHistory {
     entries: VecDeque<String>,
@@ -11,11 +11,7 @@ pub struct ShellHistory {
 
 impl ShellHistory {
     pub fn new() -> Self {
-        Self {
-            entries: VecDeque::new(),
-            max_size: 1000,
-            path: Self::history_path(),
-        }
+        Self { entries: VecDeque::new(), max_size: 1000, path: Self::history_path() }
     }
 
     pub fn add(&mut self, command: &str) {
@@ -40,10 +36,7 @@ impl ShellHistory {
 
     pub fn save(&self) -> Result<()> {
         if let Some(path) = &self.path {
-            let content = self.entries.iter()
-                .map(|e| e.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
+            let content = self.entries.iter().map(|e| e.as_str()).collect::<Vec<_>>().join("\n");
             std::fs::write(path, content)?;
         }
         Ok(())

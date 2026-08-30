@@ -1,6 +1,6 @@
 // Output formatter for different output modes
-use serde_json::Value;
 use anyhow::Result;
+use serde_json::Value;
 
 pub struct OutputFormatter {
     json_mode: bool,

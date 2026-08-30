@@ -18,12 +18,7 @@ pub struct Rect {
 
 impl Rect {
     pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
+        Self { x, y, width, height }
     }
 
     /// Returns true when the point lies inside the rectangle.
@@ -55,12 +50,7 @@ pub struct WindowManager {
 
 impl WindowManager {
     pub fn new() -> Self {
-        Self {
-            windows: HashMap::new(),
-            stack: Vec::new(),
-            focused: None,
-            next_z: 0,
-        }
+        Self { windows: HashMap::new(), stack: Vec::new(), focused: None, next_z: 0 }
     }
 
     /// Creates a window with a fresh id, title, geometry, and pixel format.
@@ -71,17 +61,10 @@ impl WindowManager {
         format: PixelFormat,
     ) -> Result<WindowId, GraphicsError> {
         if rect.width == 0 || rect.height == 0 {
-            return Err(GraphicsError::Window(
-                "Window dimensions must be non-zero".to_string(),
-            ));
+            return Err(GraphicsError::Window("Window dimensions must be non-zero".to_string()));
         }
         let id = WindowId::new();
-        let surface = Surface {
-            id: id.as_uuid(),
-            width: rect.width,
-            height: rect.height,
-            format,
-        };
+        let surface = Surface { id: id.as_uuid(), width: rect.width, height: rect.height, format };
         self.windows.insert(
             id,
             Window {
@@ -145,9 +128,7 @@ impl WindowManager {
     /// Resizes a window and its backing surface.
     pub fn resize(&mut self, id: WindowId, width: u32, height: u32) -> Result<(), GraphicsError> {
         if width == 0 || height == 0 {
-            return Err(GraphicsError::Window(
-                "Window dimensions must be non-zero".to_string(),
-            ));
+            return Err(GraphicsError::Window("Window dimensions must be non-zero".to_string()));
         }
         let w = self
             .windows
@@ -195,10 +176,7 @@ impl WindowManager {
 
     /// Returns windows in bottom-to-top stacking order.
     pub fn stacked_windows(&self) -> Vec<&Window> {
-        self.stack
-            .iter()
-            .filter_map(|id| self.windows.get(id))
-            .collect()
+        self.stack.iter().filter_map(|id| self.windows.get(id)).collect()
     }
 
     /// Returns the number of live windows.
@@ -253,8 +231,6 @@ mod tests {
     #[test]
     fn zero_size_window_rejected() {
         let mut wm = WindowManager::new();
-        assert!(wm
-            .create_window("bad", Rect::new(0, 0, 0, 10), PixelFormat::Rgb24)
-            .is_err());
+        assert!(wm.create_window("bad", Rect::new(0, 0, 0, 10), PixelFormat::Rgb24).is_err());
     }
 }

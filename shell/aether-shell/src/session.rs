@@ -1,7 +1,7 @@
 // Shell session management and state
-use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellSession {

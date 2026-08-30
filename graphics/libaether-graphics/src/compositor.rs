@@ -70,10 +70,8 @@ impl Compositor {
         if let Some(pid) = process_id {
             self.by_pid.insert(pid, surface_id);
         }
-        self.events.push(CompositorEvent::SurfaceCreated {
-            surface_id,
-            app_id: app_id.to_string(),
-        });
+        self.events
+            .push(CompositorEvent::SurfaceCreated { surface_id, app_id: app_id.to_string() });
         self.windows.insert(surface_id, win);
     }
 
@@ -114,10 +112,7 @@ impl Compositor {
     /// Records a frame submission.
     pub fn submit_frame(&mut self, surface_id: Uuid) {
         self.frame_counter += 1;
-        self.events.push(CompositorEvent::FrameSubmitted {
-            surface_id,
-            frame: self.frame_counter,
-        });
+        self.events.push(CompositorEvent::FrameSubmitted { surface_id, frame: self.frame_counter });
     }
 
     /// Returns the number of active surfaces.

@@ -12,15 +12,11 @@ use std::time::Duration;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let endpoint =
-        std::env::var("AETHER_CONTROL").unwrap_or_else(|_| "127.0.0.1:4747".to_string());
+    let endpoint = std::env::var("AETHER_CONTROL").unwrap_or_else(|_| "127.0.0.1:4747".to_string());
 
     let client = AetherClient::new(endpoint.clone(), Duration::from_secs(5));
 
-    let request = match (
-        args.first().map(String::as_str),
-        args.get(1).map(String::as_str),
-    ) {
+    let request = match (args.first().map(String::as_str), args.get(1).map(String::as_str)) {
         (Some("status"), None) => Some(IpcRequest {
             service_id: "aether-system-core".to_string(),
             command: "status".to_string(),

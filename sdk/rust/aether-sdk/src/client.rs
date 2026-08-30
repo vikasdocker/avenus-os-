@@ -14,10 +14,7 @@ pub struct AetherClient {
 impl AetherClient {
     /// Creates a client for `host:port` with a per-request timeout.
     pub fn new(addr: impl Into<String>, timeout: Duration) -> Self {
-        Self {
-            addr: addr.into(),
-            timeout,
-        }
+        Self { addr: addr.into(), timeout }
     }
 
     pub fn endpoint(&self) -> &str {
@@ -26,25 +23,17 @@ impl AetherClient {
 
     /// Sends one request and reads exactly one JSON-line response.
     pub fn request(&self, req: &IpcRequest) -> Result<IpcResponse, String> {
-        let stream = TcpStream::connect(&self.addr)
-            .map_err(|e| format!("connect {}: {e}", self.addr))?;
-        stream
-            .set_read_timeout(Some(self.timeout))
-            .map_err(|e| format!("set timeout: {e}"))?;
-        let mut writer = stream
-            .try_clone()
-            .map_err(|e| format!("clone stream: {e}"))?;
+        let stream =
+            TcpStream::connect(&self.addr).map_err(|e| format!("connect {}: {e}", self.addr))?;
+        stream.set_read_timeout(Some(self.timeout)).map_err(|e| format!("set timeout: {e}"))?;
+        let mut writer = stream.try_clone().map_err(|e| format!("clone stream: {e}"))?;
         let mut payload = serde_json::to_string(req).map_err(|e| format!("encode: {e}"))?;
         payload.push('\n');
-        writer
-            .write_all(payload.as_bytes())
-            .map_err(|e| format!("send: {e}"))?;
+        writer.write_all(payload.as_bytes()).map_err(|e| format!("send: {e}"))?;
 
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
-        reader
-            .read_line(&mut line)
-            .map_err(|e| format!("recv: {e}"))?;
+        reader.read_line(&mut line).map_err(|e| format!("recv: {e}"))?;
         if line.trim().is_empty() {
             return Err("empty response from control plane".to_string());
         }
@@ -62,11 +51,7 @@ impl AetherClient {
     }
 
     /// Convenience: lifecycle commands `start|stop|restart` on a service.
-    pub fn service_control(
-        &self,
-        action: &str,
-        service_id: &str,
-    ) -> Result<IpcResponse, String> {
+    pub fn service_control(&self, action: &str, service_id: &str) -> Result<IpcResponse, String> {
         self.request(&IpcRequest {
             service_id: "aether-system-core".to_string(),
             command: action.to_string(),
@@ -92,8 +77,7 @@ mod tests {
 
     #[test]
     fn round_trip_against_mock_server() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap_or_else(|e| panic!("{e}"));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap_or_else(|e| panic!("{e}"));
         let port = listener.local_addr().unwrap_or_else(|e| panic!("{e}")).port();
 
         let server = std::thread::spawn(move || {
@@ -125,10 +109,8 @@ mod tests {
 
     #[test]
     fn error_response_shape_round_trips() {
-        let err = IpcError {
-            code: "NOT_FOUND".to_string(),
-            message: "no such service".to_string(),
-        };
+        let err =
+            IpcError { code: "NOT_FOUND".to_string(), message: "no such service".to_string() };
         let res = IpcResponse::err("start", err);
         assert!(!res.ok);
         assert_eq!(res.error.map(|e| e.code).as_deref(), Some("NOT_FOUND"));

@@ -8,12 +8,12 @@ use crate::history::ShellHistory;
 use crate::output::OutputFormatter;
 use crate::session::ShellSession;
 
-pub mod system;
-pub mod filesystem;
-pub mod process;
-pub mod application;
-pub mod network;
 pub mod agent;
+pub mod application;
+pub mod filesystem;
+pub mod network;
+pub mod process;
+pub mod system;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandMetadata {
@@ -86,15 +86,15 @@ impl CommandRegistry {
                 info!("Executing command: {}", command_name);
                 cmd.execute(args, session, formatter, history).await
             }
-            None => Err(anyhow!("Unknown command: {}. Type 'help' for available commands.", command_name)),
+            None => Err(anyhow!(
+                "Unknown command: {}. Type 'help' for available commands.",
+                command_name
+            )),
         }
     }
 
     pub fn list_commands(&self) -> Vec<(&String, &CommandMetadata)> {
-        self.commands
-            .iter()
-            .map(|(name, cmd)| (name, cmd.metadata()))
-            .collect()
+        self.commands.iter().map(|(name, cmd)| (name, cmd.metadata())).collect()
     }
 }
 

@@ -27,9 +27,7 @@ pub struct DisplayManager {
 
 impl DisplayManager {
     pub fn new() -> Self {
-        Self {
-            displays: Vec::new(),
-        }
+        Self { displays: Vec::new() }
     }
 
     /// Registers a display with its list of supported modes.
@@ -61,10 +59,7 @@ impl DisplayManager {
             .find(|d| d.id == id)
             .ok_or_else(|| GraphicsError::Display(format!("Display {} not found", id)))?;
         if display.modes.is_empty() {
-            return Err(GraphicsError::Mode(format!(
-                "Display {} has no modes",
-                id
-            )));
+            return Err(GraphicsError::Mode(format!("Display {} has no modes", id)));
         }
         if mode_index >= display.modes.len() {
             return Err(GraphicsError::Mode(format!(
@@ -111,11 +106,7 @@ mod tests {
     use super::*;
 
     fn mode(w: u32, h: u32) -> DisplayMode {
-        DisplayMode {
-            width: w,
-            height: h,
-            refresh_rate: 60,
-        }
+        DisplayMode { width: w, height: h, refresh_rate: 60 }
     }
 
     #[test]

@@ -24,10 +24,7 @@ pub fn load_manifests_from_dir(dir: &Path) -> Result<Vec<ServiceManifest>, Aethe
             continue;
         }
         let raw = std::fs::read_to_string(&path).map_err(|e| {
-            AetherError::new(
-                ErrorKind::Io,
-                format!("cannot read manifest {}: {e}", path.display()),
-            )
+            AetherError::new(ErrorKind::Io, format!("cannot read manifest {}: {e}", path.display()))
         })?;
         let manifest: ServiceManifest = serde_json::from_str(&raw).map_err(|e| {
             AetherError::new(
@@ -87,8 +84,7 @@ mod tests {
             .unwrap_or_else(|e| panic!("{e}"));
         std::fs::write(tmp.path().join("a.json"), manifest_json("alpha"))
             .unwrap_or_else(|e| panic!("{e}"));
-        std::fs::write(tmp.path().join("notes.txt"), "ignored")
-            .unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(tmp.path().join("notes.txt"), "ignored").unwrap_or_else(|e| panic!("{e}"));
 
         let loaded = load_manifests_from_dir(tmp.path()).unwrap_or_else(|e| panic!("{e}"));
         let ids: Vec<&str> = loaded.iter().map(|m| m.service_id.as_str()).collect();
@@ -98,7 +94,8 @@ mod tests {
     #[test]
     fn invalid_schema_rejected() {
         let tmp = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        let bad = manifest_json("bad").replace("\"schema_version\": \"1\"", "\"schema_version\": \"9\"");
+        let bad =
+            manifest_json("bad").replace("\"schema_version\": \"1\"", "\"schema_version\": \"9\"");
         std::fs::write(tmp.path().join("bad.json"), bad).unwrap_or_else(|e| panic!("{e}"));
         match load_manifests_from_dir(tmp.path()) {
             Err(err) => assert_eq!(err.code, ErrorKind::InvalidInput),

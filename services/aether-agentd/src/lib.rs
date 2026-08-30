@@ -19,6 +19,11 @@ use uuid::Uuid;
 
 use crate::intent_to_action::intent_to_action;
 
+use aether_agent_runtime::{FileMemoryStore, InMemoryStore, MemoryStore, MemoryStoreError};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+
 /// Capacity of the event ring before oldest events are evicted.
 pub const EVENT_RING_CAPACITY: usize = 256;
 
@@ -66,6 +71,18 @@ pub struct AgentState {
     /// callers (and tests) can construct an `AgentState` without
     /// the runtime; we create one on demand.
     pub runtime: Option<runtime_host::RuntimeBridge>,
+    /// Bounded working memory (key/value). Survives daemon
+    /// restart via the `MemoryStore`. `default_capabilities` grants
+    /// `agent.memory.write` so callers can mutate it through the
+    /// IPC layer.
+    pub working: HashMap<String, String>,
+    /// Pluggable persistence backend. Defaults to `InMemoryStore`
+    /// (no disk writes). Production binaries select a `FileMemoryStore`
+    /// rooted under `AETHER_MEMORY_ROOT` (or `<AETHER_WORKSPACE>/aether-agent`).
+    memory_store: Arc<dyn MemoryStore>,
+    /// Wall-clock milliseconds at the time of the last successful
+    /// `flush_persisted`. Used to throttle periodic flushes.
+    last_flush_ms: u64,
 }
 
 /// Replaceable AI backend. The UI never talks to a model directly; the
@@ -229,6 +246,7 @@ impl AiProvider for RuntimeBackedProvider {
 
 impl AgentState {
     pub fn new(now_ms: fn() -> u64) -> Self {
+        let memory_store: Arc<dyn MemoryStore> = default_memory_store();
         Self {
             agent_id: Uuid::new_v4(),
             events: VecDeque::with_capacity(EVENT_RING_CAPACITY),
@@ -239,6 +257,9 @@ impl AgentState {
             surface_port: 4750,
             conversation: conversation::ConversationContext::default(),
             runtime: None,
+            working: HashMap::new(),
+            memory_store,
+            last_flush_ms: 0,
         }
     }
 
@@ -275,6 +296,34 @@ impl AgentState {
     pub fn with_provider(mut self, provider: Box<dyn AiProvider + Send>) -> Self {
         self.provider = provider;
         self
+    }
+
+    /// Replace the memory store. Used by tests to inject an
+    /// in-memory backend so persistence can be exercised without
+    /// touching the host filesystem.
+    pub fn with_memory_store(mut self, store: Arc<dyn MemoryStore>) -> Self {
+        self.memory_store = store;
+        self
+    }
+
+    /// Returns the memory store. Internal accessor for the
+    /// persistence helpers; not exposed over IPC.
+    pub fn memory_store(&self) -> Arc<dyn MemoryStore> {
+        Arc::clone(&self.memory_store)
+    }
+
+    /// Working-memory accessor. `set` overwrites or inserts.
+    /// `get` returns the value if present.
+    pub fn set_working(&mut self, key: &str, value: &str) {
+        self.working.insert(key.to_string(), value.to_string());
+    }
+
+    pub fn get_working(&self, key: &str) -> Option<&str> {
+        self.working.get(key).map(String::as_str)
+    }
+
+    pub fn working_snapshot(&self) -> HashMap<String, String> {
+        self.working.clone()
     }
 
     pub fn provider_name(&self) -> &str {
@@ -341,6 +390,260 @@ impl AgentState {
             "HEALTHY"
         }
     }
+
+    /// Loads persisted state from the `MemoryStore` into the
+    /// in-memory surfaces. Safe to call when nothing is persisted:
+    /// missing state is reported as `Missing` and the in-memory
+    /// defaults are unchanged. Corrupt state is recorded as a
+    /// `Warning` event and the in-memory defaults are kept.
+    ///
+    /// Returns a `PersistenceReport` summarising how many bytes /
+    /// entries were restored per surface.
+    pub fn load_persisted(&mut self) -> PersistenceReport {
+        let mut report = PersistenceReport::default();
+        // 1. Conversation.
+        match self.conversation.load(self.memory_store.as_ref()) {
+            Ok(true) => {
+                report.conversation =
+                    PersistenceOutcome::Loaded { entries: self.conversation.len() };
+                self.record_event(
+                    EventSeverity::Info,
+                    "persistence",
+                    &format!("conversation restored: {}", self.conversation.summary()),
+                );
+            }
+            Ok(false) => {
+                report.conversation = PersistenceOutcome::Missing;
+            }
+            Err(e) => {
+                report.conversation = PersistenceOutcome::Corrupt(e.to_string());
+                self.record_event(
+                    EventSeverity::Warning,
+                    "persistence",
+                    &format!("conversation load failed: {e}; using defaults"),
+                );
+            }
+        }
+        // 2. Working memory.
+        match self.memory_store.load("working") {
+            Ok(Some(bytes)) => match decode_persisted_working(&bytes) {
+                Ok(map) => {
+                    report.working = PersistenceOutcome::Loaded { entries: map.len() };
+                    self.working = map;
+                    self.record_event(
+                        EventSeverity::Info,
+                        "persistence",
+                        &format!("working memory restored: {} entries", self.working.len()),
+                    );
+                }
+                Err(e) => {
+                    report.working = PersistenceOutcome::Corrupt(e.to_string());
+                    self.record_event(
+                        EventSeverity::Warning,
+                        "persistence",
+                        &format!("working memory load failed: {e}; using defaults"),
+                    );
+                }
+            },
+            Ok(None) => {
+                report.working = PersistenceOutcome::Missing;
+            }
+            Err(e) => {
+                report.working = PersistenceOutcome::Corrupt(e.to_string());
+                self.record_event(
+                    EventSeverity::Warning,
+                    "persistence",
+                    &format!("working memory read failed: {e}"),
+                );
+            }
+        }
+        // 3. Audit recent. Only available once the runtime is up.
+        let _ = self.runtime_mut();
+        let restore_result = self
+            .runtime
+            .as_mut()
+            .unwrap_or_else(|| panic!("runtime bridge"))
+            .with_host_mut(|h| h.restore_audit_recent(self.memory_store.as_ref()));
+        match restore_result {
+            Ok(0) => {
+                report.audit_recent = PersistenceOutcome::Missing;
+            }
+            Ok(n) => {
+                report.audit_recent = PersistenceOutcome::Loaded { entries: n };
+                self.record_event(
+                    EventSeverity::Info,
+                    "persistence",
+                    &format!("audit log restored: {n} recent entries"),
+                );
+            }
+            Err(MemoryStoreError::Corrupt(reason)) => {
+                report.audit_recent = PersistenceOutcome::Corrupt(reason);
+                self.record_event(
+                    EventSeverity::Warning,
+                    "persistence",
+                    "audit recent load failed: corrupt blob; using empty ring",
+                );
+            }
+            Err(e) => {
+                report.audit_recent = PersistenceOutcome::Corrupt(e.to_string());
+                self.record_event(
+                    EventSeverity::Warning,
+                    "persistence",
+                    &format!("audit recent load failed: {e}"),
+                );
+            }
+        }
+        report
+    }
+
+    /// Writes the three persistence surfaces to the `MemoryStore`.
+    /// The runtime must be initialised (call `runtime_mut()` first)
+    /// so the recent audit entries can be snapshotted.
+    pub fn flush_persisted(&mut self) -> PersistenceReport {
+        let mut report = PersistenceReport::default();
+        // 1. Conversation.
+        match self.conversation.persist(self.memory_store.as_ref()) {
+            Ok(()) => {
+                report.conversation = PersistenceOutcome::Written {
+                    bytes: estimate_conversation_size(self.conversation.len()),
+                };
+            }
+            Err(e) => {
+                report.conversation = PersistenceOutcome::WriteFailed(e.to_string());
+                self.record_event(
+                    EventSeverity::Warning,
+                    "persistence",
+                    &format!("conversation flush failed: {e}"),
+                );
+            }
+        }
+        // 2. Working memory.
+        match encode_persisted_working(&self.working) {
+            Ok(bytes) => match self.memory_store.save("working", &bytes) {
+                Ok(()) => {
+                    report.working = PersistenceOutcome::Written { bytes: bytes.len() };
+                }
+                Err(e) => {
+                    report.working = PersistenceOutcome::WriteFailed(e.to_string());
+                    self.record_event(
+                        EventSeverity::Warning,
+                        "persistence",
+                        &format!("working memory flush failed: {e}"),
+                    );
+                }
+            },
+            Err(e) => {
+                report.working = PersistenceOutcome::WriteFailed(e.to_string());
+                self.record_event(
+                    EventSeverity::Warning,
+                    "persistence",
+                    &format!("working memory encode failed: {e}"),
+                );
+            }
+        }
+        // 3. Audit recent.
+        let _ = self.runtime_mut();
+        let persist_result = self
+            .runtime
+            .as_mut()
+            .unwrap_or_else(|| panic!("runtime bridge"))
+            .with_host(|h| h.persist_audit_recent(self.memory_store.as_ref(), 256));
+        match persist_result {
+            Ok(0) => {
+                report.audit_recent = PersistenceOutcome::Missing;
+            }
+            Ok(n) => {
+                report.audit_recent = PersistenceOutcome::Written { bytes: n };
+            }
+            Err(e) => {
+                report.audit_recent = PersistenceOutcome::WriteFailed(e.to_string());
+                self.record_event(
+                    EventSeverity::Warning,
+                    "persistence",
+                    &format!("audit recent flush failed: {e}"),
+                );
+            }
+        }
+        self.last_flush_ms = (self.now_ms)();
+        report
+    }
+}
+
+/// Selects a memory store based on environment. Used by `AgentState::new`.
+fn default_memory_store() -> Arc<dyn MemoryStore> {
+    let backend = std::env::var("AETHER_MEMORY_BACKEND").unwrap_or_default();
+    if backend.eq_ignore_ascii_case("in-memory") || backend.eq_ignore_ascii_case("memory") {
+        return Arc::new(InMemoryStore::new());
+    }
+    let root = match std::env::var("AETHER_MEMORY_ROOT") {
+        Ok(p) if !p.trim().is_empty() => PathBuf::from(p),
+        _ => match std::env::var("AETHER_WORKSPACE") {
+            Ok(p) if !p.trim().is_empty() => PathBuf::from(p).join("aether-agent"),
+            _ => return Arc::new(InMemoryStore::new()),
+        },
+    };
+    Arc::new(FileMemoryStore::new(root))
+}
+
+/// Per-surface persistence outcome. `Loaded` and `Written` are
+/// success; `Missing` means no state was present (treated as
+/// success — defaults are kept); `Corrupt` and `WriteFailed`
+/// surface real problems for callers to log.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub enum PersistenceOutcome {
+    #[default]
+    Missing,
+    Loaded { entries: usize },
+    Written { bytes: usize },
+    Corrupt(String),
+    WriteFailed(String),
+}
+
+/// What `load_persisted` and `flush_persisted` report back.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct PersistenceReport {
+    pub conversation: PersistenceOutcome,
+    pub working: PersistenceOutcome,
+    pub audit_recent: PersistenceOutcome,
+}
+
+impl PersistenceReport {
+    /// True when no surface hit a hard error. Missing is fine.
+    pub fn is_clean(&self) -> bool {
+        matches!(
+            self.conversation,
+            PersistenceOutcome::Missing
+                | PersistenceOutcome::Loaded { .. }
+                | PersistenceOutcome::Written { .. }
+        ) && matches!(
+            self.working,
+            PersistenceOutcome::Missing
+                | PersistenceOutcome::Loaded { .. }
+                | PersistenceOutcome::Written { .. }
+        ) && matches!(
+            self.audit_recent,
+            PersistenceOutcome::Missing
+                | PersistenceOutcome::Loaded { .. }
+                | PersistenceOutcome::Written { .. }
+        )
+    }
+}
+
+fn estimate_conversation_size(turns: usize) -> usize {
+    // Rough estimate: 256 bytes per turn + 64 bytes for the
+    // envelope. The on-disk JSON is what it is; this is just a
+    // log-friendly number.
+    64 + turns * 256
+}
+
+fn encode_persisted_working(map: &HashMap<String, String>) -> Result<Vec<u8>, MemoryStoreError> {
+    use aether_agent_runtime::encode_persisted;
+    encode_persisted(map)
+}
+
+fn decode_persisted_working(bytes: &[u8]) -> Result<HashMap<String, String>, MemoryStoreError> {
+    use aether_agent_runtime::decode_persisted;
+    decode_persisted(bytes)
 }
 
 impl Default for AgentState {
@@ -882,6 +1185,121 @@ pub fn handle_request(state: &mut AgentState, request: &AgentRequest) -> AgentRe
                 result: serde_json::json!({ "error": "'argument' with prompt text required" }),
             },
         },
+        "agent.memory.show" => {
+            let snap = state.working_snapshot();
+            let entries: Vec<serde_json::Value> =
+                snap.iter().map(|(k, v)| serde_json::json!({ "key": k, "value": v })).collect();
+            AgentResponse {
+                ok: true,
+                result: serde_json::json!({
+                    "count": entries.len(),
+                    "entries": entries,
+                }),
+            }
+        }
+        "agent.memory.set" => {
+            // `argument` is `key=value` (or a JSON object). Reject
+            // anything that doesn't parse, has no key, or has an
+            // empty value (empty values are reserved for deletions
+            // via `agent.memory.delete`).
+            let raw = request.argument.as_deref().unwrap_or("").trim();
+            if raw.is_empty() {
+                return AgentResponse {
+                    ok: false,
+                    result: serde_json::json!({
+                        "error": "'argument' must be 'key=value' or {\"key\":\"value\"}"
+                    }),
+                };
+            }
+            let (key, value) = if let Some(idx) = raw.find('=') {
+                let k = raw[..idx].trim().to_string();
+                let v = raw[idx + 1..].to_string();
+                if k.is_empty() {
+                    return AgentResponse {
+                        ok: false,
+                        result: serde_json::json!({
+                            "error": "memory key must not be empty"
+                        }),
+                    };
+                }
+                (k, v)
+            } else {
+                // Try JSON object form: {"key":"value"}
+                match serde_json::from_str::<serde_json::Value>(raw) {
+                    Ok(v) => {
+                        let k = match v.get("key").and_then(|x| x.as_str()) {
+                            Some(s) => s.to_string(),
+                            None => {
+                                return AgentResponse {
+                                    ok: false,
+                                    result: serde_json::json!({
+                                        "error": "JSON form must have a string 'key'"
+                                    }),
+                                };
+                            }
+                        };
+                        let value =
+                            v.get("value").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                        (k, value)
+                    }
+                    Err(_) => {
+                        return AgentResponse {
+                            ok: false,
+                            result: serde_json::json!({
+                                "error": "'argument' must be 'key=value' or {\"key\":\"value\"}"
+                            }),
+                        };
+                    }
+                }
+            };
+            state.set_working(&key, &value);
+            let count = state.working_snapshot().len();
+            AgentResponse {
+                ok: true,
+                result: serde_json::json!({ "key": key, "value": value, "total": count }),
+            }
+        }
+        "agent.memory.get" => {
+            let key = request.argument.as_deref().unwrap_or("").trim();
+            if key.is_empty() {
+                return AgentResponse {
+                    ok: false,
+                    result: serde_json::json!({ "error": "'argument' must be the key to read" }),
+                };
+            }
+            match state.get_working(key) {
+                Some(v) => AgentResponse {
+                    ok: true,
+                    result: serde_json::json!({ "key": key, "value": v }),
+                },
+                None => AgentResponse {
+                    ok: false,
+                    result: serde_json::json!({ "error": format!("no such key: '{key}'") }),
+                },
+            }
+        }
+        "agent.memory.delete" => {
+            let key = request.argument.as_deref().unwrap_or("").trim();
+            if key.is_empty() {
+                return AgentResponse {
+                    ok: false,
+                    result: serde_json::json!({ "error": "'argument' must be the key to delete" }),
+                };
+            }
+            let removed = state.working.remove(key).is_some();
+            AgentResponse {
+                ok: removed,
+                result: serde_json::json!({ "key": key, "deleted": removed }),
+            }
+        }
+        "agent.memory.flush" => {
+            let report = state.flush_persisted();
+            AgentResponse { ok: report.is_clean(), result: serde_json::json!({ "report": report }) }
+        }
+        "agent.memory.load" => {
+            let report = state.load_persisted();
+            AgentResponse { ok: report.is_clean(), result: serde_json::json!({ "report": report }) }
+        }
         unknown => AgentResponse {
             ok: false,
             result: serde_json::json!({ "error": format!("unknown command '{unknown}'") }),
@@ -3108,5 +3526,198 @@ mod tests {
         });
         std::thread::sleep(std::time::Duration::from_millis(50));
         (port, handle)
+    }
+
+    // ---- Phase 2.9 — Persistent agent memory ----
+
+    /// Builds a state whose memory store is the supplied
+    /// `Arc<dyn MemoryStore>`. The runtime bridge is created on
+    /// first IPC call (matches production behaviour).
+    fn state_with_store(clock: fn() -> u64, store: Arc<dyn MemoryStore>) -> AgentState {
+        AgentState::new(clock).with_memory_store(store)
+    }
+
+    #[test]
+    fn agent_state_starts_with_in_memory_store_when_no_workspace_env() {
+        // No AETHER_MEMORY_BACKEND or AETHER_WORKSPACE set in test env.
+        let (clock, _tick) = fake_clock(100);
+        let state = AgentState::new(clock);
+        // The store must be present and round-trip a payload.
+        let store = state.memory_store();
+        let key = "round_trip_probe";
+        if let Err(e) = store.save(key, b"hello") {
+            panic!("store save failed: {e}");
+        }
+        let back = match store.load(key) {
+            Ok(v) => v.unwrap_or_default(),
+            Err(e) => panic!("store load failed: {e}"),
+        };
+        assert_eq!(back, b"hello");
+    }
+
+    #[test]
+    fn working_memory_set_and_get_round_trip() {
+        let (clock, _tick) = fake_clock(200);
+        let mut state = state_with_store(clock, Arc::new(InMemoryStore::new()));
+        state.set_working("favourite_app", "notes");
+        assert_eq!(state.get_working("favourite_app"), Some("notes"));
+        let snap = state.working_snapshot();
+        assert_eq!(snap.get("favourite_app").map(|s| s.as_str()), Some("notes"));
+    }
+
+    #[test]
+    fn flush_then_load_round_trips_conversation_and_working() {
+        // 1. Create state, push a turn, set working memory, flush.
+        let store: Arc<dyn MemoryStore> = Arc::new(InMemoryStore::new());
+        let (clock, _tick) = fake_clock(300);
+        let mut state = state_with_store(clock, store.clone());
+        state.conversation.push("Open Notes", vec!["notes".to_string()], vec![]);
+        state.set_working("k", "v");
+        // Touch the runtime so flush_persisted can pull audit entries.
+        let _ = state.runtime_mut();
+        let report = state.flush_persisted();
+        assert!(report.is_clean(), "first flush should be clean: {report:?}");
+        // 2. Fresh state, sharing the same store, restores from disk.
+        let (clock2, _tick2) = fake_clock(301);
+        let mut state2 = state_with_store(clock2, store.clone());
+        let report2 = state2.load_persisted();
+        assert!(report2.is_clean(), "restore should be clean: {report2:?}");
+        // Conversation last-app restored.
+        assert_eq!(state2.conversation.last_app(), Some("notes"));
+        // Working memory restored.
+        assert_eq!(state2.get_working("k"), Some("v"));
+    }
+
+    #[test]
+    fn corrupt_conversation_file_does_not_panic() {
+        let store: Arc<dyn MemoryStore> = Arc::new(InMemoryStore::new());
+        // Write garbage into the well-known name so the next
+        // load fails with `Corrupt`.
+        if let Err(e) = store.save("conversation", b"not a valid envelope") {
+            panic!("setup save failed: {e}");
+        }
+        let (clock, _tick) = fake_clock(400);
+        let mut state = state_with_store(clock, store.clone());
+        let report = state.load_persisted();
+        // The conversation surface must be flagged as Corrupt, but
+        // the daemon is alive and the in-memory default is still empty.
+        assert!(matches!(report.conversation, PersistenceOutcome::Corrupt(_)));
+        assert!(state.conversation.last_app().is_none());
+        // The other surfaces were Missing (not Corrupt) because we
+        // never wrote anything for them.
+        assert_eq!(report.working, PersistenceOutcome::Missing);
+    }
+
+    #[test]
+    fn agent_memory_set_rejects_malformed_argument() {
+        let (clock, _tick) = fake_clock(500);
+        let mut state = state_with_store(clock, Arc::new(InMemoryStore::new()));
+        // Empty argument.
+        let r = handle_request(&mut state, &agent_request("agent.memory.set", Some("")));
+        assert!(!r.ok);
+        // No `=` separator and not JSON.
+        let r = handle_request(&mut state, &agent_request("agent.memory.set", Some("justwords")));
+        assert!(!r.ok);
+        // Empty key on the LHS.
+        let r = handle_request(&mut state, &agent_request("agent.memory.set", Some("=value")));
+        assert!(!r.ok);
+    }
+
+    #[test]
+    fn agent_memory_set_and_show_round_trip() {
+        let (clock, _tick) = fake_clock(600);
+        let mut state = state_with_store(clock, Arc::new(InMemoryStore::new()));
+        // Set in the k=v form.
+        let r = handle_request(&mut state, &agent_request("agent.memory.set", Some("k1=hello")));
+        assert!(r.ok, "set failed: {:?}", r.result);
+        assert_eq!(r.result["key"], "k1");
+        assert_eq!(r.result["value"], "hello");
+        assert_eq!(r.result["total"], 1);
+        // Set in the JSON form.
+        let r = handle_request(
+            &mut state,
+            &agent_request("agent.memory.set", Some(r#"{"key":"k2","value":"world"}"#)),
+        );
+        assert!(r.ok, "json set failed: {:?}", r.result);
+        assert_eq!(state.get_working("k1"), Some("hello"));
+        assert_eq!(state.get_working("k2"), Some("world"));
+        // Show returns both.
+        let r = handle_request(&mut state, &agent_request("agent.memory.show", None));
+        assert!(r.ok);
+        assert_eq!(r.result["count"], 2);
+        let entries = match r.result["entries"].as_array() {
+            Some(v) => v,
+            None => panic!("entries not an array: {:?}", r.result),
+        };
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn agent_memory_get_and_delete_work() {
+        let (clock, _tick) = fake_clock(700);
+        let mut state = state_with_store(clock, Arc::new(InMemoryStore::new()));
+        handle_request(&mut state, &agent_request("agent.memory.set", Some("k=vvv")));
+        // Get a present key.
+        let r = handle_request(&mut state, &agent_request("agent.memory.get", Some("k")));
+        assert!(r.ok);
+        assert_eq!(r.result["value"], "vvv");
+        // Get a missing key.
+        let r = handle_request(&mut state, &agent_request("agent.memory.get", Some("nope")));
+        assert!(!r.ok);
+        // Delete the present key, then again (idempotent miss).
+        let r = handle_request(&mut state, &agent_request("agent.memory.delete", Some("k")));
+        assert!(r.ok);
+        assert_eq!(r.result["deleted"], true);
+        let r = handle_request(&mut state, &agent_request("agent.memory.delete", Some("k")));
+        assert!(!r.ok);
+        assert_eq!(r.result["deleted"], false);
+    }
+
+    #[test]
+    fn agent_memory_flush_returns_clean_report() {
+        let (clock, _tick) = fake_clock(800);
+        let mut state = state_with_store(clock, Arc::new(InMemoryStore::new()));
+        let _ = state.runtime_mut();
+        let r = handle_request(&mut state, &agent_request("agent.memory.flush", None));
+        assert!(r.ok, "flush failed: {:?}", r.result);
+        // Conversation: written (serialised as `{"Written":{"bytes":N}}`).
+        let conv = &r.result["report"]["conversation"];
+        assert!(conv.get("Written").is_some(), "expected Written, got {conv}");
+    }
+
+    #[test]
+    fn agent_memory_load_after_flush_restores_state() {
+        let store: Arc<dyn MemoryStore> = Arc::new(InMemoryStore::new());
+        let (clock, _tick) = fake_clock(900);
+        let mut state = state_with_store(clock, store.clone());
+        let _ = state.runtime_mut();
+        handle_request(&mut state, &agent_request("agent.memory.set", Some("app=notes")));
+        state.conversation.push("u", vec!["notes".to_string()], vec![]);
+        let r = handle_request(&mut state, &agent_request("agent.memory.flush", None));
+        assert!(r.ok);
+
+        // Fresh state, same store, no conversation/working data.
+        let (clock2, _tick2) = fake_clock(901);
+        let mut state2 = state_with_store(clock2, store.clone());
+        assert!(state2.conversation.last_app().is_none());
+        assert!(state2.get_working("app").is_none());
+        let r = handle_request(&mut state2, &agent_request("agent.memory.load", None));
+        assert!(r.ok, "load failed: {:?}", r.result);
+        assert_eq!(state2.conversation.last_app(), Some("notes"));
+        assert_eq!(state2.get_working("app"), Some("notes"));
+    }
+
+    #[test]
+    fn persistence_outcome_default_is_missing() {
+        let outcome: PersistenceOutcome = Default::default();
+        assert_eq!(outcome, PersistenceOutcome::Missing);
+        let report: PersistenceReport = Default::default();
+        assert!(report.is_clean());
+    }
+
+    #[test]
+    fn default_capabilities_includes_memory_write() {
+        let caps = runtime_host::default_capabilities();
+        assert!(caps.iter().any(|c| c == "agent.memory.write"));
     }
 }

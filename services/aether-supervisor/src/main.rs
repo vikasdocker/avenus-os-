@@ -28,10 +28,7 @@ struct SupervisedUnit {
 
 impl SupervisedUnit {
     fn launch(&mut self) -> bool {
-        match std::process::Command::new(&self.command)
-            .args(&self.args)
-            .spawn()
-        {
+        match std::process::Command::new(&self.command).args(&self.args).spawn() {
             Ok(child) => {
                 self.child = Some(child);
                 true

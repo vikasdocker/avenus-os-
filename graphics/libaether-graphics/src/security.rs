@@ -15,10 +15,7 @@ pub struct GraphicsSecurity {
 
 impl GraphicsSecurity {
     pub fn new(identity: AetherIdentity, capabilities: Vec<Capability>) -> Self {
-        Self {
-            identity,
-            capabilities,
-        }
+        Self { identity, capabilities }
     }
 
     /// Verifies if a specific capability is granted.
@@ -26,10 +23,7 @@ impl GraphicsSecurity {
         if self.capabilities.iter().any(|c| c == required) {
             Ok(())
         } else {
-            Err(GraphicsError::Security(format!(
-                "Missing required capability: {}",
-                required
-            )))
+            Err(GraphicsError::Security(format!("Missing required capability: {}", required)))
         }
     }
 

@@ -44,17 +44,13 @@ impl Surface {
     /// Registers a window with the desktop shell (port from env
     /// AETHER_SURFACE_PORT, default 4750).
     pub fn connect(app_id: &str, title: &str, w: u32, h: u32) -> Result<Self, String> {
-        let port: u16 = std::env::var("AETHER_SURFACE_PORT")
-            .ok()
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(4750);
+        let port: u16 =
+            std::env::var("AETHER_SURFACE_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(4750);
         let stream = TcpStream::connect(("127.0.0.1", port))
             .map_err(|e| format!("surface server :{port}: {e}"))?;
         let mut stream = stream;
         let req = json!({ "op": "register", "app": app_id, "title": title, "w": w, "h": h });
-        stream
-            .write_all(format!("{req}\n").as_bytes())
-            .map_err(|e| format!("register: {e}"))?;
+        stream.write_all(format!("{req}\n").as_bytes()).map_err(|e| format!("register: {e}"))?;
 
         let mut line = String::new();
         std::io::BufReader::new(stream.try_clone().map_err(|e| e.to_string())?)
@@ -104,9 +100,7 @@ impl Surface {
                 match k {
                     "\n" => Some(SurfaceEvent::Enter),
                     "\u{8}" => Some(SurfaceEvent::Backspace),
-                    other if !other.is_empty() => {
-                        Some(SurfaceEvent::Key(other.chars().next()?))
-                    }
+                    other if !other.is_empty() => Some(SurfaceEvent::Key(other.chars().next()?)),
                     _ => None,
                 }
             }

@@ -11,9 +11,7 @@ pub struct GraphicsSessionManager {
 
 impl GraphicsSessionManager {
     pub fn new() -> Self {
-        Self {
-            active_session: None,
-        }
+        Self { active_session: None }
     }
 
     /// Starts a new graphical session.

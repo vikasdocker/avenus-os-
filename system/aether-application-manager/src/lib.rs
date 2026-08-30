@@ -207,13 +207,7 @@ impl ApplicationManager {
         display_name: &str,
         command: &str,
     ) -> Result<(), AppManagerError> {
-        self.register(AppDefinition::new(
-            id,
-            display_name,
-            "0.1.0",
-            command,
-            &["display"],
-        )?)
+        self.register(AppDefinition::new(id, display_name, "0.1.0", command, &["display"])?)
     }
 
     /// DISCOVER: all registered definitions sorted by id.
@@ -266,9 +260,11 @@ impl ApplicationManager {
             .ok_or_else(|| AppManagerError::UnknownApp(app_id.to_string()))?
             .clone();
 
-        if self.instances.values().any(|r| {
-            r.instance.app_id == def.id && r.instance.state == InstanceState::Running
-        }) {
+        if self
+            .instances
+            .values()
+            .any(|r| r.instance.app_id == def.id && r.instance.state == InstanceState::Running)
+        {
             return Err(AppManagerError::AlreadyRunning(def.id.clone()));
         }
 
@@ -302,23 +298,12 @@ impl ApplicationManager {
             Err(_) => (None, None),
         };
 
-        let state = if child_handle.is_some() {
-            InstanceState::Running
-        } else {
-            InstanceState::Failed
-        };
-        let instance = Instance {
-            instance_id,
-            app_id: def.id.clone(),
-            pid,
-            state,
-        };
+        let state =
+            if child_handle.is_some() { InstanceState::Running } else { InstanceState::Failed };
+        let instance = Instance { instance_id, app_id: def.id.clone(), pid, state };
         self.instances.insert(
             instance_id,
-            InstanceRecord {
-                instance: instance.clone(),
-                child: child_handle,
-            },
+            InstanceRecord { instance: instance.clone(), child: child_handle },
         );
 
         if state == InstanceState::Failed {
@@ -342,10 +327,8 @@ impl ApplicationManager {
     /// STOP/CLOSE: terminates a running instance cleanly.
     pub fn close(&mut self, instance_id: u64) -> Result<Instance, AppManagerError> {
         self.reap();
-        let record = self
-            .instances
-            .get_mut(&instance_id)
-            .ok_or(AppManagerError::NotRunning(instance_id))?;
+        let record =
+            self.instances.get_mut(&instance_id).ok_or(AppManagerError::NotRunning(instance_id))?;
         if let Some(child) = record.child.as_mut() {
             let _ = child.kill();
             let _ = child.wait();
@@ -366,10 +349,7 @@ impl ApplicationManager {
             .map(|r| r.instance.clone())
             .collect();
 
-        let state = if instances
-            .iter()
-            .any(|i| i.state == InstanceState::Running)
-        {
+        let state = if instances.iter().any(|i| i.state == InstanceState::Running) {
             "RUNNING"
         } else if instances.iter().any(|i| i.state == InstanceState::Failed) {
             "FAILED"
@@ -397,16 +377,10 @@ impl ApplicationManager {
     pub fn stats(&mut self) -> (usize, usize, usize) {
         self.reap();
         let installed = self.defs.len();
-        let running = self
-            .instances
-            .values()
-            .filter(|r| r.instance.state == InstanceState::Running)
-            .count();
-        let failed = self
-            .instances
-            .values()
-            .filter(|r| r.instance.state == InstanceState::Failed)
-            .count();
+        let running =
+            self.instances.values().filter(|r| r.instance.state == InstanceState::Running).count();
+        let failed =
+            self.instances.values().filter(|r| r.instance.state == InstanceState::Failed).count();
         (installed, running, failed)
     }
 }
@@ -420,30 +394,18 @@ mod tests {
     #[test]
     fn unknown_app_rejected() {
         let mut am = ApplicationManager::new();
-        assert!(matches!(
-            am.launch("ghost"),
-            Err(AppManagerError::UnknownApp(_))
-        ));
+        assert!(matches!(am.launch("ghost"), Err(AppManagerError::UnknownApp(_))));
     }
 
     #[test]
     fn failed_spawn_is_recorded_as_failed_instance() {
         let mut am = ApplicationManager::new();
         am.register(
-            AppDefinition::new(
-                "badapp",
-                "Bad",
-                "0.1.0",
-                "/definitely/not/a/binary",
-                &["display"],
-            )
-            .unwrap_or_else(|e| panic!("{e}")),
+            AppDefinition::new("badapp", "Bad", "0.1.0", "/definitely/not/a/binary", &["display"])
+                .unwrap_or_else(|e| panic!("{e}")),
         )
         .unwrap_or_else(|e| panic!("{e}"));
-        let err = am
-            .launch("badapp")
-            .err()
-            .unwrap_or_else(|| panic!("expected launch failure"));
+        let err = am.launch("badapp").err().unwrap_or_else(|| panic!("expected launch failure"));
         assert!(matches!(err, AppManagerError::LaunchFailed(_)));
         let report = am.app_state("badapp");
         assert_eq!(report.state, "FAILED");
@@ -462,10 +424,7 @@ mod tests {
         )
         .unwrap_or_else(|e| panic!("{e}"));
         let first = am.launch("dup").unwrap_or_else(|e| panic!("{e}"));
-        assert!(matches!(
-            am.launch("dup"),
-            Err(AppManagerError::AlreadyRunning(_))
-        ));
+        assert!(matches!(am.launch("dup"), Err(AppManagerError::AlreadyRunning(_))));
         let closed = am.close(first.instance_id).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(closed.state, InstanceState::Closed);
         assert!(am.launch("dup").is_ok());

@@ -25,10 +25,9 @@ pub enum GraphError {
 impl std::fmt::Display for GraphError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingDependency { service, dependency } => write!(
-                f,
-                "service '{service}' depends on missing service '{dependency}'"
-            ),
+            Self::MissingDependency { service, dependency } => {
+                write!(f, "service '{service}' depends on missing service '{dependency}'")
+            }
             Self::CircularDependency { cycle } => {
                 write!(f, "circular dependency detected: {}", cycle.join(" -> "))
             }
@@ -46,10 +45,7 @@ impl DependencyGraph {
     pub fn new(manifests: &[ServiceManifest]) -> Result<Self, GraphError> {
         let mut map: BTreeMap<String, ServiceManifest> = BTreeMap::new();
         for manifest in manifests {
-            if map
-                .insert(manifest.service_id.clone(), manifest.clone())
-                .is_some()
-            {
+            if map.insert(manifest.service_id.clone(), manifest.clone()).is_some() {
                 return Err(GraphError::DuplicateServiceId {
                     service: manifest.service_id.clone(),
                 });
@@ -72,11 +68,7 @@ impl DependencyGraph {
         let mut indegree: BTreeMap<String, usize> = map
             .keys()
             .map(|id| {
-                let count = map[id]
-                    .dependencies
-                    .iter()
-                    .filter(|d| map.contains_key(*d))
-                    .count();
+                let count = map[id].dependencies.iter().filter(|d| map.contains_key(*d)).count();
                 (id.clone(), count)
             })
             .collect();
@@ -90,11 +82,8 @@ impl DependencyGraph {
             m
         };
 
-        let mut ready: Vec<&ServiceManifest> = indegree
-            .iter()
-            .filter(|(_, deg)| **deg == 0)
-            .map(|(id, _)| &map[id])
-            .collect();
+        let mut ready: Vec<&ServiceManifest> =
+            indegree.iter().filter(|(_, deg)| **deg == 0).map(|(id, _)| &map[id]).collect();
         ready.sort_by_key(|m| (m.startup_priority, m.service_id.clone()));
 
         let mut queue: VecDeque<String> = ready.iter().map(|m| m.service_id.clone()).collect();
@@ -105,9 +94,8 @@ impl DependencyGraph {
             if let Some(children) = dependents.get(&id) {
                 let mut unlocked: Vec<&ServiceManifest> = Vec::new();
                 for child in children {
-                    let entry = indegree
-                        .get_mut(child)
-                        .ok_or_else(|| GraphError::MissingDependency {
+                    let entry =
+                        indegree.get_mut(child).ok_or_else(|| GraphError::MissingDependency {
                             service: id.clone(),
                             dependency: child.clone(),
                         })?;
@@ -124,19 +112,13 @@ impl DependencyGraph {
         }
 
         if start_order.len() != map.len() {
-            let mut remaining: Vec<String> = map
-                .keys()
-                .filter(|id| !start_order.contains(id))
-                .cloned()
-                .collect();
+            let mut remaining: Vec<String> =
+                map.keys().filter(|id| !start_order.contains(id)).cloned().collect();
             remaining.sort();
             return Err(GraphError::CircularDependency { cycle: remaining });
         }
 
-        Ok(Self {
-            manifests: map,
-            start_order,
-        })
+        Ok(Self { manifests: map, start_order })
     }
 
     /// Deterministic start order: dependencies before dependents.
@@ -249,11 +231,8 @@ mod tests {
 
     #[test]
     fn circular_dependency_rejected() {
-        let manifests = vec![
-            manifest("a", &["b"], 1),
-            manifest("b", &["c"], 1),
-            manifest("c", &["a"], 1),
-        ];
+        let manifests =
+            vec![manifest("a", &["b"], 1), manifest("b", &["c"], 1), manifest("c", &["a"], 1)];
         assert!(matches!(
             DependencyGraph::new(&manifests),
             Err(GraphError::CircularDependency { .. })

@@ -23,10 +23,8 @@ struct Region {
 
 impl Region {
     fn open(rect: aether_surface::Rect) -> Result<Self, String> {
-        let file = OpenOptions::new()
-            .write(true)
-            .open("/dev/fb0")
-            .map_err(|e| format!("fb0: {e}"))?;
+        let file =
+            OpenOptions::new().write(true).open("/dev/fb0").map_err(|e| format!("fb0: {e}"))?;
         let s = std::fs::read_to_string("/sys/class/graphics/fb0/stride")
             .map_err(|e| format!("stride: {e}"))?;
         Ok(Self {
@@ -154,8 +152,7 @@ fn run() -> Result<(), String> {
                     break;
                 }
                 Some(SurfaceEvent::Key(c)) => {
-                    let mut lines =
-                        lines_state.lock().unwrap_or_else(|p| p.into_inner());
+                    let mut lines = lines_state.lock().unwrap_or_else(|p| p.into_inner());
                     if lines.last().is_some_and(|l| l.chars().count() > 30) {
                         lines.push(String::new());
                     }
@@ -164,15 +161,14 @@ fn run() -> Result<(), String> {
                     }
                 }
                 Some(SurfaceEvent::Backspace) => {
-                    if let Some(last) = lines_state.lock().unwrap_or_else(|p| p.into_inner()).last_mut() {
+                    if let Some(last) =
+                        lines_state.lock().unwrap_or_else(|p| p.into_inner()).last_mut()
+                    {
                         last.pop();
                     }
                 }
                 Some(SurfaceEvent::Enter) => {
-                    lines_state
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .push(String::new());
+                    lines_state.lock().unwrap_or_else(|p| p.into_inner()).push(String::new());
                 }
             }
         });

@@ -57,6 +57,8 @@ pub fn default_capabilities() -> Vec<String> {
         "window.minimize".to_string(),
         "window.maximize".to_string(),
         "window.close".to_string(),
+        // Agent working memory (Phase 2.9 — persistent memory)
+        "agent.memory.write".to_string(),
     ]
 }
 

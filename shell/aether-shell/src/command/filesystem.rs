@@ -1,8 +1,8 @@
 // Filesystem commands: fs list, fs stat, fs search, fs storage, fs mounts
-use async_trait::async_trait;
-use serde_json::json;
 use anyhow::Result;
+use async_trait::async_trait;
 use once_cell::sync::Lazy;
+use serde_json::json;
 
 use crate::command::{Command, CommandMetadata};
 use crate::history::ShellHistory;
@@ -34,7 +34,9 @@ impl Command for FilesystemCommand {
         _history: &ShellHistory,
     ) -> Result<()> {
         if args.is_empty() {
-            return Err(anyhow::anyhow!("fs requires subcommand: list, stat, search, storage, mounts"));
+            return Err(anyhow::anyhow!(
+                "fs requires subcommand: list, stat, search, storage, mounts"
+            ));
         }
 
         match args[0] {

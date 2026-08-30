@@ -127,6 +127,33 @@ impl AuditLog {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// Returns the most recent `count` entries as owned values, in
+    /// chronological order (oldest first, newest last). Used by
+    /// `AgentRuntimeHost::snapshot_audit_recent` for persistence.
+    pub fn snapshot_recent(&self, count: usize) -> Vec<AuditEntry> {
+        let n = count.min(self.entries.len());
+        self.entries.iter().rev().take(n).cloned().collect::<Vec<_>>().into_iter().rev().collect()
+    }
+
+    /// Replaces the current ring with the supplied entries. The
+    /// ring's `capacity` is unchanged. If the input is longer than
+    /// `capacity`, only the newest `capacity` entries are kept.
+    /// Returns the number of entries actually retained.
+    pub fn restore_recent(&mut self, mut entries: Vec<AuditEntry>) -> usize {
+        if entries.len() > self.capacity {
+            let drop = entries.len() - self.capacity;
+            entries.drain(..drop);
+        }
+        let kept = entries.len();
+        self.entries.clear();
+        // Restore in chronological order so `recent(n)` returns
+        // newest-first as it does on the recording path.
+        for entry in entries {
+            self.entries.push_back(entry);
+        }
+        kept
+    }
 }
 
 impl Default for AuditLog {
@@ -218,5 +245,84 @@ mod tests {
         let long = "x".repeat(1000);
         let s = sanitize_detail(&long);
         assert!(s.len() < 600);
+    }
+
+    #[test]
+    fn snapshot_recent_returns_last_n_in_chronological_order() {
+        let mut log = AuditLog::new(10);
+        for i in 0..5 {
+            log.record("s1", AuditEventType::ActionRequested, &format!("a{i}"), true, "r");
+        }
+        let snap = log.snapshot_recent(3);
+        assert_eq!(snap.len(), 3);
+        // The snapshot is oldest-first, so the most recent three
+        // recorded events are `a2`, `a3`, `a4` in that order.
+        assert_eq!(snap[0].detail, "a2");
+        assert_eq!(snap[1].detail, "a3");
+        assert_eq!(snap[2].detail, "a4");
+    }
+
+    #[test]
+    fn snapshot_recent_zero_returns_empty() {
+        let log = AuditLog::new(10);
+        assert!(log.snapshot_recent(0).is_empty());
+        assert!(log.snapshot_recent(100).is_empty());
+    }
+
+    #[test]
+    fn restore_recent_pushes_back_evicting_oldest() {
+        let mut log = AuditLog::new(3);
+        log.record("s", AuditEventType::ActionRequested, "first", true, "r");
+        log.record("s", AuditEventType::ActionRequested, "second", true, "r");
+        let snap = log.snapshot_recent(2);
+        // New log, then restore.
+        let mut log2 = AuditLog::new(3);
+        let kept = log2.restore_recent(snap);
+        assert_eq!(kept, 2);
+        let recent = log2.recent(10);
+        // `recent` returns newest-first.
+        assert_eq!(recent[0].detail, "second");
+        assert_eq!(recent[1].detail, "first");
+    }
+
+    #[test]
+    fn restore_recent_drops_excess_to_fit_capacity() {
+        let mut log = AuditLog::new(2);
+        let entries: Vec<AuditEntry> = (0..5)
+            .map(|i| AuditEntry {
+                timestamp: i as u64,
+                session_id: "s".to_string(),
+                event_type: AuditEventType::ActionRequested,
+                detail: format!("e{i}"),
+                success: true,
+                component: "r".to_string(),
+            })
+            .collect();
+        let kept = log.restore_recent(entries);
+        assert_eq!(kept, 2);
+        let recent = log.recent(10);
+        // The two newest survive; the older three are dropped.
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].detail, "e4");
+        assert_eq!(recent[1].detail, "e3");
+    }
+
+    #[test]
+    fn snapshot_then_restore_preserves_full_ring() {
+        let mut log = AuditLog::new(5);
+        for i in 0..5 {
+            log.record("s", AuditEventType::ActionRequested, &format!("a{i}"), true, "r");
+        }
+        let snap = log.snapshot_recent(5);
+        let mut log2 = AuditLog::new(5);
+        log2.restore_recent(snap);
+        // The ring now has the same chronological order.
+        for i in 0..5 {
+            let recent = log2.recent(5);
+            // `recent` returns newest-first, so index 0 is the
+            // most recent (a4), index 4 is the oldest (a0).
+            let expected = format!("a{}", 4 - i);
+            assert_eq!(recent[i].detail, expected);
+        }
     }
 }

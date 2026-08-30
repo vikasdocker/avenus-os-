@@ -1,8 +1,8 @@
 // Process commands: process list, inspect, start, stop, restart
-use async_trait::async_trait;
-use serde_json::json;
 use anyhow::Result;
+use async_trait::async_trait;
 use once_cell::sync::Lazy;
+use serde_json::json;
 
 use crate::command::{Command, CommandMetadata};
 use crate::history::ShellHistory;
@@ -34,7 +34,9 @@ impl Command for ProcessCommand {
         _history: &ShellHistory,
     ) -> Result<()> {
         if args.is_empty() {
-            return Err(anyhow::anyhow!("process requires subcommand: list, inspect, start, stop, restart"));
+            return Err(anyhow::anyhow!(
+                "process requires subcommand: list, inspect, start, stop, restart"
+            ));
         }
 
         match args[0] {

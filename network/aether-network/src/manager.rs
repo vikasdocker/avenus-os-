@@ -9,9 +9,8 @@
 // from inside a public query — only from `refresh()`.
 
 use crate::{
-    Address, AddressFamily, ConnectivityStatus, DnsConfig, Event, Interface,
-    InterfaceKind, InterfaceState, InterfaceStats, NetworkError, NetworkStatus, Route,
-    MAX_EVENTS,
+    Address, AddressFamily, ConnectivityStatus, DnsConfig, Event, Interface, InterfaceKind,
+    InterfaceState, InterfaceStats, NetworkError, NetworkStatus, Route, MAX_EVENTS,
 };
 
 /// Source of network data. Implementations are pure data loaders —
@@ -51,13 +50,7 @@ pub struct NetworkManager {
 impl NetworkManager {
     pub fn new_with_backend(backend: Box<dyn NetworkBackend>) -> Self {
         let name = backend.name().to_string();
-        Self {
-            backend,
-            snap: Snapshot {
-                backend: name,
-                ..Snapshot::default()
-            },
-        }
+        Self { backend, snap: Snapshot { backend: name, ..Snapshot::default() } }
     }
 
     /// Pulls a fresh snapshot from the backend. Backends that fail a
@@ -67,10 +60,7 @@ impl NetworkManager {
         self.snap.interfaces = self.backend.load_interfaces().unwrap_or_default();
         self.snap.addresses = self.backend.load_addresses().unwrap_or_default();
         self.snap.routes = self.backend.load_routes().unwrap_or_default();
-        self.snap.dns = self
-            .backend
-            .load_dns()
-            .unwrap_or_else(|_| DnsConfig::empty());
+        self.snap.dns = self.backend.load_dns().unwrap_or_else(|_| DnsConfig::empty());
         self.snap.stats = self.backend.load_stats().unwrap_or_default();
         let new_events = self.backend.load_events().unwrap_or_default();
         for ev in new_events {
@@ -90,12 +80,7 @@ impl NetworkManager {
     }
 
     pub fn status(&self) -> NetworkStatus {
-        let interfaces_up = self
-            .snap
-            .interfaces
-            .iter()
-            .filter(|i| i.is_up())
-            .count();
+        let interfaces_up = self.snap.interfaces.iter().filter(|i| i.is_up()).count();
         NetworkStatus {
             backend: self.snap.backend.clone(),
             interface_count: self.snap.interfaces.len(),
@@ -148,19 +133,12 @@ impl NetworkManager {
         if self.snap.interfaces.is_empty() {
             return ConnectivityStatus::Unknown;
         }
-        let has_non_loopback_up = self
-            .snap
-            .interfaces
-            .iter()
-            .any(|i| i.is_up() && i.kind != InterfaceKind::Loopback);
+        let has_non_loopback_up =
+            self.snap.interfaces.iter().any(|i| i.is_up() && i.kind != InterfaceKind::Loopback);
         let has_default_route = self.snap.routes.iter().any(|r| {
-            matches!(r.family, AddressFamily::V4)
-                && r.prefix_len == 0
-                && r.destination == "0.0.0.0"
+            matches!(r.family, AddressFamily::V4) && r.prefix_len == 0 && r.destination == "0.0.0.0"
         }) || self.snap.routes.iter().any(|r| {
-            matches!(r.family, AddressFamily::V6)
-                && r.prefix_len == 0
-                && r.destination == "::"
+            matches!(r.family, AddressFamily::V6) && r.prefix_len == 0 && r.destination == "::"
         });
         match (has_non_loopback_up, has_default_route) {
             (true, true) => ConnectivityStatus::Full,
@@ -297,14 +275,7 @@ impl StubSeed {
                 tx_dropped: 0,
             },
         ];
-        Self {
-            interfaces,
-            addresses,
-            routes,
-            dns,
-            stats,
-            events: Vec::new(),
-        }
+        Self { interfaces, addresses, routes, dns, stats, events: Vec::new() }
     }
 }
 
@@ -317,9 +288,7 @@ pub struct StubBackend {
 
 impl StubBackend {
     pub fn default_seed() -> Self {
-        Self {
-            seed: StubSeed::canonical(),
-        }
+        Self { seed: StubSeed::canonical() }
     }
 
     pub fn with_seed(seed: StubSeed) -> Self {
@@ -469,7 +438,8 @@ mod tests {
         let m = manager();
         let s = m.stats();
         assert_eq!(s.len(), 2);
-        let eth0 = s.iter().find(|x| x.interface == "eth0").unwrap_or_else(|| panic!("missing eth0"));
+        let eth0 =
+            s.iter().find(|x| x.interface == "eth0").unwrap_or_else(|| panic!("missing eth0"));
         assert_eq!(eth0.rx_bytes, 1024);
         assert_eq!(eth0.tx_bytes, 512);
     }
@@ -485,12 +455,24 @@ mod tests {
         // Use a custom backend that returns more than MAX_EVENTS.
         struct FloodBackend;
         impl NetworkBackend for FloodBackend {
-            fn name(&self) -> &str { "flood" }
-            fn load_interfaces(&self) -> Result<Vec<Interface>, NetworkError> { Ok(Vec::new()) }
-            fn load_addresses(&self) -> Result<Vec<Address>, NetworkError> { Ok(Vec::new()) }
-            fn load_routes(&self) -> Result<Vec<Route>, NetworkError> { Ok(Vec::new()) }
-            fn load_dns(&self) -> Result<DnsConfig, NetworkError> { Ok(DnsConfig::empty()) }
-            fn load_stats(&self) -> Result<Vec<InterfaceStats>, NetworkError> { Ok(Vec::new()) }
+            fn name(&self) -> &str {
+                "flood"
+            }
+            fn load_interfaces(&self) -> Result<Vec<Interface>, NetworkError> {
+                Ok(Vec::new())
+            }
+            fn load_addresses(&self) -> Result<Vec<Address>, NetworkError> {
+                Ok(Vec::new())
+            }
+            fn load_routes(&self) -> Result<Vec<Route>, NetworkError> {
+                Ok(Vec::new())
+            }
+            fn load_dns(&self) -> Result<DnsConfig, NetworkError> {
+                Ok(DnsConfig::empty())
+            }
+            fn load_stats(&self) -> Result<Vec<InterfaceStats>, NetworkError> {
+                Ok(Vec::new())
+            }
             fn load_events(&self) -> Result<Vec<Event>, NetworkError> {
                 Ok((0..(MAX_EVENTS as u32 + 10))
                     .map(|i| Event::LinkUp(format!("eth{i}")))
@@ -541,17 +523,27 @@ mod tests {
         // Backend that errors on every loader.
         struct BrokenBackend;
         impl NetworkBackend for BrokenBackend {
-            fn name(&self) -> &str { "broken" }
-            fn load_interfaces(&self) -> Result<Vec<Interface>, NetworkError> { Ok(Vec::new()) }
-            fn load_addresses(&self) -> Result<Vec<Address>, NetworkError> { Ok(Vec::new()) }
+            fn name(&self) -> &str {
+                "broken"
+            }
+            fn load_interfaces(&self) -> Result<Vec<Interface>, NetworkError> {
+                Ok(Vec::new())
+            }
+            fn load_addresses(&self) -> Result<Vec<Address>, NetworkError> {
+                Ok(Vec::new())
+            }
             fn load_routes(&self) -> Result<Vec<Route>, NetworkError> {
                 Err(NetworkError::Backend("nope".to_string()))
             }
             fn load_dns(&self) -> Result<DnsConfig, NetworkError> {
                 Err(NetworkError::Backend("nope".to_string()))
             }
-            fn load_stats(&self) -> Result<Vec<InterfaceStats>, NetworkError> { Ok(Vec::new()) }
-            fn load_events(&self) -> Result<Vec<Event>, NetworkError> { Ok(Vec::new()) }
+            fn load_stats(&self) -> Result<Vec<InterfaceStats>, NetworkError> {
+                Ok(Vec::new())
+            }
+            fn load_events(&self) -> Result<Vec<Event>, NetworkError> {
+                Ok(Vec::new())
+            }
         }
         let mut m = NetworkManager::new_with_backend(Box::new(BrokenBackend));
         m.refresh();

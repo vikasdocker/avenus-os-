@@ -23,10 +23,7 @@ pub enum ProcessState {
 impl ProcessState {
     /// Returns true if the process is considered alive.
     pub fn is_alive(&self) -> bool {
-        matches!(
-            self,
-            Self::Created | Self::Running | Self::Sleeping | Self::Stopped
-        )
+        matches!(self, Self::Created | Self::Running | Self::Sleeping | Self::Stopped)
     }
 
     /// Validates whether a transition from this state to another is legal.
@@ -82,10 +79,7 @@ pub struct ProcessLifecycle {
 
 impl ProcessLifecycle {
     pub fn new() -> Self {
-        Self {
-            states: std::collections::HashMap::new(),
-            transitions: Vec::new(),
-        }
+        Self { states: std::collections::HashMap::new(), transitions: Vec::new() }
     }
 
     /// Registers a new process in the Created state.
@@ -115,9 +109,10 @@ impl ProcessLifecycle {
         timestamp_ms: u64,
         reason: impl Into<String>,
     ) -> Result<(), AetherError> {
-        let current = *self.states.get(&process_id).ok_or_else(|| {
-            AetherError::not_found(&format!("process {}", process_id))
-        })?;
+        let current = *self
+            .states
+            .get(&process_id)
+            .ok_or_else(|| AetherError::not_found(&format!("process {}", process_id)))?;
         if !current.can_transition_to(&next) {
             return Err(AetherError::invalid_input(format!(
                 "Illegal transition for process {}: {} -> {}",
@@ -152,11 +147,7 @@ impl ProcessLifecycle {
 
     /// All live process ids currently tracked.
     pub fn live_processes(&self) -> Vec<u32> {
-        self.states
-            .iter()
-            .filter(|(_, s)| s.is_alive())
-            .map(|(pid, _)| *pid)
-            .collect()
+        self.states.iter().filter(|(_, s)| s.is_alive()).map(|(pid, _)| *pid).collect()
     }
 }
 

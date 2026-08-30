@@ -94,10 +94,7 @@ fn query_registered_apps() -> Vec<AppInfo> {
     apps.iter()
         .filter_map(|a| {
             let id = a["id"].as_str()?.to_string();
-            let name = a["name"]
-                .as_str()
-                .unwrap_or(&id)
-                .to_string();
+            let name = a["name"].as_str().unwrap_or(&id).to_string();
             Some(AppInfo { id, name })
         })
         .collect()
@@ -213,12 +210,7 @@ fn refresh_status(state: &mut UiState) {
 
 // -------------------------------------------------------------- rendering
 
-fn draw_desktop(
-    fb: &mut Screen,
-    ui: &UiState,
-    wm: &mut WindowManager,
-    cursor: Option<(i32, i32)>,
-) {
+fn draw_desktop(fb: &mut Screen, ui: &UiState, wm: &mut WindowManager, cursor: Option<(i32, i32)>) {
     fb.fill(BG);
 
     // Header bar.
@@ -272,22 +264,18 @@ fn draw_desktop(
     );
 
     // Window chrome for every visible window.
-    for w in wm.stacked().into_iter().filter(|w| {
-        w.visible && w.state != aether_wm::WindowState::Minimized
-    }) {
+    for w in wm
+        .stacked()
+        .into_iter()
+        .filter(|w| w.visible && w.state != aether_wm::WindowState::Minimized)
+    {
         let (wx, wy) = (i64::from(w.x), i64::from(w.y));
         let ww = i64::from(w.width);
         let focused_color = if w.focused { CYAN } else { DIM };
         // Frame border.
         fb.rect(wx, wy, w.width, w.height, focused_color);
         // Title bar background.
-        fb.rect(
-            wx + 1,
-            wy + 1,
-            w.width.saturating_sub(2),
-            TITLE_H as u32 - 2,
-            PANEL,
-        );
+        fb.rect(wx + 1, wy + 1, w.width.saturating_sub(2), TITLE_H as u32 - 2, PANEL);
         fb.text(&w.title.to_uppercase(), wx + 10, wy + 9, 2, FG);
         // Buttons right side: [_] [O] [X].
         let bx = wx + ww - BOX_W * 3 - 8;
@@ -317,24 +305,34 @@ fn draw_desktop(
         let bw = 40u32;
         let color = if *ws_id == ui.active_workspace { PANEL_HI } else { KEY_BG };
         fb.rect(ws_tx, tb_y + 6, bw, TASKBAR_H as u32 - 12, color);
-        fb.text(&label, ws_tx + 4, tb_y + 15, 2, if *ws_id == ui.active_workspace { CYAN } else { DIM });
+        fb.text(
+            &label,
+            ws_tx + 4,
+            tb_y + 15,
+            2,
+            if *ws_id == ui.active_workspace { CYAN } else { DIM },
+        );
         ws_tx += bw as i64 + 4;
     }
 
     // Window taskbar buttons.
     let mut tx = ws_tx + 8;
-    for w in wm.stacked().into_iter().filter(|w| {
-        w.visible && w.state != aether_wm::WindowState::Minimized
-    }) {
+    for w in wm
+        .stacked()
+        .into_iter()
+        .filter(|w| w.visible && w.state != aether_wm::WindowState::Minimized)
+    {
         let label = w.title.to_uppercase();
         let is_focused = w.focused;
         let bw = 150u32;
-        fb.rect(tx, tb_y + 6, bw, TASKBAR_H as u32 - 12, if is_focused { PANEL_HI } else { KEY_BG });
-        let label = if label.len() > 18 {
-            format!("{}...", &label[..17])
-        } else {
-            label
-        };
+        fb.rect(
+            tx,
+            tb_y + 6,
+            bw,
+            TASKBAR_H as u32 - 12,
+            if is_focused { PANEL_HI } else { KEY_BG },
+        );
+        let label = if label.len() > 18 { format!("{}...", &label[..17]) } else { label };
         fb.text(&label, tx + 8, tb_y + 15, 2, if is_focused { CYAN } else { DIM });
         tx += bw as i64 + 8;
         if tx > fb.width as i64 - 260 {
@@ -392,18 +390,9 @@ fn draw_launcher(fb: &mut Screen, ui: &UiState) {
         let selected = i == ui.selected_launcher;
         let bg = if selected { PANEL_HI } else { PANEL };
         fb.rect(lx + 2, iy, lw - 4, LAUNCHER_ITEM_H as u32 - 2, bg);
-        let label = if app.name.len() > 20 {
-            format!("{}...", &app.name[..19])
-        } else {
-            app.name.clone()
-        };
-        fb.text(
-            &label.to_uppercase(),
-            lx + 10,
-            iy + 7,
-            2,
-            if selected { CYAN } else { FG },
-        );
+        let label =
+            if app.name.len() > 20 { format!("{}...", &app.name[..19]) } else { app.name.clone() };
+        fb.text(&label.to_uppercase(), lx + 10, iy + 7, 2, if selected { CYAN } else { FG });
     }
 }
 
@@ -411,7 +400,12 @@ const KEY_BG: Rgb = Rgb(38, 45, 56);
 
 // ------------------------------------------------------------ input decode
 
-fn handle_key(code: u16, wm: &mut WindowManager, tx: &Sender<UiEvent>, ui: &mut UiState) -> Option<char> {
+fn handle_key(
+    code: u16,
+    wm: &mut WindowManager,
+    tx: &Sender<UiEvent>,
+    ui: &mut UiState,
+) -> Option<char> {
     const TAB: u16 = 15;
     const F2: u16 = 60;
     const F3: u16 = 61;
@@ -596,12 +590,9 @@ fn agent_chat(prompt: &str, port: u16) -> Result<AgentChatReply, String> {
         .map_err(|e| format!("connect agent: {e}"))?;
     let _ = s.set_read_timeout(Some(Duration::from_secs(30)));
     let req = serde_json::json!({ "command": "chat", "argument": prompt });
-    s.write_all(format!("{req}\n").as_bytes())
-        .map_err(|e| format!("send: {e}"))?;
+    s.write_all(format!("{req}\n").as_bytes()).map_err(|e| format!("send: {e}"))?;
     let mut line = String::new();
-    BufReader::new(s)
-        .read_line(&mut line)
-        .map_err(|e| format!("recv: {e}"))?;
+    BufReader::new(s).read_line(&mut line).map_err(|e| format!("recv: {e}"))?;
     if line.trim().is_empty() {
         return Err("empty agent reply".to_string());
     }
@@ -629,9 +620,7 @@ fn spawn_input_thread(tx: Sender<UiEvent>) {
                     match file.read(&mut byte_buf) {
                         Ok(0) => std::thread::sleep(Duration::from_millis(50)),
                         Ok(_) => {
-                            if let Some(ev) =
-                                input::decode(&byte_buf, &mut kind)
-                            {
+                            if let Some(ev) = input::decode(&byte_buf, &mut kind) {
                                 let ui_ev = match ev {
                                     input::RawInput::MouseMove(dx, dy) => UiEvent::Motion(dx, dy),
                                     input::RawInput::MouseDown => UiEvent::Press,
@@ -694,8 +683,10 @@ fn spawn_serial_thread(tx: Sender<UiEvent>, port: u16) {
                                         if let Some(actions) = reply.actions.clone() {
                                             let mut first_msg: Option<String> = None;
                                             for act in &actions {
-                                                let cap = act["capability"].as_str().unwrap_or("action");
-                                                let status = act["status"].as_str().unwrap_or("Success");
+                                                let cap =
+                                                    act["capability"].as_str().unwrap_or("action");
+                                                let status =
+                                                    act["status"].as_str().unwrap_or("Success");
                                                 let msg = act["message"].as_str().unwrap_or("");
                                                 if first_msg.is_none() {
                                                     first_msg = Some(msg.to_string());
@@ -710,7 +701,11 @@ fn spawn_serial_thread(tx: Sender<UiEvent>, port: u16) {
                                                 let _ = tx.send(UiEvent::ChatReply(ChatEntry {
                                                     prefix,
                                                     color,
-                                                    text: format!("{}: {}", cap.to_ascii_uppercase(), msg),
+                                                    text: format!(
+                                                        "{}: {}",
+                                                        cap.to_ascii_uppercase(),
+                                                        msg
+                                                    ),
                                                 }));
                                             }
                                             let need_summary = match &first_msg {
@@ -768,8 +763,10 @@ fn run() -> Result<(), String> {
 
     let ui = UiState::new();
     let (tx, rx): (Sender<UiEvent>, Receiver<UiEvent>) = channel();
-    let (stx, srx): (Sender<surface_server::SurfaceCommand>, Receiver<surface_server::SurfaceCommand>) =
-        channel();
+    let (stx, srx): (
+        Sender<surface_server::SurfaceCommand>,
+        Receiver<surface_server::SurfaceCommand>,
+    ) = channel();
 
     surface_server::spawn(
         SURFACE_PORT,
@@ -850,15 +847,10 @@ fn run() -> Result<(), String> {
                 cursor_dirty = true;
             }
             Ok(UiEvent::WinClose(id)) => {
-                let rect = wm
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .get(id)
-                    .map(|w| w.content_rect());
-                let _ = wm
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .apply(&WindowAction::Close(id));
+                let rect =
+                    wm.lock().unwrap_or_else(|p| p.into_inner()).get(id).map(|w| w.content_rect());
+                let _ =
+                    wm.lock().unwrap_or_else(|p| p.into_inner()).apply(&WindowAction::Close(id));
                 if let Some((cx, cy, cw, ch)) = rect {
                     fb.rect(i64::from(cx), i64::from(cy), cw, ch, BG);
                 }
@@ -880,15 +872,9 @@ fn run() -> Result<(), String> {
 
         // Surface commands from applications / AI window capabilities.
         while let Ok(surface_server::SurfaceCommand::Close(id)) = srx.try_recv() {
-            let rect = wm
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .get(id)
-                .map(|w| w.content_rect());
-            let _ = wm
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .apply(&WindowAction::Close(id));
+            let rect =
+                wm.lock().unwrap_or_else(|p| p.into_inner()).get(id).map(|w| w.content_rect());
+            let _ = wm.lock().unwrap_or_else(|p| p.into_inner()).apply(&WindowAction::Close(id));
             if let Some((cx, cy, cw, ch)) = rect {
                 fb.rect(i64::from(cx), i64::from(cy), cw, ch, BG);
             }

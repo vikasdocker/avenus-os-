@@ -14,9 +14,7 @@ impl ComponentId {
     pub fn new(raw: impl Into<String>) -> Result<Self, AetherError> {
         let raw = raw.into();
         if raw.is_empty() {
-            return Err(AetherError::invalid_input(
-                "component id must not be empty",
-            ));
+            return Err(AetherError::invalid_input("component id must not be empty"));
         }
         if !raw
             .chars()
@@ -51,12 +49,7 @@ pub struct AetherIdentity {
 
 impl AetherIdentity {
     pub fn new(name: impl Into<String>, scope: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            scope: scope.into(),
-            permissions: Vec::new(),
-            is_root: false,
-        }
+        Self { name: name.into(), scope: scope.into(), permissions: Vec::new(), is_root: false }
     }
 
     pub fn with_permission(mut self, perm: impl Into<String>) -> Self {

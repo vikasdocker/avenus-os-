@@ -34,23 +34,20 @@ pub struct OutputManager {
 
 impl OutputManager {
     pub fn new() -> Self {
-        Self {
-            outputs: Vec::new(),
-        }
+        Self { outputs: Vec::new() }
     }
 
     /// Adds an output connector with its supported mode list.
-    pub fn add_output(&mut self, name: &str, modes: Vec<DisplayMode>) -> Result<usize, GraphicsError> {
+    pub fn add_output(
+        &mut self,
+        name: &str,
+        modes: Vec<DisplayMode>,
+    ) -> Result<usize, GraphicsError> {
         if name.is_empty() {
-            return Err(GraphicsError::Output(
-                "Output name must not be empty".to_string(),
-            ));
+            return Err(GraphicsError::Output("Output name must not be empty".to_string()));
         }
         if self.outputs.iter().any(|o| o.name == name) {
-            return Err(GraphicsError::Output(format!(
-                "Output '{}' already registered",
-                name
-            )));
+            return Err(GraphicsError::Output(format!("Output '{}' already registered", name)));
         }
         self.outputs.push(Output {
             name: name.to_string(),
@@ -71,10 +68,7 @@ impl OutputManager {
             .find(|o| o.name == name)
             .ok_or_else(|| GraphicsError::Output(format!("Output '{}' not found", name)))?;
         if !out.connected {
-            return Err(GraphicsError::Output(format!(
-                "Output '{}' is disconnected",
-                name
-            )));
+            return Err(GraphicsError::Output(format!("Output '{}' is disconnected", name)));
         }
         if mode_index >= out.modes.len() {
             return Err(GraphicsError::Mode(format!(
@@ -139,9 +133,7 @@ impl OutputManager {
     pub fn scanning_outputs(&self) -> Vec<String> {
         self.outputs
             .iter()
-            .filter(|o| {
-                o.connected && o.power == OutputPowerState::On && o.active_mode.is_some()
-            })
+            .filter(|o| o.connected && o.power == OutputPowerState::On && o.active_mode.is_some())
             .map(|o| o.name.clone())
             .collect()
     }
@@ -158,18 +150,13 @@ mod tests {
     use super::*;
 
     fn mode(w: u32, h: u32) -> DisplayMode {
-        DisplayMode {
-            width: w,
-            height: h,
-            refresh_rate: 60,
-        }
+        DisplayMode { width: w, height: h, refresh_rate: 60 }
     }
 
     #[test]
     fn mode_set_and_scanout() {
         let mut om = OutputManager::new();
-        om.add_output("HDMI-A-1", vec![mode(1920, 1080)])
-            .unwrap_or_else(|e| panic!("{e}"));
+        om.add_output("HDMI-A-1", vec![mode(1920, 1080)]).unwrap_or_else(|e| panic!("{e}"));
         om.set_mode("HDMI-A-1", 0).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(om.scanning_outputs(), vec!["HDMI-A-1".to_string()]);
     }
@@ -177,11 +164,9 @@ mod tests {
     #[test]
     fn power_off_clears_mode() {
         let mut om = OutputManager::new();
-        om.add_output("eDP-1", vec![mode(1280, 800)])
-            .unwrap_or_else(|e| panic!("{e}"));
+        om.add_output("eDP-1", vec![mode(1280, 800)]).unwrap_or_else(|e| panic!("{e}"));
         om.set_mode("eDP-1", 0).unwrap_or_else(|e| panic!("{e}"));
-        om.set_power("eDP-1", OutputPowerState::Off)
-            .unwrap_or_else(|e| panic!("{e}"));
+        om.set_power("eDP-1", OutputPowerState::Off).unwrap_or_else(|e| panic!("{e}"));
         assert!(om.scanning_outputs().is_empty());
     }
 

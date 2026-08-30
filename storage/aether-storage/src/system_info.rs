@@ -144,10 +144,7 @@ fn read_meminfo() -> (u64, u64) {
 
 fn parse_kib(line: &str) -> u64 {
     // Format: MemTotal:       16384256 kB
-    line.split_whitespace()
-        .nth(1)
-        .and_then(|n| n.parse::<u64>().ok())
-        .unwrap_or(0)
+    line.split_whitespace().nth(1).and_then(|n| n.parse::<u64>().ok()).unwrap_or(0)
 }
 
 fn cpu_count() -> usize {
@@ -159,9 +156,7 @@ fn cpu_count() -> usize {
         }
     }
     // Fallback to available_parallelism
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
 }
 
 fn read_loadavg() -> Value {
@@ -187,11 +182,7 @@ fn read_storage_for_path(path: &Path) -> Value {
     #[cfg(unix)]
     {
         // Use `statvfs` via std::process::Command df
-        if let Ok(output) = std::process::Command::new("df")
-            .arg("-B1")
-            .arg(path)
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("df").arg("-B1").arg(path).output() {
             if output.status.success() {
                 let out = String::from_utf8_lossy(&output.stdout);
                 // df output: Filesystem 1B-blocks Used Available Use% Mounted on

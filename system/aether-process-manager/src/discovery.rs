@@ -77,7 +77,12 @@ impl std::fmt::Display for ProcessRecord {
         write!(
             f,
             "PID {} ({}): {} {} - {}KB mem, {} fds",
-            self.process_id, self.state, self.name, self.cpu_usage_pct, self.memory_kb, self.open_fds
+            self.process_id,
+            self.state,
+            self.name,
+            self.cpu_usage_pct,
+            self.memory_kb,
+            self.open_fds
         )
     }
 }
@@ -92,10 +97,7 @@ pub struct ProcessDiscovery {
 
 impl ProcessDiscovery {
     pub fn new(metadata_dir: impl Into<PathBuf>) -> Self {
-        Self {
-            metadata_dir: metadata_dir.into(),
-            recursive: true,
-        }
+        Self { metadata_dir: metadata_dir.into(), recursive: true }
     }
 
     pub fn with_recursive(mut self, recursive: bool) -> Self {
@@ -120,10 +122,7 @@ impl ProcessDiscovery {
     /// Discover processes matching a specific name pattern.
     pub fn discover_by_name(&self, name_pattern: &str) -> Result<Vec<ProcessRecord>, AetherError> {
         let all_processes = self.discover()?;
-        Ok(all_processes
-            .into_iter()
-            .filter(|p| p.name.contains(name_pattern))
-            .collect())
+        Ok(all_processes.into_iter().filter(|p| p.name.contains(name_pattern)).collect())
     }
 
     /// Discover processes running under a specific user.
@@ -133,7 +132,11 @@ impl ProcessDiscovery {
     }
 
     /// Discover processes with resource usage above threshold.
-    pub fn discover_high_resource(&self, cpu_threshold: f64, memory_threshold_kb: u64) -> Result<Vec<ProcessRecord>, AetherError> {
+    pub fn discover_high_resource(
+        &self,
+        cpu_threshold: f64,
+        memory_threshold_kb: u64,
+    ) -> Result<Vec<ProcessRecord>, AetherError> {
         let all_processes = self.discover()?;
         Ok(all_processes
             .into_iter()

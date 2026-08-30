@@ -79,18 +79,12 @@ pub struct ProcessSnapshot {
 
 impl ProcessSnapshot {
     pub fn new(captured_at_ms: u64) -> Self {
-        Self {
-            captured_at_ms,
-            processes: Vec::new(),
-        }
+        Self { captured_at_ms, processes: Vec::new() }
     }
 
     /// Captures a snapshot from discovered records.
     pub fn capture(records: &[ProcessRecord], captured_at_ms: u64) -> Self {
-        Self {
-            captured_at_ms,
-            processes: records.iter().map(ProcessInfo::from_record).collect(),
-        }
+        Self { captured_at_ms, processes: records.iter().map(ProcessInfo::from_record).collect() }
     }
 
     /// Look up a process by id.
@@ -100,19 +94,12 @@ impl ProcessSnapshot {
 
     /// Index of pid -> process id for fast parent-child walks.
     pub fn index_by_pid(&self) -> HashMap<u32, usize> {
-        self.processes
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (p.process_id, i))
-            .collect()
+        self.processes.iter().enumerate().map(|(i, p)| (p.process_id, i)).collect()
     }
 
     /// All children of the given parent id.
     pub fn children_of(&self, parent_id: u32) -> Vec<&ProcessInfo> {
-        self.processes
-            .iter()
-            .filter(|p| p.parent_id == parent_id)
-            .collect()
+        self.processes.iter().filter(|p| p.parent_id == parent_id).collect()
     }
 
     /// Resolves the ancestor chain of a process (nearest parent first).

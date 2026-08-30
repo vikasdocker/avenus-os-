@@ -97,10 +97,7 @@ mod tests {
 
     #[test]
     fn wait_while_running() {
-        assert_eq!(
-            decide(RestartPolicy::Always, true, 0, 3, None, None),
-            SupervisionAction::Wait
-        );
+        assert_eq!(decide(RestartPolicy::Always, true, 0, 3, None, None), SupervisionAction::Wait);
     }
 
     #[test]

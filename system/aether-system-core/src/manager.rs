@@ -36,10 +36,7 @@ pub struct InternalExecutor;
 
 impl ServiceExecutor for InternalExecutor {
     fn start(&mut self, _service_id: &str) -> Result<ServiceHandle, AetherError> {
-        Ok(ServiceHandle {
-            service_id: String::new(),
-            pid: 0,
-        })
+        Ok(ServiceHandle { service_id: String::new(), pid: 0 })
     }
 
     fn stop(&mut self, _handle: &ServiceHandle) -> Result<(), AetherError> {
@@ -82,10 +79,7 @@ impl ManagedService {
             pid: self.handle.as_ref().map(|h| h.pid),
             restarts: self.restarts,
             failures: self.failures,
-            uptime_ms: self
-                .started_at
-                .map(|t| t.elapsed().as_millis() as u64)
-                .unwrap_or(0),
+            uptime_ms: self.started_at.map(|t| t.elapsed().as_millis() as u64).unwrap_or(0),
         }
     }
 }
@@ -99,10 +93,8 @@ pub struct ServiceManager {
 impl ServiceManager {
     /// Builds a manager over a validated dependency graph.
     pub fn new(graph: DependencyGraph) -> Self {
-        let state = graph
-            .manifests()
-            .map(|m| (m.service_id.clone(), ManagedService::fresh()))
-            .collect();
+        let state =
+            graph.manifests().map(|m| (m.service_id.clone(), ManagedService::fresh())).collect();
         Self { graph, state }
     }
 
@@ -139,10 +131,8 @@ impl ServiceManager {
             .clone();
 
         for dependency in &manifest.dependencies {
-            let ready = self
-                .state
-                .get(dependency)
-                .is_some_and(|s| s.status == ServiceStatus::Running);
+            let ready =
+                self.state.get(dependency).is_some_and(|s| s.status == ServiceStatus::Running);
             if !ready {
                 return Err(AetherError::service_failed(
                     service_id,
@@ -194,10 +184,8 @@ impl ServiceManager {
         executor: &mut dyn ServiceExecutor,
         service_id: &str,
     ) -> Result<(), AetherError> {
-        let record = self
-            .state
-            .get_mut(service_id)
-            .ok_or_else(|| AetherError::not_found(service_id))?;
+        let record =
+            self.state.get_mut(service_id).ok_or_else(|| AetherError::not_found(service_id))?;
         if let Some(handle) = record.handle.take() {
             executor.stop(&handle)?;
         }
@@ -303,30 +291,25 @@ impl ServiceManager {
         aether_core::types::SystemStatus {
             uptime_ms: 0,
             services,
-            overall_health: if healthy {
-                HealthStatus::Healthy
-            } else {
-                HealthStatus::Degraded
-            },
+            overall_health: if healthy { HealthStatus::Healthy } else { HealthStatus::Degraded },
         }
     }
 }
 
 /// Builds a manager from manifests in one step, mapping graph errors into
 /// the shared error type.
-pub fn build_manager(manifests: &[aether_core::manifest::ServiceManifest]) -> Result<ServiceManager, AetherError> {
-    let graph = DependencyGraph::new(manifests).map_err(|err: GraphError| {
-        AetherError::new(ErrorKind::InvalidInput, err.to_string())
-    })?;
+pub fn build_manager(
+    manifests: &[aether_core::manifest::ServiceManifest],
+) -> Result<ServiceManager, AetherError> {
+    let graph = DependencyGraph::new(manifests)
+        .map_err(|err: GraphError| AetherError::new(ErrorKind::InvalidInput, err.to_string()))?;
     Ok(ServiceManager::new(graph))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aether_core::manifest::{
-        IpcAccessMode, PermissionProfile, SandboxProfile, ServiceType,
-    };
+    use aether_core::manifest::{IpcAccessMode, PermissionProfile, SandboxProfile, ServiceType};
     use std::cell::RefCell;
 
     fn manifest(id: &str, deps: &[&str]) -> aether_core::manifest::ServiceManifest {
@@ -368,20 +351,14 @@ mod tests {
 
     impl FlakyExecutor {
         fn new() -> Self {
-            Self {
-                unhealthy: RefCell::new(Vec::new()),
-                next_pid: 100,
-            }
+            Self { unhealthy: RefCell::new(Vec::new()), next_pid: 100 }
         }
     }
 
     impl ServiceExecutor for FlakyExecutor {
         fn start(&mut self, _service_id: &str) -> Result<ServiceHandle, AetherError> {
             self.next_pid += 1;
-            Ok(ServiceHandle {
-                service_id: _service_id.to_string(),
-                pid: self.next_pid,
-            })
+            Ok(ServiceHandle { service_id: _service_id.to_string(), pid: self.next_pid })
         }
 
         fn stop(&mut self, _handle: &ServiceHandle) -> Result<(), AetherError> {
@@ -399,10 +376,7 @@ mod tests {
 
     #[test]
     fn start_stop_full_cycle_in_dependency_order() {
-        let manifests = vec![
-            manifest("top", &["base"]),
-            manifest("base", &[]),
-        ];
+        let manifests = vec![manifest("top", &["base"]), manifest("base", &[])];
         let mut manager = build_manager(&manifests).unwrap_or_else(|e| panic!("{e}"));
         let mut executor = FlakyExecutor::new();
         manager.start_all(&mut executor).unwrap_or_else(|e| panic!("{e}"));
@@ -421,10 +395,7 @@ mod tests {
 
     #[test]
     fn start_fails_when_dependency_not_running() {
-        let manifests = vec![
-            manifest("top", &["base"]),
-            manifest("base", &[]),
-        ];
+        let manifests = vec![manifest("top", &["base"]), manifest("base", &[])];
         let mut manager = build_manager(&manifests).unwrap_or_else(|e| panic!("{e}"));
         let mut executor = FlakyExecutor::new();
         match manager.start_one(&mut executor, "top") {
@@ -442,16 +413,10 @@ mod tests {
         let mut executor = FlakyExecutor::new();
         manager.start_all(&mut executor).unwrap_or_else(|e| panic!("{e}"));
 
-        assert!(manager
-            .handle_failure(&mut executor, "svc")
-            .unwrap_or_else(|e| panic!("{e}")));
-        assert!(manager
-            .handle_failure(&mut executor, "svc")
-            .unwrap_or_else(|e| panic!("{e}")));
+        assert!(manager.handle_failure(&mut executor, "svc").unwrap_or_else(|e| panic!("{e}")));
+        assert!(manager.handle_failure(&mut executor, "svc").unwrap_or_else(|e| panic!("{e}")));
         // Limit reached: no more restarts.
-        assert!(!manager
-            .handle_failure(&mut executor, "svc")
-            .unwrap_or_else(|e| panic!("{e}")));
+        assert!(!manager.handle_failure(&mut executor, "svc").unwrap_or_else(|e| panic!("{e}")));
         let report = &manager.system_status().services[0];
         assert_eq!(report.failures, 3);
         assert_eq!(report.status, ServiceStatus::Failed);

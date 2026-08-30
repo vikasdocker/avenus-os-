@@ -590,8 +590,8 @@ the path to sustained 60 FPS.
 
 ### Phase 2 — Aether Agent Core
 
-**Status:** `IN_PROGRESS` (most building blocks present; end-to-end wiring
-inside `aether-agentd` is the open milestone).
+**Status:** `IN_PROGRESS` (all sub-phases 2.1–2.9 shipped; end-to-end
+wiring inside `aether-agentd` is the open milestone).
 
 **Objective:** Establish the actual OS agent.
 
@@ -864,18 +864,45 @@ defined; current behavior is fail-and-report.
 
 #### 2.9 Agent Memory Foundation
 
-**Status:** `IN_PROGRESS`.
+**Status:** `COMPLETE`.
 
 `ConversationMemory` + `SessionMemory` exist as runtime types. The daemon
-also has `ConversationContext` for pronoun resolution. **No persistent
-long-term memory yet.**
+also has `ConversationContext` for pronoun resolution. Three persistence
+surfaces survive `aether-agentd` restarts:
+
+- `conversation` — last-mentioned app/window/file and the bounded turn
+  ring, so pronoun resolution works across sessions.
+- `working` — the daemon's free-form working memory, exposed to the
+  user via `agent.memory.set / get / show / delete` and persisted on
+  explicit `agent.memory.flush` and at shutdown.
+- `audit_recent` — the most recent 256 `AuditEntry` records, restored
+  on startup so the audit view picks up where the previous daemon left
+  off.
+
+Persistence goes through a `MemoryStore` trait with two implementations:
+
+- `FileMemoryStore` (default) — writes to
+  `<AETHER_WORKSPACE>/aether-agent/<name>` with atomic `.tmp` → rename,
+  256 KiB per-file cap, path-traversal-safe name validation.
+- `InMemoryStore` (fallback) — used when `AETHER_MEMORY_BACKEND=in-memory`
+  is set, or when no `AETHER_WORKSPACE` is available. The daemon
+  never panics on a missing store; it stays alive and reports
+  `PersistenceOutcome::Missing` for that surface.
+
+Each blob is wrapped in a `Persisted<T>` envelope (version, saved-at
+timestamp, FNV-1a content checksum). Version drift is rejected on
+read; a mismatched hash is surfaced as `MemoryStoreError::Corrupt` and
+the daemon keeps its in-memory defaults so a corrupt file never
+crashes the agent.
 
 **Dependencies:** Phase 1.3 (system core), Phase 1.5 (storage), Phase 1.9
 (graphical surface).
 
 **Security requirements:** every agent action is capability-checked, audited,
 and (for Medium+ risk) requires consent. The agent must never be the source of
-truth for the OS; services are.
+truth for the OS; services are. The new `agent.memory.write` capability is
+in the default capability set so the working-memory IPC commands are
+auditable like every other agent capability.
 
 **Performance requirements:** agent round-trip (intent → plan → action →
 observation) must remain interactive (< 1 s for simple actions in QEMU).
@@ -893,12 +920,14 @@ schema-enforced; runtime is not embedded inside `aether-agentd`.
 - [x] Bounded recovery semantics are enforced (Phase 2.7). The runtime
       exposes `RecoveryPolicy`, `FailureKind`, `decide_recovery`,
       and the daemon's planner uses the same source of truth.
-- [ ] Memory persists across session restart.
+- [x] Memory persists across session restart. ← **DONE in 2.9** (file
+      store under `AETHER_WORKSPACE`, atomic writes, version + checksum
+      envelope, 256 KiB per-file cap, `in-memory` fallback for CI).
 - [x] End-to-end demo: user text → agentd → intent → plan → action via IPC →
       service → observation → agentd → response → UI. ←
       **DONE in 2.4** (`e2e_open_test_application_through_runtime`)
 - [x] All agent tests pass (`cargo test -p aether-agent-runtime`,
-      `cargo test -p aether-agentd`). ← 71 + 124 = 195 tests passing.
+      `cargo test -p aether-agentd`). ← 200 + 160 = 360 tests passing.
 
 ---
 

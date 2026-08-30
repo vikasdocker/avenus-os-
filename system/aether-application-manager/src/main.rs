@@ -14,14 +14,8 @@ fn main() {
             if let Some(apps) = doc.get("apps").and_then(|a| a.as_array()) {
                 for app in apps {
                     let id = app.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-                    let name = app
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let command = app
-                        .get("command")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
+                    let name = app.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+                    let command = app.get("command").and_then(|v| v.as_str()).unwrap_or_default();
                     if let Err(e) = manager.register_json(id, name, command) {
                         eprintln!("[app-manager] seed rejected '{id}': {e}");
                     }
@@ -30,10 +24,7 @@ fn main() {
         }
     }
 
-    eprintln!(
-        "[app-manager] ready; {} apps registered",
-        manager.registered_count()
-    );
+    eprintln!("[app-manager] ready; {} apps registered", manager.registered_count());
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -56,7 +47,9 @@ fn main() {
                                     "version": d.version, "command": d.command,
                                     "permissions": d.permissions },
                     }),
-                    None => serde_json::json!({ "ok": false, "error": format!("unknown app '{id}'") }),
+                    None => {
+                        serde_json::json!({ "ok": false, "error": format!("unknown app '{id}'") })
+                    }
                 }
             }
             (Some("launch"), Some(id), None) => match manager.launch(id) {

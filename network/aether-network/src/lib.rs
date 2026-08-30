@@ -182,11 +182,7 @@ pub struct DnsConfig {
 
 impl DnsConfig {
     pub fn empty() -> Self {
-        Self {
-            nameservers: Vec::new(),
-            search_domains: Vec::new(),
-            source: "empty".to_string(),
-        }
+        Self { nameservers: Vec::new(), search_domains: Vec::new(), source: "empty".to_string() }
     }
 }
 
@@ -282,9 +278,7 @@ pub struct NetworkStatus {
 
 // --------------------------------------------------------------- re-exports
 
-pub use manager::{
-    select_backend, NetworkBackend, NetworkManager, StubBackend, StubSeed,
-};
+pub use manager::{select_backend, NetworkBackend, NetworkManager, StubBackend, StubSeed};
 
 #[cfg(test)]
 mod tests {
@@ -405,14 +399,8 @@ mod tests {
 
     #[test]
     fn event_label_is_stable() {
-        assert_eq!(
-            Event::LinkUp("eth0".to_string()).label(),
-            "link.up"
-        );
-        assert_eq!(
-            Event::LinkDown("eth0".to_string()).label(),
-            "link.down"
-        );
+        assert_eq!(Event::LinkUp("eth0".to_string()).label(), "link.up");
+        assert_eq!(Event::LinkDown("eth0".to_string()).label(), "link.down");
         assert_eq!(Event::DnsChanged.label(), "dns.changed");
     }
 

@@ -134,7 +134,9 @@ impl GraphicsError {
             Self::InvalidParameter(_) | Self::Configuration(_) | Self::Mode(_) => {
                 ErrorKind::InvalidInput
             }
-            Self::Timeout(_) | Self::GpuUnavailable | Self::DrmUnavailable
+            Self::Timeout(_)
+            | Self::GpuUnavailable
+            | Self::DrmUnavailable
             | Self::InputBackendUnavailable => ErrorKind::ResourceExhausted,
             _ => ErrorKind::ServiceFailed,
         }

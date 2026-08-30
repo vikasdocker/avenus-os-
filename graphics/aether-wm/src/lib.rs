@@ -63,12 +63,7 @@ impl Window {
         const TITLE_H: u32 = 28;
         match self.state {
             WindowState::Minimized => (0, 0, 0, 0),
-            _ => (
-                self.x,
-                self.y + TITLE_H as i32,
-                self.width,
-                self.height.saturating_sub(TITLE_H),
-            ),
+            _ => (self.x, self.y + TITLE_H as i32, self.width, self.height.saturating_sub(TITLE_H)),
         }
     }
 }
@@ -131,20 +126,8 @@ pub struct WindowManager {
 impl WindowManager {
     pub fn new(area: ScreenArea) -> Self {
         let mut workspaces = BTreeMap::new();
-        workspaces.insert(
-            0,
-            Workspace {
-                id: 0,
-                name: "Desktop".to_string(),
-                windows: Vec::new(),
-            },
-        );
-        Self {
-            area: Some(area),
-            active_workspace: 0,
-            workspaces,
-            ..Default::default()
-        }
+        workspaces.insert(0, Workspace { id: 0, name: "Desktop".to_string(), windows: Vec::new() });
+        Self { area: Some(area), active_workspace: 0, workspaces, ..Default::default() }
     }
 
     /// CREATE: registers a window, auto-tiled into the next free slot and
@@ -207,8 +190,7 @@ impl WindowManager {
             ws.windows.push(id);
         }
 
-        self.events
-            .push(WindowEvent::WindowCreated { id, app_id: app_id.to_string() });
+        self.events.push(WindowEvent::WindowCreated { id, app_id: app_id.to_string() });
         Some(window)
     }
 
@@ -248,11 +230,7 @@ impl WindowManager {
                 let w = self.windows.get_mut(&id)?;
                 w.width = width.max(120);
                 w.height = height.max(80);
-                self.events.push(WindowEvent::WindowResized {
-                    id,
-                    w: w.width,
-                    h: w.height,
-                });
+                self.events.push(WindowEvent::WindowResized { id, w: w.width, h: w.height });
                 self.windows.get(&id).cloned()
             }
             WindowAction::Minimize(id) => {
@@ -430,15 +408,8 @@ impl WindowManager {
     /// Creates a new workspace. Returns the new workspace ID.
     pub fn create_workspace(&mut self, name: &str) -> Option<u32> {
         let next_id = self.workspaces.keys().max().map_or(1, |k| k + 1);
-        let ws = Workspace {
-            id: next_id,
-            name: name.to_string(),
-            windows: Vec::new(),
-        };
-        self.events.push(WindowEvent::WorkspaceCreated {
-            id: next_id,
-            name: name.to_string(),
-        });
+        let ws = Workspace { id: next_id, name: name.to_string(), windows: Vec::new() };
+        self.events.push(WindowEvent::WorkspaceCreated { id: next_id, name: name.to_string() });
         self.workspaces.insert(next_id, ws);
         Some(next_id)
     }
@@ -515,10 +486,7 @@ impl WindowManager {
 
     /// Returns windows belonging to a specific workspace.
     pub fn windows_in_workspace(&self, ws_id: u32) -> Vec<&Window> {
-        self.windows
-            .values()
-            .filter(|w| w.workspace_id == ws_id)
-            .collect()
+        self.windows.values().filter(|w| w.workspace_id == ws_id).collect()
     }
 
     /// Assigns a window to a different workspace.

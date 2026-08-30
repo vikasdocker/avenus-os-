@@ -11,8 +11,8 @@
 // running in stripped-down QEMU images.
 
 use crate::{
-    Address, AddressFamily, DnsConfig, Event, Interface,
-    InterfaceKind, InterfaceState, InterfaceStats, NetworkBackend, NetworkError, Route,
+    Address, AddressFamily, DnsConfig, Event, Interface, InterfaceKind, InterfaceState,
+    InterfaceStats, NetworkBackend, NetworkError, Route,
 };
 
 /// Real backend. Holds the root directory it should read from so
@@ -23,18 +23,14 @@ pub struct ProcBackend {
 
 impl ProcBackend {
     pub fn new() -> Self {
-        Self {
-            root: "/proc".to_string(),
-        }
+        Self { root: "/proc".to_string() }
     }
 
     /// Constructor for tests: a backend that reads from `root`
     /// instead of `/proc`. Resolv.conf is also rooted at `<root>/etc`.
     #[cfg(test)]
     pub fn with_root(root: &str) -> Self {
-        Self {
-            root: root.to_string(),
-        }
+        Self { root: root.to_string() }
     }
 
     fn read(&self, rel: &str) -> Result<String, NetworkError> {
@@ -171,19 +167,14 @@ impl ProcBackend {
                     nameservers.push(ns.to_string());
                 }
             } else if let Some(rest) = line.strip_prefix("search") {
-                search_domains
-                    .extend(rest.split_whitespace().map(|s| s.to_string()));
+                search_domains.extend(rest.split_whitespace().map(|s| s.to_string()));
             } else if let Some(rest) = line.strip_prefix("domain") {
                 if let Some(d) = rest.split_whitespace().next() {
                     search_domains.push(d.to_string());
                 }
             }
         }
-        DnsConfig {
-            nameservers,
-            search_domains,
-            source: "resolv.conf".to_string(),
-        }
+        DnsConfig { nameservers, search_domains, source: "resolv.conf".to_string() }
     }
 }
 
@@ -302,10 +293,7 @@ impl NetworkBackend for ProcBackend {
 
     fn load_stats(&self) -> Result<Vec<InterfaceStats>, NetworkError> {
         let content = self.read("net/dev")?;
-        Ok(Self::parse_proc_net_dev(&content)
-            .into_iter()
-            .map(|(_, s)| s)
-            .collect())
+        Ok(Self::parse_proc_net_dev(&content).into_iter().map(|(_, s)| s).collect())
     }
 
     fn load_events(&self) -> Result<Vec<Event>, NetworkError> {
@@ -418,10 +406,8 @@ domain aether.local
             format!("{root}/net/dev"),
             "Inter-|   Receive\n lo: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n eth0: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
         ).unwrap_or_else(|e| panic!("{e}"));
-        fs::write(
-            format!("{root}/etc/resolv.conf"),
-            "nameserver 8.8.8.8\nsearch test\n",
-        ).unwrap_or_else(|e| panic!("{e}"));
+        fs::write(format!("{root}/etc/resolv.conf"), "nameserver 8.8.8.8\nsearch test\n")
+            .unwrap_or_else(|e| panic!("{e}"));
 
         let be = ProcBackend::with_root(root);
         let ifs = be.load_interfaces().unwrap_or_else(|e| panic!("{e}"));

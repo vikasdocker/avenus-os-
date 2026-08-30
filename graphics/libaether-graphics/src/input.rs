@@ -116,8 +116,7 @@ mod tests {
     #[test]
     fn events_dispatch_in_order() {
         let mut im = InputManager::new();
-        im.push_event(InputEvent::MouseMove { x: 1.0, y: 2.0 })
-            .unwrap_or_else(|e| panic!("{e}"));
+        im.push_event(InputEvent::MouseMove { x: 1.0, y: 2.0 }).unwrap_or_else(|e| panic!("{e}"));
         im.synthesize_click().unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(im.poll_event(), Some(InputEvent::MouseMove { x: 1.0, y: 2.0 }));
         assert_eq!(
@@ -133,12 +132,7 @@ mod tests {
     #[test]
     fn non_finite_move_rejected() {
         let mut im = InputManager::new();
-        assert!(im
-            .push_event(InputEvent::MouseMove {
-                x: f32::NAN,
-                y: 0.0
-            })
-            .is_err());
+        assert!(im.push_event(InputEvent::MouseMove { x: f32::NAN, y: 0.0 }).is_err());
     }
 
     #[test]

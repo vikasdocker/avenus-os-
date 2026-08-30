@@ -8,11 +8,9 @@ use aether_application_manager::ApplicationManager;
 use aether_core::error::ErrorKind;
 use aether_core::ipc::{IpcError, IpcRequest, IpcResponse};
 use aether_core::types::ServiceStatus;
-use aether_storage::{FileManager, WorkspaceConfig};
 use aether_storage::system_info;
-use aether_system_core::{
-    build_manager, load_manifests_from_dir, ServiceExecutor, ServiceHandle,
-};
+use aether_storage::{FileManager, WorkspaceConfig};
+use aether_system_core::{build_manager, load_manifests_from_dir, ServiceExecutor, ServiceHandle};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,10 +26,7 @@ const SEED_APPS: &[(&str, &str, &str, &str)] = &[
 ];
 
 fn unix_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0)
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
 }
 
 /// Structured audit line for every capability request dispatched here.
@@ -54,7 +49,10 @@ struct LocalExecutor {
 }
 
 impl ServiceExecutor for LocalExecutor {
-    fn start(&mut self, service_id: &str) -> Result<ServiceHandle, aether_core::error::AetherError> {
+    fn start(
+        &mut self,
+        service_id: &str,
+    ) -> Result<ServiceHandle, aether_core::error::AetherError> {
         let pid = self.next_pid.fetch_add(1, Ordering::SeqCst) + 1000;
         eprintln!("[system-core] started '{service_id}' (pid {pid})");
         Ok(ServiceHandle {
@@ -77,10 +75,7 @@ impl ServiceExecutor for LocalExecutor {
 }
 
 fn surface_port() -> u16 {
-    std::env::var("AETHER_SURFACE_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(4750)
+    std::env::var("AETHER_SURFACE_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(4750)
 }
 
 fn surface_call(req: serde_json::Value) -> Result<serde_json::Value, String> {
@@ -90,13 +85,9 @@ fn surface_call(req: serde_json::Value) -> Result<serde_json::Value, String> {
         .map_err(|e| format!("surface :{port} {e}"))?;
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
     let payload = serde_json::to_string(&req).map_err(|e| format!("encode {e}"))?;
-    stream
-        .write_all(format!("{payload}\n").as_bytes())
-        .map_err(|e| format!("send {e}"))?;
+    stream.write_all(format!("{payload}\n").as_bytes()).map_err(|e| format!("send {e}"))?;
     let mut line = String::new();
-    BufReader::new(stream)
-        .read_line(&mut line)
-        .map_err(|e| format!("recv {e}"))?;
+    BufReader::new(stream).read_line(&mut line).map_err(|e| format!("recv {e}"))?;
     if line.trim().is_empty() {
         return Err("empty surface response".to_string());
     }
@@ -191,6 +182,8 @@ fn dispatch(
         || req.command.starts_with("window.")
         || req.command.starts_with("file.")
         || req.command.starts_with("system.")
+        || req.command.starts_with("process.")
+        || req.command.starts_with("storage.")
         || req.command == "context.get";
     let started_ok = true;
     let response = dispatch_inner(manager, apps, files, started_at, req);
@@ -202,12 +195,7 @@ fn dispatch(
                 obj.insert("content".to_string(), serde_json::json!("[REDACTED]"));
             }
         }
-        audit(
-            &req.command,
-            &sanitized,
-            &req.service_id,
-            started_ok && response.ok,
-        );
+        audit(&req.command, &sanitized, &req.service_id, started_ok && response.ok);
     }
     response
 }
@@ -227,10 +215,7 @@ fn dispatch_inner(
                 Err(e) => {
                     return IpcResponse::err(
                         &req.command,
-                        IpcError {
-                            code: "INTERNAL".to_string(),
-                            message: e.to_string(),
-                        },
+                        IpcError { code: "INTERNAL".to_string(), message: e.to_string() },
                     )
                 }
             };
@@ -273,13 +258,9 @@ fn dispatch_inner(
                 .graph()
                 .manifest(service_id)
                 .map(|m| {
-                    m.dependencies.iter().all(|d| {
-                        manager
-                            .graph()
-                            .manifest(d)
-                            .map(|_| true)
-                            .unwrap_or(false)
-                    })
+                    m.dependencies
+                        .iter()
+                        .all(|d| manager.graph().manifest(d).map(|_| true).unwrap_or(false))
                 })
                 .unwrap_or(false);
             if !deps_ok && manager.graph().manifest(service_id).is_none() {
@@ -343,10 +324,7 @@ fn dispatch_inner(
                 ),
                 Err(e) => IpcResponse::err(
                     "app.launch",
-                    IpcError {
-                        code: "APP_ERROR".to_string(),
-                        message: e.to_string(),
-                    },
+                    IpcError { code: "APP_ERROR".to_string(), message: e.to_string() },
                 ),
             },
             None => IpcResponse::err(
@@ -361,11 +339,8 @@ fn dispatch_inner(
             // Close by application name (closes its RUNNING instance) or by
             // explicit instance id.
             if let Some(app_id) = req.parameters.get("app").and_then(|v| v.as_str()) {
-                let target = apps
-                    .running()
-                    .into_iter()
-                    .find(|i| i.app_id == app_id)
-                    .map(|i| i.instance_id);
+                let target =
+                    apps.running().into_iter().find(|i| i.app_id == app_id).map(|i| i.instance_id);
                 match target {
                     Some(instance) => match apps.close(instance) {
                         Ok(closed) => {
@@ -409,18 +384,13 @@ fn dispatch_inner(
             let ctx = build_context_snapshot(manager, apps);
             IpcResponse::ok("context.get", ctx)
         }
-        "window.list" => {
-            match surface_call(serde_json::json!({ "op": "window.list" })) {
-                Ok(v) => IpcResponse::ok("window.list", v),
-                Err(e) => IpcResponse::err(
-                    "window.list",
-                    IpcError {
-                        code: "SURFACE_UNAVAILABLE".to_string(),
-                        message: e,
-                    },
-                ),
-            }
-        }
+        "window.list" => match surface_call(serde_json::json!({ "op": "window.list" })) {
+            Ok(v) => IpcResponse::ok("window.list", v),
+            Err(e) => IpcResponse::err(
+                "window.list",
+                IpcError { code: "SURFACE_UNAVAILABLE".to_string(), message: e },
+            ),
+        },
         "window.focus" => {
             let app = req.parameters.get("app").and_then(|v| v.as_str());
             let wid = req.parameters.get("window_id").and_then(|v| v.as_u64());
@@ -435,7 +405,8 @@ fn dispatch_inner(
                         for w in arr {
                             let a = w["app"].as_str().unwrap_or("").to_ascii_lowercase();
                             let t = w["title"].as_str().unwrap_or("").to_ascii_lowercase();
-                            if a == app_id.to_ascii_lowercase() || t == app_id.to_ascii_lowercase() {
+                            if a == app_id.to_ascii_lowercase() || t == app_id.to_ascii_lowercase()
+                            {
                                 found = w["id"].as_u64();
                                 break;
                             }
@@ -482,10 +453,7 @@ fn dispatch_inner(
                 Ok(v) => IpcResponse::ok("window.focus", v),
                 Err(e) => IpcResponse::err(
                     "window.focus",
-                    IpcError {
-                        code: "SURFACE_ERROR".to_string(),
-                        message: e,
-                    },
+                    IpcError { code: "SURFACE_ERROR".to_string(), message: e },
                 ),
             }
         }
@@ -503,7 +471,8 @@ fn dispatch_inner(
                         for w in arr {
                             let a = w["app"].as_str().unwrap_or("").to_ascii_lowercase();
                             let t = w["title"].as_str().unwrap_or("").to_ascii_lowercase();
-                            if a == app_id.to_ascii_lowercase() || t == app_id.to_ascii_lowercase() {
+                            if a == app_id.to_ascii_lowercase() || t == app_id.to_ascii_lowercase()
+                            {
                                 found = w["id"].as_u64();
                                 break;
                             }
@@ -542,10 +511,7 @@ fn dispatch_inner(
                 Ok(v) => IpcResponse::ok("window.minimize", v),
                 Err(e) => IpcResponse::err(
                     "window.minimize",
-                    IpcError {
-                        code: "SURFACE_ERROR".to_string(),
-                        message: e,
-                    },
+                    IpcError { code: "SURFACE_ERROR".to_string(), message: e },
                 ),
             }
         }
@@ -562,7 +528,8 @@ fn dispatch_inner(
                         for w in arr {
                             let a = w["app"].as_str().unwrap_or("").to_ascii_lowercase();
                             let t = w["title"].as_str().unwrap_or("").to_ascii_lowercase();
-                            if a == app_id.to_ascii_lowercase() || t == app_id.to_ascii_lowercase() {
+                            if a == app_id.to_ascii_lowercase() || t == app_id.to_ascii_lowercase()
+                            {
                                 found = w["id"].as_u64();
                                 break;
                             }
@@ -601,10 +568,7 @@ fn dispatch_inner(
                 Ok(v) => IpcResponse::ok("window.maximize", v),
                 Err(e) => IpcResponse::err(
                     "window.maximize",
-                    IpcError {
-                        code: "SURFACE_ERROR".to_string(),
-                        message: e,
-                    },
+                    IpcError { code: "SURFACE_ERROR".to_string(), message: e },
                 ),
             }
         }
@@ -628,10 +592,7 @@ fn dispatch_inner(
                 Ok(v) => IpcResponse::ok("window.close", v),
                 Err(e) => IpcResponse::err(
                     "window.close",
-                    IpcError {
-                        code: "SURFACE_ERROR".to_string(),
-                        message: e,
-                    },
+                    IpcError { code: "SURFACE_ERROR".to_string(), message: e },
                 ),
             }
         }
@@ -680,10 +641,7 @@ fn dispatch_inner(
                 Ok(v) => IpcResponse::ok("window.restore", v),
                 Err(e) => IpcResponse::err(
                     "window.restore",
-                    IpcError {
-                        code: "SURFACE_ERROR".to_string(),
-                        message: e,
-                    },
+                    IpcError { code: "SURFACE_ERROR".to_string(), message: e },
                 ),
             }
         }
@@ -693,16 +651,28 @@ fn dispatch_inner(
             match files.list(path) {
                 Ok(entries) => {
                     // Return structured metadata limited to useful fields
-                    IpcResponse::ok("file.list", serde_json::json!({ "path": path, "files": entries }))
+                    IpcResponse::ok(
+                        "file.list",
+                        serde_json::json!({ "path": path, "files": entries }),
+                    )
                 }
-                Err(e) => IpcResponse::err("file.list", IpcError { code: e.code.to_string(), message: e.message }),
+                Err(e) => IpcResponse::err(
+                    "file.list",
+                    IpcError { code: e.code.to_string(), message: e.message },
+                ),
             }
         }
         "file.search" => {
             let query = req.parameters.get("query").and_then(|v| v.as_str()).unwrap_or("");
             match files.search(query) {
-                Ok(results) => IpcResponse::ok("file.search", serde_json::json!({ "query": query, "results": results })),
-                Err(e) => IpcResponse::err("file.search", IpcError { code: e.code.to_string(), message: e.message }),
+                Ok(results) => IpcResponse::ok(
+                    "file.search",
+                    serde_json::json!({ "query": query, "results": results }),
+                ),
+                Err(e) => IpcResponse::err(
+                    "file.search",
+                    IpcError { code: e.code.to_string(), message: e.message },
+                ),
             }
         }
         "file.read" => {
@@ -710,22 +680,43 @@ fn dispatch_inner(
             match files.read(path) {
                 Ok(content) => {
                     let size = content.len() as u64;
-                    IpcResponse::ok("file.read", serde_json::json!({ "path": path, "content": content, "size": size }))
+                    IpcResponse::ok(
+                        "file.read",
+                        serde_json::json!({ "path": path, "content": content, "size": size }),
+                    )
                 }
-                Err(e) => IpcResponse::err("file.read", IpcError { code: e.code.to_string(), message: e.message }),
+                Err(e) => IpcResponse::err(
+                    "file.read",
+                    IpcError { code: e.code.to_string(), message: e.message },
+                ),
             }
         }
         "file.create" => {
             let path = req.parameters.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let content = req.parameters.get("content").and_then(|v| v.as_str()).unwrap_or("");
             match files.create(path, content) {
-                Ok((rel, bytes)) => IpcResponse::ok("file.create", serde_json::json!({ "path": rel, "bytes_written": bytes })),
+                Ok((rel, bytes)) => IpcResponse::ok(
+                    "file.create",
+                    serde_json::json!({ "path": rel, "bytes_written": bytes }),
+                ),
                 Err(e) => {
                     // Map already exists to requires confirmation for overwrite scenario
                     if e.code == ErrorKind::InvalidInput && e.message.contains("already exists") {
-                        IpcResponse::err("file.create", IpcError { code: "REQUIRES_CONFIRMATION".to_string(), message: format!("{} already exists; overwrite requires confirmation", path) })
+                        IpcResponse::err(
+                            "file.create",
+                            IpcError {
+                                code: "REQUIRES_CONFIRMATION".to_string(),
+                                message: format!(
+                                    "{} already exists; overwrite requires confirmation",
+                                    path
+                                ),
+                            },
+                        )
                     } else {
-                        IpcResponse::err("file.create", IpcError { code: e.code.to_string(), message: e.message })
+                        IpcResponse::err(
+                            "file.create",
+                            IpcError { code: e.code.to_string(), message: e.message },
+                        )
                     }
                 }
             }
@@ -735,20 +726,37 @@ fn dispatch_inner(
             let content = req.parameters.get("content").and_then(|v| v.as_str()).unwrap_or("");
             // For this phase, writing to existing file auto-executes; future could require confirmation
             match files.write(path, content) {
-                Ok((rel, bytes)) => IpcResponse::ok("file.write", serde_json::json!({ "path": rel, "bytes_written": bytes })),
-                Err(e) => IpcResponse::err("file.write", IpcError { code: e.code.to_string(), message: e.message }),
+                Ok((rel, bytes)) => IpcResponse::ok(
+                    "file.write",
+                    serde_json::json!({ "path": rel, "bytes_written": bytes }),
+                ),
+                Err(e) => IpcResponse::err(
+                    "file.write",
+                    IpcError { code: e.code.to_string(), message: e.message },
+                ),
             }
         }
         "file.rename" => {
             let from = req.parameters.get("from").and_then(|v| v.as_str()).unwrap_or("");
             let to = req.parameters.get("to").and_then(|v| v.as_str()).unwrap_or("");
             match files.rename(from, to) {
-                Ok(rel) => IpcResponse::ok("file.rename", serde_json::json!({ "from": from, "to": rel })),
+                Ok(rel) => {
+                    IpcResponse::ok("file.rename", serde_json::json!({ "from": from, "to": rel }))
+                }
                 Err(e) => {
                     if e.code == ErrorKind::InvalidInput && e.message.contains("already exists") {
-                        IpcResponse::err("file.rename", IpcError { code: "REQUIRES_CONFIRMATION".to_string(), message: e.message })
+                        IpcResponse::err(
+                            "file.rename",
+                            IpcError {
+                                code: "REQUIRES_CONFIRMATION".to_string(),
+                                message: e.message,
+                            },
+                        )
                     } else {
-                        IpcResponse::err("file.rename", IpcError { code: e.code.to_string(), message: e.message })
+                        IpcResponse::err(
+                            "file.rename",
+                            IpcError { code: e.code.to_string(), message: e.message },
+                        )
                     }
                 }
             }
@@ -757,22 +765,41 @@ fn dispatch_inner(
             let from = req.parameters.get("from").and_then(|v| v.as_str()).unwrap_or("");
             let to = req.parameters.get("to").and_then(|v| v.as_str()).unwrap_or("");
             match files.move_file(from, to) {
-                Ok(rel) => IpcResponse::ok("file.move", serde_json::json!({ "from": from, "to": rel })),
+                Ok(rel) => {
+                    IpcResponse::ok("file.move", serde_json::json!({ "from": from, "to": rel }))
+                }
                 Err(e) => {
                     if e.code == ErrorKind::InvalidInput && e.message.contains("already exists") {
-                        IpcResponse::err("file.move", IpcError { code: "REQUIRES_CONFIRMATION".to_string(), message: e.message })
+                        IpcResponse::err(
+                            "file.move",
+                            IpcError {
+                                code: "REQUIRES_CONFIRMATION".to_string(),
+                                message: e.message,
+                            },
+                        )
                     } else {
-                        IpcResponse::err("file.move", IpcError { code: e.code.to_string(), message: e.message })
+                        IpcResponse::err(
+                            "file.move",
+                            IpcError { code: e.code.to_string(), message: e.message },
+                        )
                     }
                 }
             }
         }
         "file.delete" => {
             // Not implemented unrestricted; require confirmation
-            IpcResponse::err("file.delete", IpcError { code: "REQUIRES_CONFIRMATION".to_string(), message: "delete requires explicit user confirmation".to_string() })
+            IpcResponse::err(
+                "file.delete",
+                IpcError {
+                    code: "REQUIRES_CONFIRMATION".to_string(),
+                    message: "delete requires explicit user confirmation".to_string(),
+                },
+            )
         }
         "system.info" => {
-            let services_val = serde_json::to_value(manager.system_status()).ok().and_then(|v| v.get("services").cloned());
+            let services_val = serde_json::to_value(manager.system_status())
+                .ok()
+                .and_then(|v| v.get("services").cloned());
             let info = system_info::system_info(services_val);
             IpcResponse::ok("system.info", info)
         }
@@ -783,6 +810,100 @@ fn dispatch_inner(
         "system.uptime" => {
             let up = system_info::system_uptime(Some(started_at));
             IpcResponse::ok("system.uptime", up)
+        }
+        "storage.status" => {
+            // Surface the storage workspace as a high-level report
+            // (root, sandboxed, configured limits, file counts).
+            let root = files.workspace_root();
+            let root_str = root.to_string_lossy().to_string();
+            // Count the entries under root (bounded to a sensible
+            // cap so a runaway directory cannot stall the request).
+            let entry_count = std::fs::read_dir(root).map(|it| it.flatten().count()).unwrap_or(0);
+            let sandboxed = root_str.contains("/workspace") || root_str.contains("workspace");
+            IpcResponse::ok(
+                "storage.status",
+                serde_json::json!({
+                    "workspace_root": root_str,
+                    "sandboxed": sandboxed,
+                    "entry_count": entry_count,
+                    "status": "HEALTHY",
+                }),
+            )
+        }
+        "process.list" => {
+            // Lightweight /proc-based process listing, bounded to
+            // keep responses compact. Each entry includes pid and
+            // comm only — never the full cmdline which may contain
+            // sensitive material.
+            let mut processes = Vec::new();
+            if let Ok(entries) = std::fs::read_dir("/proc") {
+                for entry in entries.flatten().take(256) {
+                    let name = entry.file_name();
+                    let Some(name) = name.to_str() else { continue };
+                    let Ok(pid) = name.parse::<u32>() else { continue };
+                    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm"))
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string();
+                    processes.push(serde_json::json!({
+                        "pid": pid,
+                        "comm": comm,
+                    }));
+                }
+            }
+            IpcResponse::ok("process.list", serde_json::json!({ "processes": processes }))
+        }
+        "process.inspect" => {
+            // Resolve pid from params and read /proc/<pid>/status
+            // for safe, well-defined fields. No env, no cmdline.
+            let pid = req
+                .parameters
+                .get("pid")
+                .and_then(|v| v.as_u64())
+                .and_then(|p| u32::try_from(p).ok())
+                .or_else(|| {
+                    let name = req.parameters.get("name").and_then(|v| v.as_str())?;
+                    std::fs::read_dir("/proc").ok()?.flatten().find_map(|e| {
+                        let n = e.file_name();
+                        let n = n.to_str()?;
+                        let p = n.parse::<u32>().ok()?;
+                        let comm = std::fs::read_to_string(format!("/proc/{p}/comm"))
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string();
+                        if comm == name {
+                            Some(p)
+                        } else {
+                            None
+                        }
+                    })
+                });
+            let Some(pid) = pid else {
+                return IpcResponse::err(
+                    "process.inspect",
+                    IpcError {
+                        code: "NOT_FOUND".to_string(),
+                        message: "no such process".to_string(),
+                    },
+                );
+            };
+            let status_text =
+                std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
+            let mut data = serde_json::Map::new();
+            data.insert("pid".to_string(), serde_json::json!(pid));
+            for line in status_text.lines() {
+                if let Some((k, v)) = line.split_once(':') {
+                    let key = k.trim();
+                    let val = v.trim();
+                    if matches!(
+                        key,
+                        "Name" | "State" | "Pid" | "PPid" | "Uid" | "Gid" | "VmRSS" | "VmSize"
+                    ) {
+                        data.insert(key.to_string(), serde_json::json!(val));
+                    }
+                }
+            }
+            IpcResponse::ok("process.inspect", serde_json::Value::Object(data))
         }
         "shutdown" => IpcResponse::ok("shutdown", serde_json::json!({ "state": "SHUTTING_DOWN" })),
         other => IpcResponse::err(
@@ -801,14 +922,11 @@ fn main() {
         .or_else(|| std::env::var("AETHER_MANIFEST_DIR").ok())
         .unwrap_or_else(|| "/etc/aether/services.d".to_string());
 
-    let port: u16 = std::env::var("AETHER_CONTROL_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(4747);
+    let port: u16 =
+        std::env::var("AETHER_CONTROL_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(4747);
     // Loopback by default; guest images override to expose the plane to
     // the isolated QEMU user network.
-    let bind_addr =
-        std::env::var("AETHER_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let bind_addr = std::env::var("AETHER_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
 
     eprintln!("[system-core] loading manifests from {manifests_dir}");
     let manifests = match load_manifests_from_dir(&PathBuf::from(&manifests_dir)) {
@@ -878,10 +996,8 @@ fn main() {
             break;
         }
         let Ok(stream) = stream else { continue };
-        let peer = stream
-            .peer_addr()
-            .map(|a| a.to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
+        let peer =
+            stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "unknown".to_string());
         eprintln!("[system-core] control connection from {peer}");
         let mut writer = match stream.try_clone() {
             Ok(w) => w,

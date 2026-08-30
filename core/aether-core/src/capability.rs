@@ -47,11 +47,7 @@ pub enum RiskLevel {
 
 impl Capability {
     pub fn new(domain: CapabilityDomain, name: impl Into<String>, risk: RiskLevel) -> Self {
-        Self {
-            domain,
-            name: name.into(),
-            risk_level: risk,
-        }
+        Self { domain, name: name.into(), risk_level: risk }
     }
 
     /// Returns the fully qualified capability string (e.g. "filesystem.read").

@@ -35,12 +35,7 @@ pub struct IpcError {
 
 impl IpcResponse {
     pub fn ok(command: &str, result: serde_json::Value) -> Self {
-        Self {
-            ok: true,
-            command: command.to_string(),
-            result,
-            error: None,
-        }
+        Self { ok: true, command: command.to_string(), result, error: None }
     }
 
     pub fn err(command: &str, error: IpcError) -> Self {
@@ -55,9 +50,6 @@ impl IpcResponse {
 
 impl From<AetherError> for IpcError {
     fn from(err: AetherError) -> Self {
-        Self {
-            code: err.code.to_string(),
-            message: err.message,
-        }
+        Self { code: err.code.to_string(), message: err.message }
     }
 }

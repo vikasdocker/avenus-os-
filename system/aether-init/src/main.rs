@@ -74,9 +74,7 @@ fn early_mounts() {
         ("tmpfs", "tmpfs", "/run"),
     ];
     for (fstype, source, target) in mounts {
-        let status = Command::new("/bin/mount")
-            .args(["-t", fstype, source, target])
-            .status();
+        let status = Command::new("/bin/mount").args(["-t", fstype, source, target]).status();
         match status {
             Ok(s) if s.success() => {}
             Ok(s) => log_warn("early-mounts", &format!("mount {fstype} exited {s}")),
@@ -179,11 +177,7 @@ fn gpu_drivers() {
 fn gpu_drivers() {}
 
 fn spawn_system_core(cfg: &aether_init::BootConfig) -> Result<Child, std::io::Error> {
-    let exe = if cfg!(windows) {
-        "aether-system-core.exe"
-    } else {
-        "aether-system-core"
-    };
+    let exe = if cfg!(windows) { "aether-system-core.exe" } else { "aether-system-core" };
     // PID1 resolves the core binary from PATH; the initramfs installs both.
     Command::new(exe)
         .arg(&cfg.manifest_dir)
@@ -198,10 +192,7 @@ fn spawn_system_core(cfg: &aether_init::BootConfig) -> Result<Child, std::io::Er
 /// manager does not spawn processes yet, so PID1 starts it directly.
 #[cfg(target_os = "linux")]
 fn spawn_agentd() -> Option<Child> {
-    match Command::new("/sbin/aether-agentd")
-        .env("AETHER_BIND", "0.0.0.0")
-        .spawn()
-    {
+    match Command::new("/sbin/aether-agentd").env("AETHER_BIND", "0.0.0.0").spawn() {
         Ok(child) => {
             log("services", "agent daemon started");
             Some(child)
@@ -279,10 +270,7 @@ fn ensure_console_session(session: &mut Option<Child>) {
 fn main() {
     // PID1 starts with an empty environment; establish the standard paths
     // so spawned services resolve against the Aether userspace layout.
-    std::env::set_var(
-        "PATH",
-        "/sbin:/usr/sbin:/bin:/usr/bin",
-    );
+    std::env::set_var("PATH", "/sbin:/usr/sbin:/bin:/usr/bin");
 
     let mut stage = aether_init::BootStage::EarlyMounts;
 
@@ -299,13 +287,7 @@ fn main() {
     if cfg.quiet {
         QUIET.store(true, Ordering::Relaxed);
     }
-    log(
-        stage.label(),
-        &format!(
-            "manifests={} port={}",
-            cfg.manifest_dir, cfg.control_port
-        ),
-    );
+    log(stage.label(), &format!("manifests={} port={}", cfg.manifest_dir, cfg.control_port));
 
     stage = stage.next().unwrap_or(stage);
     log(stage.label(), "starting aether-system-core");

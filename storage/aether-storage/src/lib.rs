@@ -29,9 +29,9 @@ impl WorkspaceConfig {
     pub fn default_with_root(root: PathBuf) -> Self {
         let mut allowed: HashSet<String> = HashSet::new();
         for ext in [
-            "txt", "md", "json", "yaml", "yml", "toml", "rs", "py", "js", "ts", "tsx", "jsx",
-            "c", "h", "cpp", "hpp", "go", "java", "sh", "css", "html", "xml", "ini", "cfg",
-            "log", "csv",
+            "txt", "md", "json", "yaml", "yml", "toml", "rs", "py", "js", "ts", "tsx", "jsx", "c",
+            "h", "cpp", "hpp", "go", "java", "sh", "css", "html", "xml", "ini", "cfg", "log",
+            "csv",
         ] {
             allowed.insert(ext.to_string());
         }
@@ -97,7 +97,10 @@ impl FileManager {
     pub fn new(config: WorkspaceConfig) -> Result<Self, AetherError> {
         // Ensure root exists and create standard subfolders
         fs::create_dir_all(&config.root).map_err(|e| {
-            AetherError::new(ErrorKind::Io, format!("cannot create workspace {}: {e}", config.root.display()))
+            AetherError::new(
+                ErrorKind::Io,
+                format!("cannot create workspace {}: {e}", config.root.display()),
+            )
         })?;
         for sub in ["Documents", "Downloads", "Projects", "Notes"] {
             let p = config.root.join(sub);
@@ -180,7 +183,10 @@ impl FileManager {
                 if parent.exists() {
                     let canon_parent = parent.canonicalize().unwrap_or(parent.to_path_buf());
                     if !canon_parent.starts_with(&self.config.root) {
-                        return Err(AetherError::symlink_escape(user_path, &canon_parent.display().to_string()));
+                        return Err(AetherError::symlink_escape(
+                            user_path,
+                            &canon_parent.display().to_string(),
+                        ));
                     }
                 } else {
                     // Parent doesn't exist yet; ensure the joined path's prefix is still inside root via string check
@@ -197,7 +203,10 @@ impl FileManager {
                         if a.exists() {
                             if let Ok(canon_a) = a.canonicalize() {
                                 if !canon_a.starts_with(&self.config.root) {
-                                    return Err(AetherError::symlink_escape(user_path, &canon_a.display().to_string()));
+                                    return Err(AetherError::symlink_escape(
+                                        user_path,
+                                        &canon_a.display().to_string(),
+                                    ));
                                 }
                             }
                             break;
@@ -219,16 +228,14 @@ impl FileManager {
 
     /// List directory contents (relative path, empty or "." for workspace root).
     pub fn list(&self, relative_path: &str) -> Result<Vec<FileMeta>, AetherError> {
-        let rel = if relative_path.trim().is_empty() || relative_path == "." || relative_path == "/" {
+        let rel = if relative_path.trim().is_empty() || relative_path == "." || relative_path == "/"
+        {
             ""
         } else {
             relative_path
         };
-        let abs = if rel.is_empty() {
-            self.config.root.clone()
-        } else {
-            self.validate_and_resolve(rel)?
-        };
+        let abs =
+            if rel.is_empty() { self.config.root.clone() } else { self.validate_and_resolve(rel)? };
         if !abs.exists() {
             return Err(AetherError::not_found(rel));
         }
@@ -236,20 +243,24 @@ impl FileManager {
             return Err(AetherError::invalid_input(format!("not a directory: {rel}")));
         }
         let mut out = Vec::new();
-        for entry in fs::read_dir(&abs).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))? {
+        for entry in
+            fs::read_dir(&abs).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?
+        {
             let entry = entry.map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
             let path = entry.path();
-            let meta = entry.metadata().map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
+            let meta =
+                entry.metadata().map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
             let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string();
-            let rel_path = path.strip_prefix(&self.config.root).unwrap_or(&path).to_string_lossy().to_string().replace('\\', "/");
-            let file_type = if meta.is_dir() { "directory".to_string() } else { "file".to_string() };
+            let rel_path = path
+                .strip_prefix(&self.config.root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string()
+                .replace('\\', "/");
+            let file_type =
+                if meta.is_dir() { "directory".to_string() } else { "file".to_string() };
             let size = if meta.is_file() { meta.len() } else { 0 };
-            out.push(FileMeta {
-                filename,
-                relative_path: rel_path,
-                file_type,
-                size,
-            });
+            out.push(FileMeta { filename, relative_path: rel_path, file_type, size });
         }
         out.sort_by(|a, b| a.filename.cmp(&b.filename));
         Ok(out)
@@ -274,11 +285,18 @@ impl FileManager {
         Ok(results)
     }
 
-    fn search_recursive(&self, dir: &Path, query: &str, out: &mut Vec<FileMeta>, depth: usize) -> Result<(), AetherError> {
+    fn search_recursive(
+        &self,
+        dir: &Path,
+        query: &str,
+        out: &mut Vec<FileMeta>,
+        depth: usize,
+    ) -> Result<(), AetherError> {
         if depth > 8 {
             return Ok(());
         }
-        let entries = fs::read_dir(dir).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
+        let entries =
+            fs::read_dir(dir).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
         for entry in entries {
             let entry = entry.map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
             let path = entry.path();
@@ -291,16 +309,17 @@ impl FileManager {
             let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
             if filename.to_ascii_lowercase().contains(query) {
-                let meta = entry.metadata().map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
-                let rel = path.strip_prefix(&self.config.root).unwrap_or(&path).to_string_lossy().to_string().replace('\\', "/");
+                let meta =
+                    entry.metadata().map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
+                let rel = path
+                    .strip_prefix(&self.config.root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string()
+                    .replace('\\', "/");
                 let size = if meta.is_file() { meta.len() } else { 0 };
                 let file_type = if is_dir { "directory".to_string() } else { "file".to_string() };
-                out.push(FileMeta {
-                    filename,
-                    relative_path: rel,
-                    file_type,
-                    size,
-                });
+                out.push(FileMeta { filename, relative_path: rel, file_type, size });
             }
             if is_dir {
                 self.search_recursive(&path, query, out, depth + 1)?;
@@ -318,14 +337,19 @@ impl FileManager {
         if !abs.exists() {
             return Err(AetherError::not_found(relative_path));
         }
-        let meta = fs::metadata(&abs).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
+        let meta =
+            fs::metadata(&abs).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
         if meta.is_dir() {
             return Err(AetherError::invalid_input(format!("is a directory: {relative_path}")));
         }
         if meta.len() > self.config.max_read_bytes as u64 {
             return Err(AetherError::new(
                 ErrorKind::ResourceExhausted,
-                format!("file too large ({} bytes, limit {}): {relative_path}", meta.len(), self.config.max_read_bytes),
+                format!(
+                    "file too large ({} bytes, limit {}): {relative_path}",
+                    meta.len(),
+                    self.config.max_read_bytes
+                ),
             ));
         }
         // Check extension
@@ -335,11 +359,14 @@ impl FileManager {
             // Check if file is binary by reading first bytes
         }
         // Try to read as utf8
-        let mut file = fs::File::open(&abs).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
+        let mut file =
+            fs::File::open(&abs).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
         let mut buf = Vec::new();
         // Limit read
         let mut limited = file.by_ref().take(self.config.max_read_bytes as u64 + 1);
-        limited.read_to_end(&mut buf).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
+        limited
+            .read_to_end(&mut buf)
+            .map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
         if buf.len() > self.config.max_read_bytes {
             return Err(AetherError::new(
                 ErrorKind::ResourceExhausted,
@@ -354,12 +381,19 @@ impl FileManager {
             ));
         }
         String::from_utf8(buf).map_err(|_| {
-            AetherError::new(ErrorKind::InvalidInput, format!("unsupported file encoding: {relative_path}"))
+            AetherError::new(
+                ErrorKind::InvalidInput,
+                format!("unsupported file encoding: {relative_path}"),
+            )
         })
     }
 
     /// Create a new file; fails if exists (caller should handle overwrite confirmation).
-    pub fn create(&self, relative_path: &str, content: &str) -> Result<(String, usize), AetherError> {
+    pub fn create(
+        &self,
+        relative_path: &str,
+        content: &str,
+    ) -> Result<(String, usize), AetherError> {
         let abs = self.validate_and_resolve(relative_path)?;
         if abs.exists() {
             return Err(AetherError::new(
@@ -369,11 +403,15 @@ impl FileManager {
         }
         // Ensure parent exists
         if let Some(parent) = abs.parent() {
-            fs::create_dir_all(parent).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
             // Validate parent still inside root after creation
             let canon_parent = parent.canonicalize().unwrap_or(parent.to_path_buf());
             if !canon_parent.starts_with(&self.config.root) {
-                return Err(AetherError::symlink_escape(relative_path, &canon_parent.display().to_string()));
+                return Err(AetherError::symlink_escape(
+                    relative_path,
+                    &canon_parent.display().to_string(),
+                ));
             }
         }
         fs::write(&abs, content).map_err(|e| {
@@ -384,20 +422,35 @@ impl FileManager {
             }
         })?;
         let bytes = content.len();
-        let rel = abs.strip_prefix(&self.config.root).unwrap_or(&abs).to_string_lossy().to_string().replace('\\', "/");
+        let rel = abs
+            .strip_prefix(&self.config.root)
+            .unwrap_or(&abs)
+            .to_string_lossy()
+            .to_string()
+            .replace('\\', "/");
         Ok((rel, bytes))
     }
 
     /// Write (overwrite) file; creates if not exists.
-    pub fn write(&self, relative_path: &str, content: &str) -> Result<(String, usize), AetherError> {
+    pub fn write(
+        &self,
+        relative_path: &str,
+        content: &str,
+    ) -> Result<(String, usize), AetherError> {
         let abs = self.validate_and_resolve(relative_path)?;
         if let Some(parent) = abs.parent() {
-            fs::create_dir_all(parent).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
         }
         // Check if exists for audit purposes; still allow overwrite but caller should have confirmed
         fs::write(&abs, content).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
         let bytes = content.len();
-        let rel = abs.strip_prefix(&self.config.root).unwrap_or(&abs).to_string_lossy().to_string().replace('\\', "/");
+        let rel = abs
+            .strip_prefix(&self.config.root)
+            .unwrap_or(&abs)
+            .to_string_lossy()
+            .to_string()
+            .replace('\\', "/");
         Ok((rel, bytes))
     }
 
@@ -409,13 +462,23 @@ impl FileManager {
         }
         let abs_to = self.validate_and_resolve(to)?;
         if abs_to.exists() {
-            return Err(AetherError::new(ErrorKind::InvalidInput, format!("destination already exists: {to}")));
+            return Err(AetherError::new(
+                ErrorKind::InvalidInput,
+                format!("destination already exists: {to}"),
+            ));
         }
         if let Some(parent) = abs_to.parent() {
-            fs::create_dir_all(parent).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
         }
-        fs::rename(&abs_from, &abs_to).map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
-        let rel = abs_to.strip_prefix(&self.config.root).unwrap_or(&abs_to).to_string_lossy().to_string().replace('\\', "/");
+        fs::rename(&abs_from, &abs_to)
+            .map_err(|e| AetherError::new(ErrorKind::Io, e.to_string()))?;
+        let rel = abs_to
+            .strip_prefix(&self.config.root)
+            .unwrap_or(&abs_to)
+            .to_string_lossy()
+            .to_string()
+            .replace('\\', "/");
         Ok(rel)
     }
 
@@ -482,7 +545,8 @@ mod tests {
     #[test]
     fn create_read_search_flow() {
         let (fm, _d) = temp_manager();
-        let (rel, bytes) = fm.create("Documents/ideas.md", "Aether OS idea").unwrap_or_else(|e| panic!("{e}"));
+        let (rel, bytes) =
+            fm.create("Documents/ideas.md", "Aether OS idea").unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(rel, "Documents/ideas.md");
         assert_eq!(bytes, 14);
         let content = fm.read("Documents/ideas.md").unwrap_or_else(|e| panic!("{e}"));
@@ -509,7 +573,8 @@ mod tests {
     fn write_overwrites() {
         let (fm, _d) = temp_manager();
         fm.create("Documents/file.txt", "old").unwrap_or_else(|e| panic!("{e}"));
-        let (rel, bytes) = fm.write("Documents/file.txt", "new content").unwrap_or_else(|e| panic!("{e}"));
+        let (rel, bytes) =
+            fm.write("Documents/file.txt", "new content").unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(bytes, 11);
         assert_eq!(fm.read(&rel).unwrap_or_else(|e| panic!("{e}")), "new content");
     }
@@ -518,11 +583,13 @@ mod tests {
     fn rename_and_move() {
         let (fm, _d) = temp_manager();
         fm.create("Documents/old.md", "data").unwrap_or_else(|e| panic!("{e}"));
-        let new_rel = fm.rename("Documents/old.md", "Documents/new.md").unwrap_or_else(|e| panic!("{e}"));
+        let new_rel =
+            fm.rename("Documents/old.md", "Documents/new.md").unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(new_rel, "Documents/new.md");
         assert!(!fm.workspace_root().join("Documents/old.md").exists());
         assert!(fm.workspace_root().join("Documents/new.md").exists());
-        let moved = fm.move_file("Documents/new.md", "Notes/new.md").unwrap_or_else(|e| panic!("{e}"));
+        let moved =
+            fm.move_file("Documents/new.md", "Notes/new.md").unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(moved, "Notes/new.md");
     }
 

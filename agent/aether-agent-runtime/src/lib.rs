@@ -21,6 +21,7 @@ pub mod intent;
 pub mod llm;
 pub mod llm_provider;
 pub mod memory;
+pub mod memory_store;
 pub mod observation;
 pub mod planner;
 pub mod recovery;
@@ -42,6 +43,10 @@ pub use host::{
 pub use intent::{Confidence, Intent, IntentType};
 pub use llm::{LlmProvider, LlmRequest, LlmResponse};
 pub use memory::{ConversationMemory, SessionMemory};
+pub use memory_store::{
+    decode_persisted, encode_persisted, FileMemoryStore, InMemoryStore, MemoryStore,
+    MemoryStoreError, Persisted,
+};
 pub use observation::{Observation, ObservationId, ObservationType};
 pub use planner::{Plan, PlanId, PlanStep};
 pub use recovery::{backoff_delay, decide_recovery, FailureKind, RecoveryAction, RecoveryPolicy};

@@ -16,11 +16,7 @@ impl DesktopShell {
     /// Creates a new desktop shell with default workspace.
     pub fn new() -> Self {
         let session = crate::GraphicsSessionManager::new();
-        Self {
-            workspace: crate::WorkspaceManager::new(),
-            display_mode: (1920, 1080),
-            session,
-        }
+        Self { workspace: crate::WorkspaceManager::new(), display_mode: (1920, 1080), session }
     }
 
     /// Returns the current display resolution.

@@ -51,7 +51,7 @@ mod tests {
     fn test_shell_session_capabilities() {
         let mut session = ShellSession::new();
         assert!(session.has_capability("filesystem.read"));
-        
+
         session.add_capability("custom.capability".to_string());
         assert!(session.has_capability("custom.capability"));
     }
@@ -61,7 +61,7 @@ mod tests {
         let mut history = ShellHistory::new();
         history.add("help");
         history.add("status");
-        
+
         let entries = history.get_all();
         assert_eq!(entries.len(), 2);
     }
@@ -71,7 +71,7 @@ mod tests {
         let mut history = ShellHistory::new();
         history.add("help");
         history.add("set password=secret");
-        
+
         let entries = history.get_all();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0], "help");
@@ -83,7 +83,7 @@ mod tests {
         history.add("help");
         history.add("status");
         history.clear();
-        
+
         let entries = history.get_all();
         assert_eq!(entries.len(), 0);
     }
