@@ -16,6 +16,7 @@ members = [
   "system/aether-sandbox",
   "system/aether-store",
   "system/aether-diagnostics",
+  "system/aether-recovery",
   "agent/aether-agent-core",
   "agent/aether-device-core",
   "network/aether-network",

@@ -1,0 +1,14 @@
+[package]
+name = "aether-recovery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether self-healing: bounded recovery actions for the kinds of symptoms the diagnostics pipeline surfaces. Each RecoveryAction is a typed, reviewable step the agent proposes; the agent then executes it (with consent when required)."
+
+[dependencies]
+aether-agent-core = { path = "../../agent/aether-agent-core" }
+aether-diagnostics = { path = "../aether-diagnostics" }
+
+[lints]
+workspace = true

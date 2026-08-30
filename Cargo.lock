@@ -235,6 +235,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-recovery"
+version = "0.1.0"
+dependencies = [
+ "aether-agent-core",
+ "aether-diagnostics",
+]
+
+[[package]]
 name = "aether-sandbox"
 version = "0.1.0"
 dependencies = [
