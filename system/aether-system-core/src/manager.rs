@@ -98,6 +98,31 @@ impl ServiceManager {
         Self { graph, state }
     }
 
+    /// Returns the kernel-sandbox plan the launcher must enforce
+    /// before exec()ing the given service. Returns `None` for
+    /// unknown services.
+    ///
+    /// Phase 11.4: this is the bridge between the manifest's
+    /// declarative `SandboxProfile` and the future
+    /// `aether-sandbox` binary. The plan is deterministic and
+    /// log-friendly; the launcher writes the plan to the audit log
+    /// so a post-mortem can confirm every primitive was applied.
+    pub fn sandbox_plan(&self, service_id: &str) -> Option<aether_core::SandboxPlan> {
+        let manifest = self.graph.manifest(service_id)?;
+        Some(aether_core::plan_sandbox(manifest.sandbox_profile))
+    }
+
+    /// Iterates the sandbox plan for every known service. Used by
+    /// the audit layer to confirm a launcher's intent matches the
+    /// manifest declarations, and by the kernel-sandbox binary's
+    /// dry-run mode.
+    pub fn all_sandbox_plans(&self) -> Vec<(String, aether_core::SandboxPlan)> {
+        self.graph
+            .manifests()
+            .map(|m| (m.service_id.clone(), aether_core::plan_sandbox(m.sandbox_profile)))
+            .collect()
+    }
+
     /// The resolved dependency graph.
     pub fn graph(&self) -> &DependencyGraph {
         &self.graph
@@ -441,5 +466,76 @@ mod tests {
             build_manager(&manifests),
             Err(AetherError { code: ErrorKind::InvalidInput, .. })
         ));
+    }
+
+    // -------- Phase 11.4 sandbox plan tests --------
+
+    fn manifest_with_sandbox(id: &str, profile: SandboxProfile) -> aether_core::manifest::ServiceManifest {
+        let mut m = manifest(id, &[]);
+        m.sandbox_profile = profile;
+        m
+    }
+
+    #[test]
+    fn sandbox_plan_returns_none_for_unknown_service() {
+        let manifests = vec![manifest("aether-agentd", &[])];
+        let manager = build_manager(&manifests).unwrap_or_else(|e| panic!("{e}"));
+        assert!(manager.sandbox_plan("not-a-real-service").is_none());
+    }
+
+    #[test]
+    fn sandbox_plan_for_internal_has_no_primitives() {
+        let manifests = vec![manifest_with_sandbox("svc", SandboxProfile::Internal)];
+        let manager = build_manager(&manifests).unwrap_or_else(|e| panic!("{e}"));
+        let plan = manager.sandbox_plan("svc").unwrap_or_else(|| panic!("plan missing"));
+        assert_eq!(plan.profile, SandboxProfile::Internal);
+        assert!(plan.namespaces.is_empty());
+        assert!(plan.capabilities.is_empty());
+    }
+
+    #[test]
+    fn sandbox_plan_for_system_service_drops_dangerous_caps() {
+        let manifests =
+            vec![manifest_with_sandbox("svc", SandboxProfile::SystemService)];
+        let manager = build_manager(&manifests).unwrap_or_else(|e| panic!("{e}"));
+        let plan = manager.sandbox_plan("svc").unwrap_or_else(|| panic!("plan missing"));
+        assert_eq!(plan.profile, SandboxProfile::SystemService);
+        assert!(plan.no_new_privs);
+        // sys_admin / sys_module / sys_rawio are NOT in the allow-list.
+        for cap in plan.capabilities {
+            let name = cap.name();
+            assert!(
+                name != "sys_admin" && name != "sys_module" && name != "sys_rawio",
+                "dangerous cap '{name}' leaked into SystemService plan"
+            );
+        }
+    }
+
+    #[test]
+    fn sandbox_plan_for_restricted_app_drops_every_cap() {
+        let manifests =
+            vec![manifest_with_sandbox("svc", SandboxProfile::RestrictedService)];
+        let manager = build_manager(&manifests).unwrap_or_else(|e| panic!("{e}"));
+        let plan = manager.sandbox_plan("svc").unwrap_or_else(|| panic!("plan missing"));
+        assert!(plan.capabilities.is_empty(), "restricted app must drop every cap");
+        assert!(plan.namespaces.iter().any(|n| n.name() == "pid"));
+        assert!(plan.namespaces.iter().any(|n| n.name() == "network"));
+        assert!(plan.resources.memory_max_bytes.is_some());
+    }
+
+    #[test]
+    fn all_sandbox_plans_iterates_every_service() {
+        let manifests = vec![
+            manifest_with_sandbox("a", SandboxProfile::Internal),
+            manifest_with_sandbox("b", SandboxProfile::SystemService),
+            manifest_with_sandbox("c", SandboxProfile::RestrictedService),
+        ];
+        let manager = build_manager(&manifests).unwrap_or_else(|e| panic!("{e}"));
+        let plans = manager.all_sandbox_plans();
+        assert_eq!(plans.len(), 3);
+        let profiles: Vec<SandboxProfile> = plans.iter().map(|(_, p)| p.profile).collect();
+        assert!(profiles.contains(&SandboxProfile::Internal));
+        assert!(profiles.contains(&SandboxProfile::SystemService));
+        assert!(profiles.contains(&SandboxProfile::RestrictedService));
     }
 }

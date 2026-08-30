@@ -79,6 +79,9 @@ pub fn command_to_capability(command: &str) -> Option<Capability> {
         "network.status" => (CapabilityDomain::Network, "status", RiskLevel::Low),
         "network.interfaces" => (CapabilityDomain::Network, "interfaces", RiskLevel::Low),
 
+        // Sandbox introspection (low risk; declarative read).
+        "sandbox.plan" => (CapabilityDomain::System, "sandbox.plan", RiskLevel::Low),
+
         _ => return None,
     };
     Some(Capability::new(domain, name, risk))

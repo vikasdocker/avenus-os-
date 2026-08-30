@@ -956,6 +956,44 @@ fn dispatch_inner(
             IpcResponse::ok("process.inspect", serde_json::Value::Object(data))
         }
         "shutdown" => IpcResponse::ok("shutdown", serde_json::json!({ "state": "SHUTTING_DOWN" })),
+        "sandbox.plan" => {
+            // Returns the kernel-sandbox plan the launcher must
+            // enforce for one service (or every service, when
+            // `service` is omitted). The plan is declarative —
+            // the actual prctl / unshare / seccomp invocation is
+            // done by the `aether-sandbox` binary, not by
+            // system-core.
+            match req.parameters.get("service").and_then(|v| v.as_str()) {
+                Some(service_id) => match manager.sandbox_plan(service_id) {
+                    Some(plan) => {
+                        let plan_val = serde_json::to_value(&plan).unwrap_or(serde_json::json!({}));
+                        IpcResponse::ok(
+                            "sandbox.plan",
+                            serde_json::json!({ "service": service_id, "plan": plan_val }),
+                        )
+                    }
+                    None => IpcResponse::err(
+                        "sandbox.plan",
+                        IpcError {
+                            code: "NOT_FOUND".to_string(),
+                            message: format!("unknown service '{service_id}'"),
+                        },
+                    ),
+                },
+                None => {
+                    let plans = manager.all_sandbox_plans();
+                    let plans_val: Vec<serde_json::Value> = plans
+                        .into_iter()
+                        .map(|(sid, plan)| {
+                            let plan_val = serde_json::to_value(&plan)
+                                .unwrap_or(serde_json::json!({}));
+                            serde_json::json!({ "service": sid, "plan": plan_val })
+                        })
+                        .collect();
+                    IpcResponse::ok("sandbox.plan", serde_json::json!({ "plans": plans_val }))
+                }
+            }
+        }
         other => IpcResponse::err(
             other,
             IpcError {
