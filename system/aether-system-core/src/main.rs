@@ -8,6 +8,7 @@ use aether_application_manager::ApplicationManager;
 use aether_core::error::ErrorKind;
 use aether_core::ipc::{IpcError, IpcRequest, IpcResponse};
 use aether_core::types::ServiceStatus;
+use aether_security::audit::{AuditChain, AuditEntry, ChainStatus, RetentionPolicy};
 use aether_storage::system_info;
 use aether_storage::{FileManager, WorkspaceConfig};
 use aether_system_core::policy;
@@ -15,6 +16,7 @@ use aether_system_core::{build_manager, load_manifests_from_dir, ServiceExecutor
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Applications the capability layer exposes. Commands are spawned directly
@@ -30,15 +32,93 @@ fn unix_ms() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
 }
 
+/// Converts an `AuditEntry` into the JSON shape the audit
+/// inspection commands return. The `prev_hash` and
+/// `content_hash` are serialised as hex strings so the
+/// result is JSON-clean (byte arrays are not directly
+/// representable in idiomatic JSON).
+fn audit_entry_to_json(entry: &AuditEntry) -> serde_json::Value {
+    serde_json::json!({
+        "index": entry.index,
+        "timestamp_ms": entry.timestamp_ms,
+        "event": entry.event,
+        "component": entry.component,
+        "detail": entry.detail,
+        "prev_hash": hex_lower(&entry.prev_hash),
+        "content_hash": hex_lower(&entry.content_hash),
+    })
+}
+
+/// Converts a `ChainStatus` into the JSON shape the
+/// `audit.verify` command returns. The `ok` field is
+/// always `false` here because the caller only reaches this
+/// path on a verification failure.
+fn chain_status_to_json(status: &ChainStatus) -> serde_json::Value {
+    match status {
+        ChainStatus::Ok => serde_json::json!({ "ok": true }),
+        ChainStatus::ContentMismatch { index } => {
+            serde_json::json!({ "ok": false, "kind": "content_mismatch", "index": index })
+        }
+        ChainStatus::BrokenLink { index } => {
+            serde_json::json!({ "ok": false, "kind": "broken_link", "index": index })
+        }
+        ChainStatus::IndexGap { index } => {
+            serde_json::json!({ "ok": false, "kind": "index_gap", "index": index })
+        }
+    }
+}
+
+/// Lowercase hex encoding of a 32-byte array. Used for the
+/// hash fields in audit entries.
+fn hex_lower(bytes: &[u8; 32]) -> String {
+    let mut out = String::with_capacity(64);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
+}
+
 /// Structured audit line for every capability request dispatched here.
-fn audit(capability: &str, args: &serde_json::Value, component: &str, ok: bool) {
+///
+/// Writes a tamper-evident entry to the system-level audit
+/// chain. The chain is shared across every dispatch path and
+/// is the authoritative record of which actor tried which
+/// capability, with what arguments, and with what result.
+fn record_audit(
+    chain: &Mutex<AuditChain>,
+    capability: &str,
+    args: &serde_json::Value,
+    component: &str,
+    ok: bool,
+) {
+    let detail = format!(
+        "args={} result={}",
+        args,
+        if ok { "success" } else { "failure" }
+    );
+    let timestamp_ms = unix_ms().min(u128::from(u64::MAX)) as u64;
+    // Best-effort write: if the lock is poisoned (a previous
+    // holder panicked) we do not want to crash the dispatch
+    // path — the audit record is observability, not control
+    // flow. We also still log to stderr so an operator can
+    // see that an audit line was emitted.
+    let mut guard = match chain.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let index = guard.record(
+        timestamp_ms,
+        "ipc.dispatch",
+        component,
+        &format!("capability={capability} {detail}"),
+    );
     eprintln!(
-        "[audit] ts={} component={} capability={} args={} result={}",
-        unix_ms(),
+        "[audit] ts={} component={} capability={} args={} result={} index={index}",
+        timestamp_ms,
         component,
         capability,
         args,
-        if ok { "success" } else { "failure" }
+        if ok { "success" } else { "failure" },
     );
 }
 
@@ -175,6 +255,7 @@ fn dispatch(
     manager: &mut aether_system_core::manager::ServiceManager,
     apps: &mut ApplicationManager,
     files: &mut FileManager,
+    audit_chain: &Mutex<AuditChain>,
     started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
@@ -187,7 +268,7 @@ fn dispatch(
         || req.command.starts_with("storage.")
         || req.command == "context.get";
     let started_ok = true;
-    let response = dispatch_inner(manager, apps, files, started_at, req);
+    let response = dispatch_inner(manager, apps, files, audit_chain, started_at, req);
     if is_capability {
         // For file capabilities, sanitize args to avoid logging content
         let mut sanitized = req.parameters.clone();
@@ -196,7 +277,13 @@ fn dispatch(
                 obj.insert("content".to_string(), serde_json::json!("[REDACTED]"));
             }
         }
-        audit(&req.command, &sanitized, &req.service_id, started_ok && response.ok);
+        record_audit(
+            audit_chain,
+            &req.command,
+            &sanitized,
+            &req.service_id,
+            started_ok && response.ok,
+        );
     }
     response
 }
@@ -238,6 +325,7 @@ fn dispatch_inner(
     manager: &mut aether_system_core::manager::ServiceManager,
     apps: &mut ApplicationManager,
     files: &mut FileManager,
+    audit_chain: &Mutex<AuditChain>,
     started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
@@ -255,6 +343,13 @@ fn dispatch_inner(
     // capabilities for an unauthenticated peer.
     let verdict = policy::evaluate(&req.command, req.actor_trust);
     if !verdict.is_allow() {
+        record_audit(
+            audit_chain,
+            "policy.deny",
+            &serde_json::json!({ "command": req.command, "actor_trust": req.actor_trust }),
+            &req.service_id,
+            false,
+        );
         return gate_response(&req.command, &verdict);
     }
     let mut executor = LocalExecutor::default();
@@ -994,6 +1089,78 @@ fn dispatch_inner(
                 }
             }
         }
+        "audit.recent" => {
+            // Returns the most recent `n` audit entries in
+            // newest-first order, along with the current chain
+            // length so callers can tell whether the page is
+            // complete. The default `n` of 64 is small enough
+            // to be cheap and large enough to be useful for a
+            // post-incident review.
+            let n = req
+                .parameters
+                .get("n")
+                .and_then(|v| v.as_u64())
+                .and_then(|n| usize::try_from(n).ok())
+                .unwrap_or(64);
+            let guard = match audit_chain.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let total = guard.len();
+            let entries: Vec<serde_json::Value> = guard
+                .recent(n)
+                .into_iter()
+                .map(audit_entry_to_json)
+                .collect();
+            IpcResponse::ok(
+                "audit.recent",
+                serde_json::json!({
+                    "total": total,
+                    "returned": entries.len(),
+                    "entries": entries,
+                }),
+            )
+        }
+        "audit.verify" => {
+            // Walks the entire chain and reports the first
+            // inconsistency found, or {ok: true} if every
+            // entry's stored content_hash and prev_hash are
+            // valid.
+            let guard = match audit_chain.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let status = match guard.verify_chain() {
+                Ok(()) => serde_json::json!({ "ok": true, "entries": guard.len() }),
+                Err(status) => chain_status_to_json(&status),
+            };
+            IpcResponse::ok("audit.verify", status)
+        }
+        "audit.prune" => {
+            // Time-based pruning of the audit log. Caller
+            // supplies the current wall-clock time in
+            // milliseconds so the daemon does not need to
+            // read the clock itself (the agentd already has
+            // a synchronised notion of `now`).
+            let now_ms = req
+                .parameters
+                .get("now_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or_else(|| unix_ms().min(u128::from(u64::MAX)) as u64);
+            let mut guard = match audit_chain.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let dropped = guard.prune_older_than(now_ms);
+            IpcResponse::ok(
+                "audit.prune",
+                serde_json::json!({
+                    "now_ms": now_ms,
+                    "dropped": dropped,
+                    "remaining": guard.len(),
+                }),
+            )
+        }
         other => IpcResponse::err(
             other,
             IpcError {
@@ -1070,6 +1237,12 @@ fn main() {
         files.workspace_root().display()
     );
 
+    // System-level tamper-evident audit log. The default
+    // policy keeps the most recent 4 096 dispatch events,
+    // which fits comfortably in a few hundred KiB and is
+    // long enough to span a typical session.
+    let audit_chain = Mutex::new(AuditChain::new(RetentionPolicy::default()));
+
     let listener = match std::net::TcpListener::bind((bind_addr.as_str(), port)) {
         Ok(l) => l,
         Err(e) => {
@@ -1104,7 +1277,14 @@ fn main() {
                     if req.command == "shutdown" {
                         stop_requested = true;
                     }
-                    dispatch(&mut manager, &mut apps, &mut files, started_at, &req)
+                    dispatch(
+                        &mut manager,
+                        &mut apps,
+                        &mut files,
+                        &audit_chain,
+                        started_at,
+                        &req,
+                    )
                 }
                 Err(e) => IpcResponse::err(
                     "?",
@@ -1211,5 +1391,94 @@ mod dispatch_policy_tests {
         // capabilities.
         let r = req("system.status", ActorTrust::default());
         assert_eq!(r.actor_trust, ActorTrust::Trusted);
+    }
+}
+
+#[cfg(test)]
+mod audit_chain_tests {
+    //! Tests for the tamper-evident audit chain wired into
+    //! `record_audit`. The chain is exercised directly here
+    //! because every public dispatch path eventually funnels
+    //! into `record_audit`, and the chain's own correctness
+    //! properties are tested in `aether-security`.
+
+    use super::audit_entry_to_json;
+    use super::chain_status_to_json;
+    use super::record_audit;
+    use aether_security::audit::{AuditChain, ChainStatus, RetentionPolicy};
+    use std::sync::Mutex;
+
+    #[test]
+    fn record_writes_a_tamper_evident_entry() {
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(16)));
+        record_audit(&chain, "system.status", &serde_json::json!({}), "test", true);
+        let guard = chain.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(guard.len(), 1);
+        assert!(guard.verify_chain().is_ok());
+    }
+
+    #[test]
+    fn record_redacts_file_content_in_args() {
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(16)));
+        // The dispatch wrapper sanitizes args before calling
+        // record_audit, so the chain never sees the literal
+        // "content" payload.
+        let mut sanitized = serde_json::json!({ "path": "/tmp/x", "content": "secret" });
+        if let Some(obj) = sanitized.as_object_mut() {
+            obj.insert("content".to_string(), serde_json::json!("[REDACTED]"));
+        }
+        record_audit(&chain, "file.write", &sanitized, "test", true);
+        let guard = chain.lock().unwrap_or_else(|p| p.into_inner());
+        let entries = guard.entries();
+        let detail = &entries[0].detail;
+        assert!(!detail.contains("secret"));
+        assert!(detail.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn chain_handles_poisoned_lock_without_panicking() {
+        // The dispatch path must not crash if a previous
+        // holder of the lock panicked. We simulate that by
+        // poisoning the mutex and then calling record_audit,
+        // which should still write the entry.
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(16)));
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = chain.lock().unwrap();
+            panic!("simulated panic");
+        });
+        record_audit(&chain, "system.status", &serde_json::json!({}), "test", true);
+        let guard = chain.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(guard.len(), 1);
+    }
+
+    #[test]
+    fn audit_entry_to_json_includes_hashes_as_hex() {
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(16)));
+        record_audit(&chain, "system.status", &serde_json::json!({}), "test", true);
+        let guard = chain.lock().unwrap_or_else(|p| p.into_inner());
+        let entry = &guard.entries()[0];
+        let json = audit_entry_to_json(entry);
+        // The hex form of a 32-byte SHA-256 is exactly 64
+        // lowercase hex chars.
+        let prev = json["prev_hash"].as_str().unwrap_or("");
+        let content = json["content_hash"].as_str().unwrap_or("");
+        assert_eq!(prev.len(), 64);
+        assert_eq!(content.len(), 64);
+        assert!(prev.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(content.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    }
+
+    #[test]
+    fn chain_status_to_json_reports_failure_kind() {
+        let broken = ChainStatus::ContentMismatch { index: 7 };
+        let json = chain_status_to_json(&broken);
+        assert_eq!(json["ok"], serde_json::json!(false));
+        assert_eq!(json["kind"], serde_json::json!("content_mismatch"));
+        assert_eq!(json["index"], serde_json::json!(7));
+
+        let gap = ChainStatus::IndexGap { index: 42 };
+        let json = chain_status_to_json(&gap);
+        assert_eq!(json["kind"], serde_json::json!("index_gap"));
+        assert_eq!(json["index"], serde_json::json!(42));
     }
 }
