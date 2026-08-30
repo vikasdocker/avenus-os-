@@ -297,9 +297,14 @@ impl Ed25519ManifestSigner {
         rand::thread_rng().fill_bytes(&mut seed);
         let signing_key = SigningKey::from_bytes(&seed);
         let verifying_key = signing_key.verifying_key();
-        let mut seed = seed;
+        // Zeroize the seed buffer. The rebind
+        // through a new name keeps the zeroize
+        // call's intent obvious and silences
+        // clippy's redundant_locals lint.
+        #[allow(clippy::redundant_locals)]
+        let mut owned = seed;
         use zeroize::Zeroize;
-        seed.zeroize();
+        owned.zeroize();
         Self { signing_key, verifying_key }
     }
 

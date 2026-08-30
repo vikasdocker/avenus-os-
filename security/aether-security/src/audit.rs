@@ -94,7 +94,7 @@ impl AuditEntry {
     #[must_use]
     pub fn recompute_hash(&self) -> [u8; 32] {
         let mut hasher = Sha256::new();
-        hasher.update(&self.canonical_bytes());
+        hasher.update(self.canonical_bytes());
         let digest = hasher.finalize();
         let mut out = [0u8; 32];
         out.copy_from_slice(&digest);
@@ -255,8 +255,7 @@ impl AuditChain {
     /// 4 Ki-entry log that is a few hundred microseconds.
     pub fn verify_chain(&self) -> Result<(), ChainStatus> {
         let mut expected_prev = GENESIS_PREV_HASH;
-        let mut expected_index: u64 = 0;
-        for entry in &self.entries {
+        for (expected_index, entry) in (0u64..).zip(self.entries.iter()) {
             if entry.index != expected_index {
                 return Err(ChainStatus::IndexGap { index: entry.index });
             }
@@ -268,7 +267,6 @@ impl AuditChain {
                 return Err(ChainStatus::ContentMismatch { index: entry.index });
             }
             expected_prev = entry.content_hash;
-            expected_index += 1;
         }
         Ok(())
     }
@@ -344,8 +342,7 @@ impl AuditChain {
         // Validate on a copy so a rejection does not leave
         // the log half-rebuilt.
         let mut expected_prev = GENESIS_PREV_HASH;
-        let mut expected_index: u64 = 0;
-        for entry in &entries {
+        for (expected_index, entry) in (0u64..).zip(entries.iter()) {
             if entry.index != expected_index {
                 return Err(ChainStatus::IndexGap { index: entry.index });
             }
@@ -357,7 +354,6 @@ impl AuditChain {
                 return Err(ChainStatus::ContentMismatch { index: entry.index });
             }
             expected_prev = entry.content_hash;
-            expected_index += 1;
         }
         if self.retention.max_entries != 0 && entries.len() > self.retention.max_entries {
             let drop = entries.len() - self.retention.max_entries;

@@ -154,7 +154,7 @@ impl VersionPolicyDecision {
 /// The policy object. Constructed once at daemon
 /// startup; held by the planning layer and queried on
 /// every update.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VersionPolicy {
     /// Allow downgrades when set. Off by default; an
     /// operator must opt in.
@@ -162,12 +162,6 @@ pub struct VersionPolicy {
     /// Allow pre-release same-version updates when
     /// set. Off by default; an operator must opt in.
     pub allow_prerelease: bool,
-}
-
-impl Default for VersionPolicy {
-    fn default() -> Self {
-        Self { allow_downgrade: false, allow_prerelease: false }
-    }
 }
 
 impl VersionPolicy {

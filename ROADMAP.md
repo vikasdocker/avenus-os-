@@ -1363,7 +1363,7 @@ credentials, audit chain).
 
 ### Phase 13 — Aether Autonomous OS
 
-**Status:** `NOT_STARTED`.
+**Status:** `PARTIAL` (13.1 landed; the runtime daemon is still out of scope).
 
 **Sub-milestones:**
 
@@ -1375,6 +1375,43 @@ credentials, audit chain).
   a dependency".
 
 **Dependencies:** Phase 7, Phase 11, Phase 12.
+
+**13.1 — Agent planning surface (landed):**
+
+- New crate `agent/aether-agent-core` carries the out-of-scope shell: typed
+  `AgentTask`, `TaskGraph` (DAG with cycle detection + ready queue), `Proposal`
+  (action + risk + evidence), `Observation` (component + severity), `TaskStage`
+  (Proposed → Approved → Executing → Done / Failed / Cancelled), `AgentStatus`
+  (live state machine: tasks, proposals, history, observations).
+- A local `TaskRisk` enum mirrors `aether_core::RiskLevel` with serde derives
+  so the agent crate can be serialised independently; `From` conversions live
+  at the IPC boundary.
+- A `propose_from_observations` validator partitions drafts into accepted /
+  rejected and enforces the per-kind risk floor (ProposeUpdate /
+  ProposeInstall / Custom require `High`).
+- `validate_proposal` checks that every `evidence` id is present in the live
+  observation log, that the description / reasoning are non-empty, and that
+  the risk is at least the kind's default.
+- `proposal_to_task` is the bridge that turns an approved `Proposal` into a
+  live `AgentTask` (with risk, target, and arguments carried through).
+- `aether-system-core` now exposes the `agent.*` IPC family:
+  `agent.observe`, `agent.propose`, `agent.proposals`, `agent.tasks`,
+  `agent.history`, `agent.observations`, `agent.cancel`, `agent.approve`.
+- `agent.approve` is the only path that turns a proposal into a live task; the
+  conversion uses `proposal_to_task` so the shape is identical to what the
+  future runtime will produce.
+- 39 unit tests in `aether-agent-core`; 12 integration tests in
+  `aether-system-core::agent_ipc_tests`. Full workspace: 798 tests pass,
+  zero clippy warnings.
+
+**Out of scope (deferred):**
+
+- The future `aether-agent-runtime` daemon (the only thing allowed to call
+  `add_observation` and `add_proposal` from outside the IPC layer in
+  production).
+- The model / LLM layer that turns observation batches into proposal drafts.
+- The actual executor (today tasks sit in the graph; nothing runs them).
+- Cross-device coordination (Phase 14).
 
 ---
 

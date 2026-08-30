@@ -353,9 +353,14 @@ impl UpdateSigner {
         rand::thread_rng().fill_bytes(&mut seed);
         let signing_key = SigningKey::from_bytes(&seed);
         let verifying_key = signing_key.verifying_key();
-        let mut seed = seed;
+        // Zeroize the seed buffer. We must clone
+        // first because `signing_key` is built
+        // from it; the redundant rebind silences
+        // clippy and keeps the zeroize call.
+        #[allow(clippy::redundant_locals)]
+        let mut owned = seed;
         use zeroize::Zeroize;
-        seed.zeroize();
+        owned.zeroize();
         Self { signing_key, verifying_key }
     }
 

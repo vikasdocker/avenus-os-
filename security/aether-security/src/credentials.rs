@@ -268,7 +268,9 @@ impl<K: KeyProvider> SealedStore<K> {
         let credential =
             Credential { name: name.to_string(), blob, plaintext_len: plaintext.len() };
         self.entries.insert(name.to_string(), credential);
-        Ok(self.entries.get(name).expect("insert succeeded"))
+        // Insert just succeeded, so the value is
+        // guaranteed to be present.
+        Ok(self.entries.get(name).unwrap_or_else(|| unreachable!("insert just succeeded")))
     }
 
     /// Decrypts and returns the plaintext for `name`. The

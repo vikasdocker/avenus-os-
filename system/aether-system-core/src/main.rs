@@ -20,6 +20,9 @@ use aether_system_core::{
 };
 use aether_update_core::{plan_from_signed_update, UpdateAction, UpdatePlanError, UpdateStage,
     UpdateStatus, VersionPolicy};
+use aether_agent_core::{
+    AgentStatus, Observation, Proposal, ProposalError, TaskId,
+};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -434,6 +437,14 @@ fn build_context_snapshot(
     })
 }
 
+// The dispatcher wires together every global the
+// daemon owns (services, apps, files, audit, sealed
+// credentials, trust store, update planner, version
+// policy, agent planning surface). Splitting it into
+// a struct would help testability, but the IPC layer
+// is small enough that the explicit signature is the
+// simplest correct shape.
+#[allow(clippy::too_many_arguments)]
 fn dispatch(
     manager: &mut aether_system_core::manager::ServiceManager,
     apps: &mut ApplicationManager,
@@ -443,6 +454,7 @@ fn dispatch(
     trust_store: Option<&TrustStore>,
     update_status: &Mutex<UpdateStatus>,
     version_policy: &Mutex<VersionPolicy>,
+    agent_status: &Mutex<AgentStatus>,
     started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
@@ -464,6 +476,7 @@ fn dispatch(
         trust_store,
         update_status,
         version_policy,
+        agent_status,
         started_at,
         req,
     );
@@ -519,6 +532,10 @@ fn gate_response(command: &str, verdict: &aether_system_core::policy::PolicyVerd
     IpcResponse::err(command, IpcError { code, message })
 }
 
+// See the note on `dispatch` — this is the inner
+// half of the central IPC router and inherits the
+// same broad signature.
+#[allow(clippy::too_many_arguments)]
 fn dispatch_inner(
     manager: &mut aether_system_core::manager::ServiceManager,
     apps: &mut ApplicationManager,
@@ -528,6 +545,7 @@ fn dispatch_inner(
     trust_store: Option<&TrustStore>,
     update_status: &Mutex<UpdateStatus>,
     version_policy: &Mutex<VersionPolicy>,
+    agent_status: &Mutex<AgentStatus>,
     started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
@@ -2035,6 +2053,419 @@ fn dispatch_inner(
                 serde_json::json!({ "applied": applied, "current": status.stage().as_str() }),
             )
         }
+        // ----- Agent (Phase 13) -----
+        //
+        // The agent is the future runtime; today
+        // the shell exposes only the planning
+        // surface — observations, proposals, task
+        // graph, history. The runtime is the
+        // only thing allowed to call
+        // `add_observation` and `add_proposal` from
+        // outside, but the IPC layer is open so
+        // tests and the future shell UI can drive
+        // it end-to-end.
+        "agent.propose" => {
+            // Accepts a single `Proposal` object in
+            // `parameters.proposal`. Validates the
+            // proposal against the live observation
+            // log; on success it is added to the
+            // agent's pending set.
+            let proposal_value = match req
+                .parameters
+                .get("proposal")
+                .cloned()
+            {
+                Some(v) => v,
+                None => {
+                    return IpcResponse::err(
+                        "agent.propose",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'proposal' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let proposal: Proposal = match serde_json::from_value(proposal_value) {
+                Ok(p) => p,
+                Err(e) => {
+                    return IpcResponse::err(
+                        "agent.propose",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: format!("proposal decode: {e}"),
+                        },
+                    );
+                }
+            };
+            let mut status = match agent_status.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            // Validate against the live observation
+            // log so callers can't reference
+            // observations that don't exist.
+            let obs_snapshot: Vec<Observation> =
+                status.observations().to_vec();
+            match aether_agent_core::proposal::validate_proposal(
+                &proposal,
+                &obs_snapshot,
+            ) {
+                Ok(()) => {
+                    let id = proposal.id.clone();
+                    let was_new = status.add_proposal(proposal);
+                    IpcResponse::ok(
+                        "agent.propose",
+                        serde_json::json!({
+                            "id": id.to_string(),
+                            "new": was_new,
+                        }),
+                    )
+                }
+                Err(e) => {
+                    let (code, message) = match &e {
+                        ProposalError::EmptyId => (
+                            "EMPTY_ID".to_string(),
+                            e.to_string(),
+                        ),
+                        ProposalError::IncompleteDescription => (
+                            "INCOMPLETE_DESCRIPTION".to_string(),
+                            e.to_string(),
+                        ),
+                        ProposalError::UnknownEvidence { .. } => (
+                            "UNKNOWN_EVIDENCE".to_string(),
+                            e.to_string(),
+                        ),
+                        ProposalError::RiskTooLowForKind { .. } => (
+                            "RISK_TOO_LOW".to_string(),
+                            e.to_string(),
+                        ),
+                    };
+                    IpcResponse::err(
+                        "agent.propose",
+                        IpcError { code, message },
+                    )
+                }
+            }
+        }
+        "agent.observe" => {
+            // Records a new observation in the
+            // bounded log. Today this is invoked
+            // only by tests; the future agentd
+            // is the real source.
+            let obs_value = match req.parameters.get("observation").cloned() {
+                Some(v) => v,
+                None => {
+                    return IpcResponse::err(
+                        "agent.observe",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'observation' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let observation: Observation = match serde_json::from_value(obs_value) {
+                Ok(o) => o,
+                Err(e) => {
+                    return IpcResponse::err(
+                        "agent.observe",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: format!("observation decode: {e}"),
+                        },
+                    );
+                }
+            };
+            let mut status = match agent_status.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let id = observation.id.clone();
+            status.add_observation(observation);
+            IpcResponse::ok(
+                "agent.observe",
+                serde_json::json!({ "id": id }),
+            )
+        }
+        "agent.proposals" => {
+            // Read-only view of the pending
+            // proposal set. Sorted by id for a
+            // stable order.
+            let status = match agent_status.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let mut proposals: Vec<&Proposal> = status.proposals();
+            proposals.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+            let values: Vec<serde_json::Value> = proposals
+                .iter()
+                .filter_map(|p| serde_json::to_value(p).ok())
+                .collect();
+            IpcResponse::ok(
+                "agent.proposals",
+                serde_json::json!({
+                    "proposals": values,
+                    "total": values.len(),
+                }),
+            )
+        }
+        "agent.tasks" => {
+            // Read-only view of the live task
+            // graph. Returns the insertion-order
+            // task list and a `ready` subset for
+            // the given `done` ids (defaults to
+            // empty).
+            let done: Vec<TaskId> = match req
+                .parameters
+                .get("done")
+                .and_then(|v| v.as_array())
+            {
+                Some(arr) => {
+                    let mut out = Vec::with_capacity(arr.len());
+                    for item in arr {
+                        if let Some(s) = item.as_str() {
+                            if let Some(t) = TaskId::new(s) {
+                                out.push(t);
+                            }
+                        }
+                    }
+                    out
+                }
+                None => Vec::new(),
+            };
+            let status = match agent_status.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let tasks: Vec<serde_json::Value> = status
+                .tasks()
+                .tasks()
+                .iter()
+                .filter_map(|t| serde_json::to_value(t).ok())
+                .collect();
+            let ready: Vec<serde_json::Value> = status
+                .tasks()
+                .ready(&done)
+                .iter()
+                .filter_map(|t| serde_json::to_value(t).ok())
+                .collect();
+            IpcResponse::ok(
+                "agent.tasks",
+                serde_json::json!({
+                    "tasks": tasks,
+                    "ready": ready,
+                    "task_count": tasks.len(),
+                    "ready_count": ready.len(),
+                }),
+            )
+        }
+        "agent.history" => {
+            // Returns the bounded task history,
+            // oldest-first. The `task` field is
+            // the full `AgentTask`; the `stage`
+            // is the terminal stage it ended in.
+            let status = match agent_status.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let entries: Vec<serde_json::Value> = status
+                .history()
+                .iter()
+                .map(|h| {
+                    serde_json::json!({
+                        "stage": h.stage.as_str(),
+                        "timestamp_ms": h.timestamp_ms,
+                        "note": h.note,
+                        "task": serde_json::to_value(&h.task).ok(),
+                    })
+                })
+                .collect();
+            IpcResponse::ok(
+                "agent.history",
+                serde_json::json!({
+                    "entries": entries,
+                    "total": entries.len(),
+                }),
+            )
+        }
+        "agent.observations" => {
+            // Returns the bounded observation log,
+            // oldest-first. The proposal layer
+            // reads this to validate evidence ids.
+            let status = match agent_status.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let entries: Vec<serde_json::Value> = status
+                .observations()
+                .iter()
+                .filter_map(|o| serde_json::to_value(o).ok())
+                .collect();
+            IpcResponse::ok(
+                "agent.observations",
+                serde_json::json!({
+                    "observations": entries,
+                    "total": entries.len(),
+                }),
+            )
+        }
+        "agent.cancel" => {
+            // Removes a live task by id. Returns
+            // the removed task or an
+            // `INVALID_INPUT` if no such task
+            // exists. Cancelled tasks are not
+            // appended to history; the future
+            // runtime appends a `Cancelled`
+            // history entry when it observes the
+            // removal.
+            let id_str = match req
+                .parameters
+                .get("id")
+                .and_then(|v| v.as_str())
+            {
+                Some(s) => s.to_string(),
+                None => {
+                    return IpcResponse::err(
+                        "agent.cancel",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'id' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let id = match TaskId::new(id_str) {
+                Some(t) => t,
+                None => {
+                    return IpcResponse::err(
+                        "agent.cancel",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "task id is empty".to_string(),
+                        },
+                    );
+                }
+            };
+            let mut status = match agent_status.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            match status.remove_task(&id) {
+                Some(task) => {
+                    let task_json = serde_json::to_value(&task).ok();
+                    IpcResponse::ok(
+                        "agent.cancel",
+                        serde_json::json!({ "removed": task_json }),
+                    )
+                }
+                None => IpcResponse::err(
+                    "agent.cancel",
+                    IpcError {
+                        code: "NOT_FOUND".to_string(),
+                        message: format!("task '{}' not found", id.as_str()),
+                    },
+                ),
+            }
+        }
+        "agent.approve" => {
+            // Approves a pending proposal and
+            // turns it into a live task. The
+            // task is inserted into the agent's
+            // task graph; the future runtime is
+            // responsible for picking it up. The
+            // proposal is removed from the
+            // pending set on success.
+            let id_str = match req
+                .parameters
+                .get("id")
+                .and_then(|v| v.as_str())
+            {
+                Some(s) => s.to_string(),
+                None => {
+                    return IpcResponse::err(
+                        "agent.approve",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'id' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let mut status = match agent_status.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let proposal = match aether_agent_core::ProposalId::new(id_str.clone()) {
+                Some(pid) => status.remove_proposal(&pid),
+                None => {
+                    return IpcResponse::err(
+                        "agent.approve",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "proposal id is empty".to_string(),
+                        },
+                    );
+                }
+            };
+            let proposal = match proposal {
+                Some(p) => p,
+                None => {
+                    return IpcResponse::err(
+                        "agent.approve",
+                        IpcError {
+                            code: "NOT_FOUND".to_string(),
+                            message: format!("proposal '{id_str}' not found"),
+                        },
+                    );
+                }
+            };
+            // The future runtime supplies the
+            // task id; for now we derive it from
+            // the proposal id so the operation
+            // is idempotent in tests.
+            let task_id = match TaskId::new(format!("task-{}", proposal.id.as_str())) {
+                Some(t) => t,
+                None => {
+                    return IpcResponse::err(
+                        "agent.approve",
+                        IpcError {
+                            code: "INTERNAL".to_string(),
+                            message: "could not derive task id".to_string(),
+                        },
+                    );
+                }
+            };
+            let task = match aether_agent_core::proposal::proposal_to_task(&proposal, task_id) {
+                Some(t) => t,
+                None => {
+                    return IpcResponse::err(
+                        "agent.approve",
+                        IpcError {
+                            code: "INTERNAL".to_string(),
+                            message: "could not convert proposal to task".to_string(),
+                        },
+                    );
+                }
+            };
+            // Insert into the live graph. The
+            // graph may reject duplicate ids; we
+            // surface that as INVALID_INPUT.
+            if let Err(e) = status.insert_task(task.clone()) {
+                return IpcResponse::err(
+                    "agent.approve",
+                    IpcError {
+                        code: "INVALID_INPUT".to_string(),
+                        message: format!("insert task: {e}"),
+                    },
+                );
+            }
+            let task_json = serde_json::to_value(&task).ok();
+            IpcResponse::ok(
+                "agent.approve",
+                serde_json::json!({ "task": task_json }),
+            )
+        }
         other => IpcResponse::err(
             other,
             IpcError {
@@ -2163,6 +2594,11 @@ fn main() {
     // will own these and drive the state machine.
     let update_status = Mutex::new(UpdateStatus::new());
     let version_policy = Mutex::new(VersionPolicy::default());
+    // Phase 13: agent planning surface. The
+    // future agentd owns the live state
+    // machine; today the shell only stores
+    // observations, proposals, and tasks.
+    let agent_status = Mutex::new(AgentStatus::new());
 
     let listener = match std::net::TcpListener::bind((bind_addr.as_str(), port)) {
         Ok(l) => l,
@@ -2207,6 +2643,7 @@ fn main() {
                         trust_store.as_ref(),
                         &update_status,
                         &version_policy,
+                        &agent_status,
                         started_at,
                         &req,
                     )
@@ -2421,6 +2858,7 @@ mod credentials_ipc_tests {
 
     use super::credential_error_response;
     use super::dispatch_inner;
+    use aether_agent_core::AgentStatus;
     use aether_update_core::{UpdateStatus, VersionPolicy};
     use aether_application_manager::ApplicationManager;
     use aether_core::ipc::{ActorTrust, IpcRequest};
@@ -2483,6 +2921,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2499,6 +2938,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2520,6 +2960,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2544,6 +2985,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r1,
         );
@@ -2560,6 +3002,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r2,
         );
@@ -2585,6 +3028,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2599,6 +3043,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2627,6 +3072,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2640,6 +3086,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2665,6 +3112,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2689,6 +3137,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2702,6 +3151,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2718,6 +3168,7 @@ mod credentials_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2759,6 +3210,7 @@ mod trust_store_ipc_tests {
     //! signer fingerprints it currently trusts.
 
     use super::dispatch_inner;
+    use aether_agent_core::AgentStatus;
     use aether_update_core::{UpdateStatus, VersionPolicy};
     use aether_application_manager::ApplicationManager;
     use aether_core::ipc::{ActorTrust, IpcRequest};
@@ -2809,7 +3261,7 @@ mod trust_store_ipc_tests {
         let started_at = SystemTime::now();
         let r = req("manifest.trust_store", serde_json::json!({}));
         let resp =
-            dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &creds, None, &Mutex::new(UpdateStatus::new()), &Mutex::new(VersionPolicy::default()), started_at, &r);
+            dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &creds, None, &Mutex::new(UpdateStatus::new()), &Mutex::new(VersionPolicy::default()), &Mutex::new(AgentStatus::new()), started_at, &r);
         assert!(resp.ok);
         assert_eq!(resp.result["enabled"], serde_json::json!(false));
         assert_eq!(resp.result["count"], serde_json::json!(0));
@@ -2832,6 +3284,7 @@ mod trust_store_ipc_tests {
             Some(&trust),
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2858,6 +3311,7 @@ mod update_ipc_tests {
     //! inputs and rejects tampered ones.
 
     use super::{base64_decode, base64_encode, dispatch_inner};
+    use aether_agent_core::AgentStatus;
     use aether_update_core::{UpdateStatus, VersionPolicy};
     use aether_application_manager::ApplicationManager;
     use aether_core::ipc::{ActorTrust, IpcRequest};
@@ -2917,6 +3371,7 @@ mod update_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2943,6 +3398,7 @@ mod update_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -2972,6 +3428,7 @@ mod update_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -3011,6 +3468,7 @@ mod update_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -3055,6 +3513,7 @@ mod update_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -3097,6 +3556,7 @@ mod update_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -3120,6 +3580,7 @@ mod update_ipc_tests {
             None,
             &Mutex::new(UpdateStatus::new()),
             &Mutex::new(VersionPolicy::default()),
+            &Mutex::new(AgentStatus::new()),
             started_at,
             &r,
         );
@@ -3159,14 +3620,15 @@ mod update_plan_ipc_tests {
     //! that mutates the live `UpdateStatus`; everything
     //! else is read-only.
 
-    use super::{base64_decode, base64_encode, dispatch_inner};
+    use super::{base64_encode, dispatch_inner};
+    use aether_agent_core::AgentStatus;
     use aether_application_manager::ApplicationManager;
     use aether_core::ipc::{ActorTrust, IpcRequest};
     use aether_security::audit::{AuditChain, RetentionPolicy};
     use aether_security::credentials::{SealedStore, StaticKeyProvider};
     use aether_security::signed_update::{UpdateKind, UpdateSigner};
     use aether_storage::{FileManager, WorkspaceConfig};
-    use aether_update_core::{UpdateStage, UpdateStatus, VersionPolicy};
+    use aether_update_core::{UpdateStatus, VersionPolicy};
     use std::sync::Mutex;
     use std::time::SystemTime;
 
@@ -3178,6 +3640,7 @@ mod update_plan_ipc_tests {
         Mutex<SealedStore<StaticKeyProvider>>,
         Mutex<UpdateStatus>,
         Mutex<VersionPolicy>,
+        Mutex<AgentStatus>,
     ) {
         let graph = aether_system_core::graph::DependencyGraph::new(&[]).expect("empty");
         let manager = aether_system_core::manager::ServiceManager::new(graph);
@@ -3187,7 +3650,8 @@ mod update_plan_ipc_tests {
         let creds = Mutex::new(SealedStore::new(StaticKeyProvider::new([0x33u8; 32])));
         let status = Mutex::new(UpdateStatus::new());
         let policy = Mutex::new(VersionPolicy::default());
-        (manager, apps, files, chain, creds, status, policy)
+        let agent = Mutex::new(AgentStatus::new());
+        (manager, apps, files, chain, creds, status, policy, agent)
     }
 
     fn req(command: &str, params: serde_json::Value) -> IpcRequest {
@@ -3257,7 +3721,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_plan_returns_plan_for_signed_upgrade() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
         let started_at = SystemTime::now();
         let (signer, header) = sign_os_image("aether-os", "1.2.0");
         let r = req(
@@ -3282,6 +3746,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3301,7 +3766,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_plan_rejects_downgrade_by_default() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
         let started_at = SystemTime::now();
         let (signer, header) = sign_os_image("aether-os", "0.9.0");
         let mut params = plan_params(&signer, &header, "aether-os", "0.9.0");
@@ -3318,6 +3783,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3328,7 +3794,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_plan_rejects_bad_signature() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
         let started_at = SystemTime::now();
         let (signer, header) = sign_os_image("aether-os", "1.2.0");
         let mut params = plan_params(&signer, &header, "aether-os", "1.2.0");
@@ -3350,6 +3816,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3359,7 +3826,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_plan_rejects_empty_target() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
         let started_at = SystemTime::now();
         // The plan layer rejects empty target
         // *before* the signature verifier runs in
@@ -3386,6 +3853,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3405,7 +3873,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_status_reports_idle_initially() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
         let started_at = SystemTime::now();
         let r = req("update.status", serde_json::json!({}));
         let resp = dispatch_inner(
@@ -3417,6 +3885,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3429,7 +3898,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_simulate_drives_state_machine() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
         let started_at = SystemTime::now();
         let r = req(
             "update.simulate",
@@ -3444,6 +3913,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3460,6 +3930,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3472,7 +3943,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_simulate_records_failed_transition_with_note() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
         let started_at = SystemTime::now();
         // We can't pass a note through `simulate` (it
         // accepts a sequence only), so we drive the
@@ -3490,6 +3961,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3504,6 +3976,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3513,7 +3986,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_simulate_rejects_unknown_stage() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
         let started_at = SystemTime::now();
         let r = req(
             "update.simulate",
@@ -3528,6 +4001,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3537,7 +4011,7 @@ mod update_plan_ipc_tests {
 
     #[test]
     fn update_history_is_empty_initially() {
-        let (mut mgr, mut apps, mut files, chain, creds, status, policy) = env();
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
         let started_at = SystemTime::now();
         let r = req("update.history", serde_json::json!({}));
         let resp = dispatch_inner(
@@ -3549,6 +4023,7 @@ mod update_plan_ipc_tests {
             None,
             &status,
             &policy,
+            &agent,
             started_at,
             &r,
         );
@@ -3558,5 +4033,429 @@ mod update_plan_ipc_tests {
             resp.result["entries"],
             serde_json::json!([])
         );
+    }
+}
+
+#[cfg(test)]
+mod agent_ipc_tests {
+    //! Integration tests for the Phase-13 agent
+    //! planning surface IPC commands
+    //! (`agent.observe`, `agent.propose`,
+    //! `agent.proposals`, `agent.tasks`,
+    //! `agent.history`, `agent.observations`,
+    //! `agent.cancel`, `agent.approve`).
+    //!
+    //! The shell stores observations, validates
+    //! proposals against the live observation log,
+    //! and converts approved proposals into tasks.
+    //! The future agentd is the only thing that will
+    //! execute the tasks; today the tests cover the
+    //! contract.
+
+    use super::dispatch_inner;
+    use aether_agent_core::{
+        AgentStatus, Observation, ObservationSeverity, Proposal, ProposalRisk, TaskId, TaskKind,
+    };
+    use aether_application_manager::ApplicationManager;
+    use aether_core::ipc::{ActorTrust, IpcRequest};
+    use aether_security::audit::{AuditChain, RetentionPolicy};
+    use aether_security::credentials::{SealedStore, StaticKeyProvider};
+    use aether_storage::{FileManager, WorkspaceConfig};
+    use aether_update_core::{UpdateStatus, VersionPolicy};
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+
+    fn env() -> (
+        aether_system_core::manager::ServiceManager,
+        ApplicationManager,
+        FileManager,
+        Mutex<AuditChain>,
+        Mutex<SealedStore<StaticKeyProvider>>,
+        Mutex<UpdateStatus>,
+        Mutex<VersionPolicy>,
+        Mutex<AgentStatus>,
+    ) {
+        let graph = aether_system_core::graph::DependencyGraph::new(&[]).expect("empty");
+        let manager = aether_system_core::manager::ServiceManager::new(graph);
+        let apps = ApplicationManager::default();
+        let files = FileManager::new(WorkspaceConfig::from_env_or_default()).expect("workspace");
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
+        let creds = Mutex::new(SealedStore::new(StaticKeyProvider::new([0x55u8; 32])));
+        let status = Mutex::new(UpdateStatus::new());
+        let policy = Mutex::new(VersionPolicy::default());
+        let agent = Mutex::new(AgentStatus::new());
+        (manager, apps, files, chain, creds, status, policy, agent)
+    }
+
+    fn req(command: &str, params: serde_json::Value) -> IpcRequest {
+        IpcRequest {
+            service_id: "test".to_string(),
+            command: command.to_string(),
+            parameters: params,
+            actor_trust: ActorTrust::Trusted,
+        }
+    }
+
+    fn observation_json(id: &str) -> serde_json::Value {
+        let o = Observation::new(
+            id,
+            "storage",
+            "disk is 95% full",
+            ObservationSeverity::Warning,
+            1_700_000_000_000,
+        )
+        .expect("valid obs");
+        serde_json::to_value(&o).expect("obs -> json")
+    }
+
+    fn proposal_json(
+        id: &str,
+        risk: ProposalRisk,
+        evidence: Vec<String>,
+    ) -> serde_json::Value {
+        let mut p = Proposal::new(
+            id,
+            TaskKind::ProposeCleanup,
+            "free up space",
+            "delete cached files",
+            "disk is 95% full",
+            risk,
+            1_700_000_000_000,
+        )
+        .expect("valid proposal");
+        if !evidence.is_empty() {
+            p = p.with_evidence(evidence);
+        }
+        serde_json::to_value(&p).expect("proposal -> json")
+    }
+
+    #[test]
+    fn observe_and_list_observations() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "agent.observe",
+            serde_json::json!({ "observation": observation_json("o1") }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp.ok, "expected ok, got: {resp:?}");
+        assert_eq!(resp.result["id"], serde_json::json!("o1"));
+        let r = req("agent.observations", serde_json::json!({}));
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp.ok);
+        assert_eq!(resp.result["total"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn propose_requires_known_evidence() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "agent.propose",
+            serde_json::json!({
+                "proposal": proposal_json("p1", ProposalRisk::Medium, vec!["missing".to_string()]),
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "UNKNOWN_EVIDENCE");
+    }
+
+    #[test]
+    fn propose_succeeds_when_evidence_is_known() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "agent.observe",
+            serde_json::json!({ "observation": observation_json("o1") }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req(
+            "agent.propose",
+            serde_json::json!({
+                "proposal": proposal_json("p1", ProposalRisk::Medium, vec!["o1".to_string()]),
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp.ok, "expected ok, got: {resp:?}");
+        assert_eq!(resp.result["id"], serde_json::json!("p1"));
+        assert_eq!(resp.result["new"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn propose_rejects_low_risk_for_propose_cleanup() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "agent.observe",
+            serde_json::json!({ "observation": observation_json("o1") }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req(
+            "agent.propose",
+            serde_json::json!({
+                "proposal": proposal_json("p1", ProposalRisk::Low, vec!["o1".to_string()]),
+            }),
+        );
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "RISK_TOO_LOW");
+    }
+
+    #[test]
+    fn proposals_list_sorts_by_id() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "agent.observe",
+            serde_json::json!({ "observation": observation_json("o1") }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        for id in ["p2", "p1", "p3"] {
+            let r = req(
+                "agent.propose",
+                serde_json::json!({
+                    "proposal": proposal_json(id, ProposalRisk::Medium, vec!["o1".to_string()]),
+                }),
+            );
+            let _ = dispatch_inner(
+                &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+                &status, &policy, &agent, started_at, &r,
+            );
+        }
+        let r = req("agent.proposals", serde_json::json!({}));
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp.ok);
+        assert_eq!(resp.result["total"], serde_json::json!(3));
+        let arr = resp.result["proposals"].as_array().unwrap();
+        assert_eq!(arr[0]["id"], serde_json::json!("p1"));
+        assert_eq!(arr[1]["id"], serde_json::json!("p2"));
+        assert_eq!(arr[2]["id"], serde_json::json!("p3"));
+    }
+
+    #[test]
+    fn tasks_list_is_empty_initially() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req("agent.tasks", serde_json::json!({}));
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp.ok);
+        assert_eq!(resp.result["task_count"], serde_json::json!(0));
+        assert_eq!(resp.result["ready_count"], serde_json::json!(0));
+    }
+
+    #[test]
+    fn approve_converts_proposal_to_task() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "agent.observe",
+            serde_json::json!({ "observation": observation_json("o1") }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req(
+            "agent.propose",
+            serde_json::json!({
+                "proposal": proposal_json("p1", ProposalRisk::Medium, vec!["o1".to_string()]),
+            }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req("agent.approve", serde_json::json!({ "id": "p1" }));
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp.ok, "expected ok, got: {resp:?}");
+        assert_eq!(
+            resp.result["task"]["kind"],
+            serde_json::json!("propose-cleanup")
+        );
+        let r = req("agent.proposals", serde_json::json!({}));
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert_eq!(resp.result["total"], serde_json::json!(0));
+        let r = req("agent.tasks", serde_json::json!({}));
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert_eq!(resp.result["task_count"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn cancel_removes_live_task() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "agent.observe",
+            serde_json::json!({ "observation": observation_json("o1") }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req(
+            "agent.propose",
+            serde_json::json!({
+                "proposal": proposal_json("p1", ProposalRisk::Medium, vec!["o1".to_string()]),
+            }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req("agent.approve", serde_json::json!({ "id": "p1" }));
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req("agent.cancel", serde_json::json!({ "id": "task-p1" }));
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp.ok, "expected ok, got: {resp:?}");
+        assert!(resp.result["removed"].is_object());
+    }
+
+    #[test]
+    fn cancel_unknown_task_returns_not_found() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req("agent.cancel", serde_json::json!({ "id": "no-such-task" }));
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn history_starts_empty() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req("agent.history", serde_json::json!({}));
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp.ok);
+        assert_eq!(resp.result["total"], serde_json::json!(0));
+    }
+
+    #[test]
+    fn tasks_ready_filters_by_done() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "agent.observe",
+            serde_json::json!({ "observation": observation_json("o1") }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req(
+            "agent.propose",
+            serde_json::json!({
+                "proposal": proposal_json("p1", ProposalRisk::Medium, vec!["o1".to_string()]),
+            }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req("agent.approve", serde_json::json!({ "id": "p1" }));
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req("agent.tasks", serde_json::json!({}));
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp.ok);
+        assert_eq!(resp.result["task_count"], serde_json::json!(1));
+        assert_eq!(resp.result["ready_count"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn propose_duplicate_id_returns_existing_flag() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "agent.observe",
+            serde_json::json!({ "observation": observation_json("o1") }),
+        );
+        let _ = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        let r = req(
+            "agent.propose",
+            serde_json::json!({
+                "proposal": proposal_json("p1", ProposalRisk::Medium, vec!["o1".to_string()]),
+            }),
+        );
+        let resp1 = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp1.ok);
+        assert_eq!(resp1.result["new"], serde_json::json!(true));
+        let r = req(
+            "agent.propose",
+            serde_json::json!({
+                "proposal": proposal_json("p1", ProposalRisk::Medium, vec!["o1".to_string()]),
+            }),
+        );
+        let resp2 = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None,
+            &status, &policy, &agent, started_at, &r,
+        );
+        assert!(resp2.ok);
+        assert_eq!(resp2.result["new"], serde_json::json!(false));
+        // Reference TaskId for the unused-import linter.
+        let _ = TaskId::new("x");
     }
 }

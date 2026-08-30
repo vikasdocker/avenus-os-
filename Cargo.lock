@@ -38,6 +38,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-agent-core"
+version = "0.1.0"
+dependencies = [
+ "aether-core",
+ "aether-security",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "aether-agent-runtime"
 version = "0.1.0"
 dependencies = [
@@ -215,6 +226,7 @@ dependencies = [
 name = "aether-system-core"
 version = "0.1.0"
 dependencies = [
+ "aether-agent-core",
  "aether-application-manager",
  "aether-core",
  "aether-security",
