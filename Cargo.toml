@@ -20,6 +20,7 @@ members = [
   "system/aether-automation",
   "agent/aether-agent-core",
   "agent/aether-device-core",
+  "agent/aether-background-agent",
   "network/aether-network",
   "services/aether-agentd",
   "services/aether-supervisor",

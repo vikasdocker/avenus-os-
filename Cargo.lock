@@ -124,6 +124,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-background-agent"
+version = "0.1.0"
+dependencies = [
+ "aether-agent-core",
+ "aether-automation",
+ "aether-diagnostics",
+ "aether-recovery",
+ "serde_json",
+]
+
+[[package]]
 name = "aether-bench"
 version = "0.1.0"
 dependencies = [

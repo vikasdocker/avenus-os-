@@ -1250,10 +1250,9 @@ will paint the surfaces with them.
 
 ### Phase 7 — Aether Agent Deep System Control
 
-**Status:** `IN_PROGRESS` (7.1 system diagnostics shipped;
-7.2 self-healing shipped;
-7.3 system automation shipped;
-7.4 background agent is the remaining work).
+**Status:** `COMPLETE` (7.1 diagnostics, 7.2
+self-healing, 7.3 system automation, and 7.4
+background agent all shipped).
 
 **Objective:** Make Aether capable of operating the entire OS.
 
@@ -1345,6 +1344,36 @@ will paint the surfaces with them.
   back at execution time. 19 unit tests, 0
   warnings, 0 clippy lints. Files:
   `system/aether-automation/src/lib.rs`.
+- 7.4 **Background agent — COMPLETE**. New
+  crate `agent/aether-background-agent`
+  ships the runtime that ties 7.1-7.3
+  together. The model is a tick-driven
+  pure state machine: the host supplies
+  `AgentEvent`s (SignalUpdate / TimeTick /
+  WorkflowTrigger), the runtime ingests
+  them, evaluates diagnostics, plans
+  recovery (de-duplicating against the
+  `planned_symptoms` map so a stable
+  diagnosis is only planned once), fires
+  time-of-day workflows (rate-limited to
+  once per minute via `last_fired`), and
+  produces an `ActionQueue` of
+  `ActionItem`s. Each `ActionItem` is a
+  reviewable unit: it carries its kind
+  (Recovery / Workflow), reason
+  (symptom id or workflow id), title,
+  description, whether it requires
+  consent, the `TaskKind` /
+  `TaskRisk` it compiles to, the
+  `Subsystem` it targets, and a
+  structured JSON payload. The host
+  splits the queue via
+  `partition_consent()`, auto-executes
+  the non-consent items, and surfaces
+  the consent-required ones in a single
+  dialog. 38 unit tests, 0 warnings, 0
+  clippy lints. Files:
+  `agent/aether-background-agent/src/lib.rs`.
 
 **Dependencies:** Phase 2 + Phase 3 + Phase 8 (devices).
 

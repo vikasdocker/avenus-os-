@@ -1,0 +1,17 @@
+[package]
+name = "aether-background-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether background agent: a tick-driven runtime that ties diagnostics, self-healing, and workflow automation together. Produces ActionItems the foreground agent and the shell can review and execute."
+
+[dependencies]
+aether-agent-core = { path = "../aether-agent-core" }
+aether-automation = { path = "../../system/aether-automation" }
+aether-diagnostics = { path = "../../system/aether-diagnostics" }
+aether-recovery = { path = "../../system/aether-recovery" }
+serde_json = "1"
+
+[lints]
+workspace = true
