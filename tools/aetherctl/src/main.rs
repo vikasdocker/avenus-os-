@@ -7,7 +7,7 @@
 //
 // Environment: AETHER_CONTROL (default "127.0.0.1:4747")
 
-use aether_sdk::{AetherClient, IpcRequest};
+use aether_sdk::{AetherClient, ActorTrust, IpcRequest};
 use std::time::Duration;
 
 fn main() {
@@ -21,18 +21,21 @@ fn main() {
             service_id: "aether-system-core".to_string(),
             command: "status".to_string(),
             parameters: serde_json::json!({}),
+            actor_trust: ActorTrust::Trusted,
         }),
         (Some(action @ ("start" | "stop" | "restart")), Some(service)) if args.len() == 2 => {
             Some(IpcRequest {
                 service_id: service.to_string(),
                 command: action.to_string(),
                 parameters: serde_json::json!({ "service": service }),
+                actor_trust: ActorTrust::Trusted,
             })
         }
         (Some("shutdown"), None) => Some(IpcRequest {
             service_id: "aether-system-core".to_string(),
             command: "shutdown".to_string(),
             parameters: serde_json::json!({}),
+            actor_trust: ActorTrust::Trusted,
         }),
         _ => None,
     };

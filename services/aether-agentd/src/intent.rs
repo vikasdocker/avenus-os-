@@ -1343,35 +1343,30 @@ pub fn execute_extended(
     client: &aether_sdk::AetherClient,
     surface: &SurfaceClient,
 ) -> Result<Value, String> {
+    // Local helper: build a control-plane request attributed to the
+    // agent (trusted). The actor_trust field was added in Phase 11
+    // alongside the system-core policy gate.
+    let req = |command: &str, parameters: serde_json::Value| aether_sdk::IpcRequest {
+        service_id: "aether-system-core".to_string(),
+        command: command.to_string(),
+        parameters,
+        actor_trust: aether_sdk::ActorTrust::Trusted,
+    };
     let response = match intent.capability {
         CapabilityId::SystemStatus => client.status()?,
-        CapabilityId::AppStatus => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "app.status".to_string(),
-            parameters: serde_json::json!({ "app": intent.arguments["app"] }),
-        })?,
-        CapabilityId::AppList => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "app.list".to_string(),
-            parameters: serde_json::json!({}),
-        })?,
-        CapabilityId::AppLaunch => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "app.launch".to_string(),
-            parameters: serde_json::json!({ "app": intent.arguments["app"] }),
-        })?,
-        CapabilityId::AppClose => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "app.close".to_string(),
-            parameters: serde_json::json!({ "app": intent.arguments["app"] }),
-        })?,
+        CapabilityId::AppStatus => {
+            client.request(&req("app.status", serde_json::json!({ "app": intent.arguments["app"] })))?
+        }
+        CapabilityId::AppList => client.request(&req("app.list", serde_json::json!({})))?,
+        CapabilityId::AppLaunch => {
+            client.request(&req("app.launch", serde_json::json!({ "app": intent.arguments["app"] })))?
+        }
+        CapabilityId::AppClose => {
+            client.request(&req("app.close", serde_json::json!({ "app": intent.arguments["app"] })))?
+        }
         CapabilityId::WindowList => {
             // Try control plane proxy first, fallback to direct surface.
-            let via_control = client.request(&aether_sdk::IpcRequest {
-                service_id: "aether-system-core".to_string(),
-                command: "window.list".to_string(),
-                parameters: serde_json::json!({}),
-            });
+            let via_control = client.request(&req("window.list", serde_json::json!({})));
             match via_control {
                 Ok(r) if r.ok => return Ok(r.result),
                 _ => {
@@ -1384,11 +1379,7 @@ pub fn execute_extended(
         CapabilityId::WindowFocus => {
             let app = intent.arguments["app"].as_str().unwrap_or_default();
             // Try control plane first
-            let via_control = client.request(&aether_sdk::IpcRequest {
-                service_id: "aether-system-core".to_string(),
-                command: "window.focus".to_string(),
-                parameters: serde_json::json!({ "app": app }),
-            });
+            let via_control = client.request(&req("window.focus", serde_json::json!({ "app": app })));
             match via_control {
                 Ok(r) if r.ok => return Ok(r.result),
                 _ => {
@@ -1399,11 +1390,8 @@ pub fn execute_extended(
         }
         CapabilityId::WindowMinimize => {
             let app = intent.arguments["app"].as_str().unwrap_or_default();
-            let via_control = client.request(&aether_sdk::IpcRequest {
-                service_id: "aether-system-core".to_string(),
-                command: "window.minimize".to_string(),
-                parameters: serde_json::json!({ "app": app }),
-            });
+            let via_control =
+                client.request(&req("window.minimize", serde_json::json!({ "app": app })));
             match via_control {
                 Ok(r) if r.ok => return Ok(r.result),
                 _ => {
@@ -1414,11 +1402,8 @@ pub fn execute_extended(
         }
         CapabilityId::WindowMaximize => {
             let app = intent.arguments["app"].as_str().unwrap_or_default();
-            let via_control = client.request(&aether_sdk::IpcRequest {
-                service_id: "aether-system-core".to_string(),
-                command: "window.maximize".to_string(),
-                parameters: serde_json::json!({ "app": app }),
-            });
+            let via_control =
+                client.request(&req("window.maximize", serde_json::json!({ "app": app })));
             match via_control {
                 Ok(r) if r.ok => return Ok(r.result),
                 _ => {
@@ -1429,11 +1414,8 @@ pub fn execute_extended(
         }
         CapabilityId::WindowClose => {
             let app = intent.arguments["app"].as_str().unwrap_or_default();
-            let via_control = client.request(&aether_sdk::IpcRequest {
-                service_id: "aether-system-core".to_string(),
-                command: "window.close".to_string(),
-                parameters: serde_json::json!({ "app": app }),
-            });
+            let via_control =
+                client.request(&req("window.close", serde_json::json!({ "app": app })));
             match via_control {
                 Ok(r) if r.ok => return Ok(r.result),
                 _ => {
@@ -1444,11 +1426,8 @@ pub fn execute_extended(
         }
         CapabilityId::WindowRestore => {
             let app = intent.arguments["app"].as_str().unwrap_or_default();
-            let via_control = client.request(&aether_sdk::IpcRequest {
-                service_id: "aether-system-core".to_string(),
-                command: "window.restore".to_string(),
-                parameters: serde_json::json!({ "app": app }),
-            });
+            let via_control =
+                client.request(&req("window.restore", serde_json::json!({ "app": app })));
             match via_control {
                 Ok(r) if r.ok => return Ok(r.result),
                 _ => {
@@ -1458,66 +1437,41 @@ pub fn execute_extended(
                 }
             }
         }
-        CapabilityId::ContextGet => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "context.get".to_string(),
-            parameters: serde_json::json!({}),
-        })?,
-        CapabilityId::FileList => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "file.list".to_string(),
-            parameters: serde_json::json!({ "path": intent.arguments.get("path").cloned().unwrap_or(Value::String(String::new())) }),
-        })?,
-        CapabilityId::FileSearch => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "file.search".to_string(),
-            parameters: serde_json::json!({ "query": intent.arguments["query"] }),
-        })?,
-        CapabilityId::FileRead => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "file.read".to_string(),
-            parameters: serde_json::json!({ "path": intent.arguments["path"] }),
-        })?,
-        CapabilityId::FileCreate => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "file.create".to_string(),
-            parameters: serde_json::json!({ "path": intent.arguments["path"], "content": intent.arguments.get("content").cloned().unwrap_or(Value::String(String::new())) }),
-        })?,
-        CapabilityId::FileWrite => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "file.write".to_string(),
-            parameters: serde_json::json!({ "path": intent.arguments["path"], "content": intent.arguments["content"] }),
-        })?,
-        CapabilityId::FileRename => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "file.rename".to_string(),
-            parameters: serde_json::json!({ "from": intent.arguments["from"], "to": intent.arguments["to"] }),
-        })?,
-        CapabilityId::FileMove => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "file.move".to_string(),
-            parameters: serde_json::json!({ "from": intent.arguments["from"], "to": intent.arguments["to"] }),
-        })?,
-        CapabilityId::FileDelete => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "file.delete".to_string(),
-            parameters: serde_json::json!({ "path": intent.arguments["path"] }),
-        })?,
-        CapabilityId::SystemInfo => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "system.info".to_string(),
-            parameters: serde_json::json!({}),
-        })?,
-        CapabilityId::SystemResources => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "system.resources".to_string(),
-            parameters: serde_json::json!({}),
-        })?,
-        CapabilityId::SystemUptime => client.request(&aether_sdk::IpcRequest {
-            service_id: "aether-system-core".to_string(),
-            command: "system.uptime".to_string(),
-            parameters: serde_json::json!({}),
-        })?,
+        CapabilityId::ContextGet => client.request(&req("context.get", serde_json::json!({})))?,
+        CapabilityId::FileList => client.request(&req(
+            "file.list",
+            serde_json::json!({ "path": intent.arguments.get("path").cloned().unwrap_or(Value::String(String::new())) }),
+        ))?,
+        CapabilityId::FileSearch => {
+            client.request(&req("file.search", serde_json::json!({ "query": intent.arguments["query"] })))?
+        }
+        CapabilityId::FileRead => {
+            client.request(&req("file.read", serde_json::json!({ "path": intent.arguments["path"] })))?
+        }
+        CapabilityId::FileCreate => client.request(&req(
+            "file.create",
+            serde_json::json!({ "path": intent.arguments["path"], "content": intent.arguments.get("content").cloned().unwrap_or(Value::String(String::new())) }),
+        ))?,
+        CapabilityId::FileWrite => client.request(&req(
+            "file.write",
+            serde_json::json!({ "path": intent.arguments["path"], "content": intent.arguments["content"] }),
+        ))?,
+        CapabilityId::FileRename => client.request(&req(
+            "file.rename",
+            serde_json::json!({ "from": intent.arguments["from"], "to": intent.arguments["to"] }),
+        ))?,
+        CapabilityId::FileMove => client.request(&req(
+            "file.move",
+            serde_json::json!({ "from": intent.arguments["from"], "to": intent.arguments["to"] }),
+        ))?,
+        CapabilityId::FileDelete => {
+            client.request(&req("file.delete", serde_json::json!({ "path": intent.arguments["path"] })))?
+        }
+        CapabilityId::SystemInfo => client.request(&req("system.info", serde_json::json!({})))?,
+        CapabilityId::SystemResources => {
+            client.request(&req("system.resources", serde_json::json!({})))?
+        }
+        CapabilityId::SystemUptime => client.request(&req("system.uptime", serde_json::json!({})))?,
     };
 
     if response.ok {

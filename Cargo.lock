@@ -175,6 +175,7 @@ version = "0.1.0"
 dependencies = [
  "aether-application-manager",
  "aether-core",
+ "aether-security",
  "aether-storage",
  "serde",
  "serde_json",

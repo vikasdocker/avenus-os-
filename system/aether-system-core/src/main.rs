@@ -10,6 +10,7 @@ use aether_core::ipc::{IpcError, IpcRequest, IpcResponse};
 use aether_core::types::ServiceStatus;
 use aether_storage::system_info;
 use aether_storage::{FileManager, WorkspaceConfig};
+use aether_system_core::policy;
 use aether_system_core::{build_manager, load_manifests_from_dir, ServiceExecutor, ServiceHandle};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -200,6 +201,39 @@ fn dispatch(
     response
 }
 
+/// Convert a `PolicyVerdict` into the corresponding `IpcResponse`.
+///
+/// The IPC error code carries enough information for the caller
+/// (aetherctl, agentd, the shell) to decide what to do next:
+///   * `POLICY_DENIED` — the request is rejected; do not retry.
+///   * `REQUIRES_CONFIRMATION` — the capability is gated behind
+///     explicit user consent; the caller must surface the request
+///     to the user and re-issue through the approval flow.
+fn gate_response(command: &str, verdict: &aether_system_core::policy::PolicyVerdict) -> IpcResponse {
+    use aether_security::Decision;
+    let (code, message) = match (verdict.decision, &verdict.reason) {
+        (Decision::Deny, _) => ("POLICY_DENIED".to_string(), verdict.reason.clone()),
+        (Decision::RequireConsent, _) => {
+            ("REQUIRES_CONFIRMATION".to_string(), verdict.reason.clone())
+        }
+        // Allow is handled by the caller; this fn is only invoked
+        // when the gate rejects the request.
+        (Decision::Allow, _) => (
+            "INTERNAL".to_string(),
+            "gate_response called for allow verdict".to_string(),
+        ),
+    };
+    // Untrusted denials are tagged with a distinct code so the
+    // audit log + red-team suite can distinguish "policy said no"
+    // from "we don't know who you are".
+    let code = if code == "POLICY_DENIED" && verdict.reason.contains("untrusted actor") {
+        "POLICY_DENIED_UNTRUSTED".to_string()
+    } else {
+        code
+    };
+    IpcResponse::err(command, IpcError { code, message })
+}
+
 fn dispatch_inner(
     manager: &mut aether_system_core::manager::ServiceManager,
     apps: &mut ApplicationManager,
@@ -207,6 +241,22 @@ fn dispatch_inner(
     started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
+    // Policy gate: every command is evaluated against the cross-domain
+    // `DefaultPermissionPolicy` combined with the request's
+    // `actor_trust`. The verdict is converted into an IPC response:
+    //   * Deny            -> POLICY_DENIED, request is rejected.
+    //   * RequireConsent  -> REQUIRES_CONFIRMATION, the caller is
+    //                        told to re-issue through the agentd's
+    //                        approval-gated flow.
+    //   * Allow           -> fall through to the existing dispatcher.
+    //
+    // Untrusted actors are denied outright before the policy is even
+    // consulted — the system-core dispatcher must not execute
+    // capabilities for an unauthenticated peer.
+    let verdict = policy::evaluate(&req.command, req.actor_trust);
+    if !verdict.is_allow() {
+        return gate_response(&req.command, &verdict);
+    }
     let mut executor = LocalExecutor::default();
     match req.command.as_str() {
         "status" | "system.status" => {
@@ -1042,4 +1092,86 @@ fn main() {
     }
 
     eprintln!("[system-core] exited cleanly");
+}
+
+#[cfg(test)]
+mod dispatch_policy_tests {
+    //! Integration tests for the policy gate wired into `dispatch_inner`.
+    //!
+    //! The gate runs *before* the existing capability handlers, so
+    //! the test does not need a real `ServiceManager` or filesystem
+    //! — it only checks that the gate short-circuits to the right
+    //! error code for each (command, actor_trust) combination.
+
+    use super::gate_response;
+    use aether_core::ipc::{ActorTrust, IpcRequest};
+    use aether_system_core::policy::{evaluate, PolicyVerdict};
+    use aether_security::Decision;
+
+    fn req(command: &str, trust: ActorTrust) -> IpcRequest {
+        IpcRequest {
+            service_id: "test".to_string(),
+            command: command.to_string(),
+            parameters: serde_json::json!({}),
+            actor_trust: trust,
+        }
+    }
+
+    fn err_code(verdict: &PolicyVerdict) -> String {
+        gate_response("test", verdict).error.map(|e| e.code).unwrap_or_default()
+    }
+
+    #[test]
+    fn low_risk_trusted_passes_gate() {
+        let v = evaluate("system.status", ActorTrust::Trusted);
+        assert!(v.is_allow());
+    }
+
+    #[test]
+    fn high_risk_trusted_is_require_consent() {
+        let v = evaluate("file.delete", ActorTrust::Trusted);
+        assert_eq!(v.decision, Decision::RequireConsent);
+        assert_eq!(err_code(&v), "REQUIRES_CONFIRMATION");
+    }
+
+    #[test]
+    fn critical_shutdown_trusted_is_require_consent() {
+        let v = evaluate("system.shutdown", ActorTrust::Trusted);
+        assert_eq!(v.decision, Decision::RequireConsent);
+        assert_eq!(err_code(&v), "REQUIRES_CONFIRMATION");
+    }
+
+    #[test]
+    fn untrusted_low_risk_is_denied() {
+        let v = evaluate("system.status", ActorTrust::Untrusted);
+        assert_eq!(v.decision, Decision::Deny);
+        assert_eq!(err_code(&v), "POLICY_DENIED_UNTRUSTED");
+    }
+
+    #[test]
+    fn untrusted_shutdown_is_denied() {
+        let v = evaluate("system.shutdown", ActorTrust::Untrusted);
+        assert_eq!(v.decision, Decision::Deny);
+        assert_eq!(err_code(&v), "POLICY_DENIED_UNTRUSTED");
+    }
+
+    #[test]
+    fn gate_response_unused_for_allow_verdict() {
+        let v = evaluate("system.status", ActorTrust::Trusted);
+        let resp = gate_response("system.status", &v);
+        // The helper isn't called for allow verdicts, but if it is
+        // invoked defensively it should still produce a well-formed
+        // IpcResponse (ok=false, error present).
+        assert!(!resp.ok);
+        assert!(resp.error.is_some());
+    }
+
+    #[test]
+    fn request_defaults_trust_to_trusted() {
+        // Backwards-compat: existing callers that don't set
+        // actor_trust must still pass the gate for low-risk
+        // capabilities.
+        let r = req("system.status", ActorTrust::default());
+        assert_eq!(r.actor_trust, ActorTrust::Trusted);
+    }
 }

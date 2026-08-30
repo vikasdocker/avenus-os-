@@ -6,7 +6,7 @@
 
 pub mod client;
 
-pub use aether_core::ipc::{IpcError, IpcRequest, IpcResponse};
+pub use aether_core::ipc::{ActorTrust, IpcError, IpcRequest, IpcResponse};
 pub use client::AetherClient;
 
 /// SDK version reported to the control plane.

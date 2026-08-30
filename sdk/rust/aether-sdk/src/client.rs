@@ -1,6 +1,6 @@
 // Aether SDK - TCP control-plane client.
 
-use crate::{IpcRequest, IpcResponse};
+use crate::{ActorTrust, IpcRequest, IpcResponse};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::time::Duration;
@@ -47,6 +47,7 @@ impl AetherClient {
             service_id: "aether-system-core".to_string(),
             command: "status".to_string(),
             parameters: serde_json::json!({}),
+            actor_trust: ActorTrust::Trusted,
         })
     }
 
@@ -56,6 +57,7 @@ impl AetherClient {
             service_id: "aether-system-core".to_string(),
             command: action.to_string(),
             parameters: serde_json::json!({ "service": service_id }),
+            actor_trust: ActorTrust::Trusted,
         })
     }
 
@@ -65,6 +67,7 @@ impl AetherClient {
             service_id: "aether-system-core".to_string(),
             command: "shutdown".to_string(),
             parameters: serde_json::json!({}),
+            actor_trust: ActorTrust::Trusted,
         })
     }
 }
