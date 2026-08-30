@@ -2,6 +2,7 @@ use aether_core::{Capability, RiskLevel};
 use std::fmt::{self, Display};
 
 pub mod audit;
+pub mod credentials;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Decision {

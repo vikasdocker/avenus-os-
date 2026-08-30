@@ -9,6 +9,7 @@ use aether_core::error::ErrorKind;
 use aether_core::ipc::{IpcError, IpcRequest, IpcResponse};
 use aether_core::types::ServiceStatus;
 use aether_security::audit::{AuditChain, AuditEntry, ChainStatus, RetentionPolicy};
+use aether_security::credentials::{CredentialError, SealedStore, StaticKeyProvider};
 use aether_storage::system_info;
 use aether_storage::{FileManager, WorkspaceConfig};
 use aether_system_core::policy;
@@ -76,6 +77,34 @@ fn hex_lower(bytes: &[u8; 32]) -> String {
         out.push_str(&format!("{byte:02x}"));
     }
     out
+}
+
+/// Maps a `CredentialError` to the corresponding IPC
+/// error response. The IPC code is stable; the message
+/// is a short, caller-facing explanation.
+fn credential_error_response(command: &str, err: &CredentialError) -> IpcResponse {
+    let (code, message) = match err {
+        CredentialError::NotFound => ("NOT_FOUND".to_string(), err.to_string()),
+        CredentialError::AuthenticationFailed => {
+            ("AUTHENTICATION_FAILED".to_string(), err.to_string())
+        }
+        CredentialError::AlreadyExists { .. } => ("ALREADY_EXISTS".to_string(), err.to_string()),
+        CredentialError::Malformed => ("MALFORMED".to_string(), err.to_string()),
+    };
+    IpcResponse::err(command, IpcError { code, message })
+}
+
+/// Creates a new sealing key by drawing 32 random bytes
+/// from the OS RNG. The key is unique per process; the
+/// `StaticKeyProvider` zeroes it on `Drop` (when the
+/// daemon exits). For a production deployment the key
+/// would come from a TPM or the kernel keyring — this is
+/// a stand-in until that integration lands.
+fn new_sealing_key() -> [u8; 32] {
+    use rand::RngCore;
+    let mut key = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut key);
+    key
 }
 
 /// Structured audit line for every capability request dispatched here.
@@ -256,6 +285,7 @@ fn dispatch(
     apps: &mut ApplicationManager,
     files: &mut FileManager,
     audit_chain: &Mutex<AuditChain>,
+    credentials: &Mutex<SealedStore<StaticKeyProvider>>,
     started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
@@ -268,7 +298,8 @@ fn dispatch(
         || req.command.starts_with("storage.")
         || req.command == "context.get";
     let started_ok = true;
-    let response = dispatch_inner(manager, apps, files, audit_chain, started_at, req);
+    let response =
+        dispatch_inner(manager, apps, files, audit_chain, credentials, started_at, req);
     if is_capability {
         // For file capabilities, sanitize args to avoid logging content
         let mut sanitized = req.parameters.clone();
@@ -326,6 +357,7 @@ fn dispatch_inner(
     apps: &mut ApplicationManager,
     files: &mut FileManager,
     audit_chain: &Mutex<AuditChain>,
+    credentials: &Mutex<SealedStore<StaticKeyProvider>>,
     started_at: SystemTime,
     req: &IpcRequest,
 ) -> IpcResponse {
@@ -1161,6 +1193,165 @@ fn dispatch_inner(
                 }),
             )
         }
+        "credentials.seal" => {
+            // Seals `plaintext` under `name` and stores the
+            // ciphertext. If `name` exists, the call is
+            // rejected unless `force` is set. The plaintext
+            // never appears in the response — only the
+            // ciphertext, label, and length.
+            let name = req.parameters.get("name").and_then(|v| v.as_str());
+            let plaintext = req.parameters.get("plaintext").and_then(|v| v.as_str());
+            let label = req.parameters.get("label").and_then(|v| v.as_str());
+            let force = req.parameters.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+            let (name, plaintext) = match (name, plaintext) {
+                (Some(n), Some(p)) => (n, p),
+                _ => {
+                    return IpcResponse::err(
+                        "credentials.seal",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameters 'name' and 'plaintext' are required".to_string(),
+                        },
+                    )
+                }
+            };
+            let mut guard = match credentials.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            match guard.seal(name, plaintext, label, force) {
+                Ok(_) => IpcResponse::ok(
+                    "credentials.seal",
+                    serde_json::json!({ "name": name, "sealed": true }),
+                ),
+                Err(e) => credential_error_response("credentials.seal", &e),
+            }
+        }
+        "credentials.unseal" => {
+            // Decrypts and returns the plaintext for `name`.
+            // The plaintext is wrapped in a `Secret<String>`
+            // by the store and immediately turned into a
+            // owned `String` for the IPC response — at the
+            // cost of having it in the response buffer
+            // briefly, we get to keep the type system
+            // simple and the call site obvious. A future
+            // revision can pipe the `Secret` through
+            // zero-copy channels when one exists.
+            let name = match req.parameters.get("name").and_then(|v| v.as_str()) {
+                Some(n) => n,
+                None => {
+                    return IpcResponse::err(
+                        "credentials.unseal",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'name' is required".to_string(),
+                        },
+                    )
+                }
+            };
+            let guard = match credentials.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            match guard.unseal(name) {
+                Ok(secret) => {
+                    let value = secret.into_inner();
+                    IpcResponse::ok(
+                        "credentials.unseal",
+                        serde_json::json!({ "name": name, "plaintext": value }),
+                    )
+                }
+                Err(e) => credential_error_response("credentials.unseal", &e),
+            }
+        }
+        "credentials.list" => {
+            // Returns the names of every stored credential,
+            // sorted. Plaintext is never returned by this
+            // command.
+            let guard = match credentials.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let names = guard.names();
+            let total = guard.len();
+            IpcResponse::ok(
+                "credentials.list",
+                serde_json::json!({ "names": names, "total": total }),
+            )
+        }
+        "credentials.remove" => {
+            // Drops a credential. Returns the removed
+            // metadata (no plaintext) so the caller can
+            // confirm the right entry was removed.
+            let name = match req.parameters.get("name").and_then(|v| v.as_str()) {
+                Some(n) => n,
+                None => {
+                    return IpcResponse::err(
+                        "credentials.remove",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'name' is required".to_string(),
+                        },
+                    )
+                }
+            };
+            let mut guard = match credentials.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            match guard.remove(name) {
+                Ok(removed) => IpcResponse::ok(
+                    "credentials.remove",
+                    serde_json::json!({
+                        "name": removed.name,
+                        "plaintext_len": removed.plaintext_len,
+                        "sealed_at_ms": removed.blob.sealed_at_ms,
+                    }),
+                ),
+                Err(e) => credential_error_response("credentials.remove", &e),
+            }
+        }
+        "credentials.metadata" => {
+            // Returns the stored metadata for `name` —
+            // label, sealed-at timestamp, plaintext length,
+            // and the hex-encoded ciphertext length. No
+            // plaintext is ever returned.
+            let name = match req.parameters.get("name").and_then(|v| v.as_str()) {
+                Some(n) => n,
+                None => {
+                    return IpcResponse::err(
+                        "credentials.metadata",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'name' is required".to_string(),
+                        },
+                    )
+                }
+            };
+            let guard = match credentials.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            match guard.get(name) {
+                Some(cred) => IpcResponse::ok(
+                    "credentials.metadata",
+                    serde_json::json!({
+                        "name": cred.name,
+                        "label": cred.blob.label,
+                        "sealed_at_ms": cred.blob.sealed_at_ms,
+                        "plaintext_len": cred.plaintext_len,
+                        "ciphertext_len": cred.blob.bytes.len(),
+                    }),
+                ),
+                None => IpcResponse::err(
+                    "credentials.metadata",
+                    IpcError {
+                        code: "NOT_FOUND".to_string(),
+                        message: format!("credential '{name}' not found"),
+                    },
+                ),
+            }
+        }
         other => IpcResponse::err(
             other,
             IpcError {
@@ -1243,6 +1434,15 @@ fn main() {
     // long enough to span a typical session.
     let audit_chain = Mutex::new(AuditChain::new(RetentionPolicy::default()));
 
+    // In-memory sealed credential store. The key is fresh
+    // for every process invocation; credentials do not
+    // survive a restart until the journal integration
+    // lands. This is the right default for the OS-image
+    // boot story: nothing on the disk is sensitive, the
+    // user re-authenticates after each boot, and the
+    // store is freshly sealed.
+    let credentials = Mutex::new(SealedStore::new(StaticKeyProvider::new(new_sealing_key())));
+
     let listener = match std::net::TcpListener::bind((bind_addr.as_str(), port)) {
         Ok(l) => l,
         Err(e) => {
@@ -1282,6 +1482,7 @@ fn main() {
                         &mut apps,
                         &mut files,
                         &audit_chain,
+                        &credentials,
                         started_at,
                         &req,
                     )
@@ -1480,5 +1681,204 @@ mod audit_chain_tests {
         let json = chain_status_to_json(&gap);
         assert_eq!(json["kind"], serde_json::json!("index_gap"));
         assert_eq!(json["index"], serde_json::json!(42));
+    }
+}
+
+#[cfg(test)]
+mod credentials_ipc_tests {
+    //! Integration tests for the credentials.* IPC commands.
+    //!
+    //! Each test constructs a fresh `SealedStore` and
+    //! exercises one command path through the
+    //! `dispatch_inner` entry point. The store and the
+    //! audit chain are constructed with the same shape as
+    //! `main()` so any signature drift between the two is
+    //! caught here.
+
+    use super::credential_error_response;
+    use super::dispatch_inner;
+    use aether_application_manager::ApplicationManager;
+    use aether_core::ipc::{ActorTrust, IpcRequest};
+    use aether_security::audit::{AuditChain, RetentionPolicy};
+    use aether_security::credentials::{CredentialError, SealedStore, StaticKeyProvider};
+    use aether_storage::{FileManager, WorkspaceConfig};
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+
+    fn env() -> (
+        aether_system_core::manager::ServiceManager,
+        ApplicationManager,
+        FileManager,
+        Mutex<AuditChain>,
+        Mutex<SealedStore<StaticKeyProvider>>,
+    ) {
+        // The credentials tests never reach the manager
+        // (every command is short-circuited by the IPC
+        // handler), so an empty graph is sufficient.
+        let graph = aether_system_core::graph::DependencyGraph::new(&[])
+            .expect("empty graph");
+        let manager = aether_system_core::manager::ServiceManager::new(graph);
+        let apps = ApplicationManager::default();
+        let files = FileManager::new(WorkspaceConfig::from_env_or_default())
+            .expect("workspace init");
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
+        let store = Mutex::new(SealedStore::new(StaticKeyProvider::new([0x55u8; 32])));
+        (manager, apps, files, chain, store)
+    }
+
+    fn req(command: &str, params: serde_json::Value) -> IpcRequest {
+        IpcRequest {
+            service_id: "test".to_string(),
+            command: command.to_string(),
+            parameters: params,
+            actor_trust: ActorTrust::Trusted,
+        }
+    }
+
+    #[test]
+    fn seal_then_unseal_round_trip_via_ipc() {
+        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let started_at = SystemTime::now();
+
+        // Seal.
+        let r = req(
+            "credentials.seal",
+            serde_json::json!({
+                "name": "api_key",
+                "plaintext": "super-secret-value",
+                "label": "prod",
+            }),
+        );
+        let resp = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        assert!(resp.ok, "seal should succeed: {:?}", resp);
+
+        // Unseal.
+        let r = req("credentials.unseal", serde_json::json!({ "name": "api_key" }));
+        let resp = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        assert!(resp.ok);
+        assert_eq!(resp.result["plaintext"], serde_json::json!("super-secret-value"));
+    }
+
+    #[test]
+    fn seal_rejects_missing_inputs() {
+        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let started_at = SystemTime::now();
+        let r = req("credentials.seal", serde_json::json!({}));
+        let resp = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn seal_rejects_duplicate_by_default() {
+        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let started_at = SystemTime::now();
+        let r1 = req(
+            "credentials.seal",
+            serde_json::json!({ "name": "x", "plaintext": "v1" }),
+        );
+        let _ = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r1);
+        let r2 = req(
+            "credentials.seal",
+            serde_json::json!({ "name": "x", "plaintext": "v2" }),
+        );
+        let resp = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r2);
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "ALREADY_EXISTS");
+    }
+
+    #[test]
+    fn list_returns_sorted_names() {
+        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let started_at = SystemTime::now();
+        for (name, value) in [("zeta", "z"), ("alpha", "a"), ("mu", "m")] {
+            let r = req(
+                "credentials.seal",
+                serde_json::json!({ "name": name, "plaintext": value }),
+            );
+            let _ = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        }
+        let r = req("credentials.list", serde_json::json!({}));
+        let resp = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        assert!(resp.ok);
+        assert_eq!(
+            resp.result["names"],
+            serde_json::json!(["alpha", "mu", "zeta"])
+        );
+        assert_eq!(resp.result["total"], serde_json::json!(3));
+    }
+
+    #[test]
+    fn metadata_returns_label_and_length_only() {
+        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "credentials.seal",
+            serde_json::json!({ "name": "k", "plaintext": "value", "label": "lbl" }),
+        );
+        let _ = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        let r = req("credentials.metadata", serde_json::json!({ "name": "k" }));
+        let resp = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        assert!(resp.ok);
+        assert_eq!(resp.result["label"], serde_json::json!("lbl"));
+        assert_eq!(resp.result["plaintext_len"], serde_json::json!(5));
+        assert!(resp.result["ciphertext_len"].as_u64().unwrap() > 0);
+        // No plaintext field on metadata.
+        assert!(resp.result.get("plaintext").is_none());
+    }
+
+    #[test]
+    fn metadata_for_unknown_name_is_not_found() {
+        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let started_at = SystemTime::now();
+        let r = req("credentials.metadata", serde_json::json!({ "name": "nope" }));
+        let resp = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn remove_drops_the_credential() {
+        let (mut mgr, mut apps, mut files, chain, store) = env();
+        let started_at = SystemTime::now();
+        let r = req(
+            "credentials.seal",
+            serde_json::json!({ "name": "k", "plaintext": "v" }),
+        );
+        let _ = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        let r = req("credentials.remove", serde_json::json!({ "name": "k" }));
+        let resp = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        assert!(resp.ok);
+        assert_eq!(resp.result["name"], serde_json::json!("k"));
+        // Subsequent unseal must fail.
+        let r = req("credentials.unseal", serde_json::json!({ "name": "k" }));
+        let resp = dispatch_inner(&mut mgr, &mut apps, &mut files, &chain, &store, started_at, &r);
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn credential_error_response_maps_each_variant() {
+        // The mapping from `CredentialError` to IPC code
+        // is part of the daemon's stable contract; a
+        // caller can branch on the code without parsing
+        // the human-readable message.
+        let not_found = credential_error_response("test", &CredentialError::NotFound);
+        assert_eq!(not_found.error.as_ref().unwrap().code, "NOT_FOUND");
+
+        let auth = credential_error_response(
+            "test",
+            &CredentialError::AuthenticationFailed,
+        );
+        assert_eq!(auth.error.as_ref().unwrap().code, "AUTHENTICATION_FAILED");
+
+        let dup = credential_error_response(
+            "test",
+            &CredentialError::AlreadyExists { name: "k".to_string() },
+        );
+        assert_eq!(dup.error.as_ref().unwrap().code, "ALREADY_EXISTS");
+
+        let malformed = credential_error_response("test", &CredentialError::Malformed);
+        assert_eq!(malformed.error.as_ref().unwrap().code, "MALFORMED");
     }
 }
