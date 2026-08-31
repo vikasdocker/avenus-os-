@@ -32,7 +32,7 @@ pub mod tool;
 pub mod tools;
 pub mod validator;
 
-pub use action::{Action, ActionId, ActionVariant};
+pub use action::{recovery_policy_for, Action, ActionId, ActionVariant};
 pub use approval::{ApprovalDecision, ApprovalRequest, ApprovalStatus};
 pub use cancellation::CancellationToken;
 pub use errors::AgentError;

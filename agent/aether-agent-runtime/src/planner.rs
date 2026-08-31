@@ -190,6 +190,36 @@ impl Planner {
         plan
     }
 
+    /// Creates a single-step plan from an `Action`, using the
+    /// trusted `recovery_policy_for(&action.variant)` mapping as
+    /// the recovery policy. This is the recommended entry point
+    /// for new code: it pulls the policy from the trusted
+    /// classification table rather than letting the LLM or the
+    /// caller pick a retry budget.
+    pub fn plan_for_action(&self, action: &crate::action::Action) -> Plan {
+        use crate::action::{recovery_policy_for, ActionRisk};
+        let risk = match action.risk_level {
+            ActionRisk::Low => "low",
+            ActionRisk::Medium => "medium",
+            ActionRisk::High => "high",
+            ActionRisk::Critical => "critical",
+        };
+        let recovery = recovery_policy_for(&action.variant);
+        let mut plan = Plan::new(&action.session_id, action.action_name());
+        plan.add_step(PlanStep {
+            step_index: 0,
+            action_name: action.action_name().to_string(),
+            parameters: serde_json::to_value(&action.variant)
+                .unwrap_or_else(|_| serde_json::json!({})),
+            depends_on: Vec::new(),
+            required_capabilities: action.requested_capabilities.clone(),
+            risk_level: risk.to_string(),
+            optional: false,
+            recovery,
+        });
+        plan
+    }
+
     /// Creates a multi-step plan.
     pub fn plan_multi(&self, session_id: &str, intent_summary: &str, steps: Vec<PlanStep>) -> Plan {
         let mut plan = Plan::new(session_id, intent_summary);

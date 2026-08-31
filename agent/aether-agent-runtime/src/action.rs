@@ -7,6 +7,13 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
+/// A recommended recovery policy for an `ActionVariant`.
+///
+/// `RecoveryPolicy` lives in `crate::recovery`; this re-export
+/// is here so callers can `use Action::recovery_policy` without
+/// pulling in the recovery module.
+pub use crate::recovery::RecoveryPolicy;
+
 /// Unique action identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ActionId(pub Uuid);
@@ -442,6 +449,43 @@ fn classify_action(variant: &ActionVariant) -> (Vec<String>, ActionRisk) {
     }
 }
 
+/// Returns the recommended `RecoveryPolicy` for an `ActionVariant`.
+///
+/// Read-only / idempotent actions get
+/// `RecoveryPolicy::transient_default()` (retry up to 3 times with
+/// exponential backoff). Mutating actions (writes, deletes,
+/// enable/disable, credentials, power) get
+/// `RecoveryPolicy::no_retry()` — a retry on a mutating action
+/// can produce duplicate side effects, so the user must
+/// re-issue explicitly. This mapping is part of the trusted
+/// code path; the LLM cannot override it.
+pub fn recovery_policy_for(variant: &ActionVariant) -> RecoveryPolicy {
+    use ActionVariant::*;
+    match variant {
+        ApplicationLaunch(_) | ApplicationClose(_) => RecoveryPolicy::no_retry(),
+        FileCreate(_) | FileWrite(_) | FileRename(_) | FileMove(_) | FileDelete(_) => {
+            RecoveryPolicy::no_retry()
+        }
+        DeviceEnable(_) | DeviceDisable(_) => RecoveryPolicy::no_retry(),
+        DisplaySetResolution(_) | DisplaySetBrightness(_) => RecoveryPolicy::no_retry(),
+        CredentialSeal(_) | CredentialUnseal(_) | PolicyReload => RecoveryPolicy::no_retry(),
+        SystemReboot(_) | SystemShutdown(_) | SystemSuspend => RecoveryPolicy::no_retry(),
+        WindowClose(_) => RecoveryPolicy::no_retry(),
+        WindowList | WindowFocus(_) | WindowMinimize(_) | WindowMaximize(_) => {
+            RecoveryPolicy::transient_default()
+        }
+        FileList(_) | FileRead(_) | FileSearch(_) => RecoveryPolicy::transient_default(),
+        ProcessList | ProcessInspect(_) => RecoveryPolicy::transient_default(),
+        NetworkStatus | NetworkInterfaces => RecoveryPolicy::transient_default(),
+        SystemStatus | SystemInfo | SystemResources | SystemUptime => {
+            RecoveryPolicy::transient_default()
+        }
+        StorageStatus | ContextGet => RecoveryPolicy::transient_default(),
+        DisplayList => RecoveryPolicy::transient_default(),
+        DeviceList | DeviceInspect(_) => RecoveryPolicy::transient_default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,5 +633,157 @@ mod tests {
 
         let reload = Action::new("s1", ActionVariant::PolicyReload, "reload");
         assert_eq!(reload.risk_level, ActionRisk::Medium);
+    }
+
+    #[test]
+    fn mutating_actions_have_no_retry_policy() {
+        // A retry on these can produce duplicate side effects.
+        let variants = [
+            ActionVariant::ApplicationLaunch(ApplicationLaunchParams {
+                application_id: "x".to_string(),
+            }),
+            ActionVariant::FileWrite(FileWriteParams {
+                path: "/x".to_string(),
+                content: "y".to_string(),
+            }),
+            ActionVariant::FileDelete(FileDeleteParams { path: "/x".to_string() }),
+            ActionVariant::DeviceEnable(DeviceEnableParams {
+                device_id: "x".to_string(),
+            }),
+            ActionVariant::CredentialSeal(CredentialSealParams {
+                name: "n".to_string(),
+                plaintext: "p".to_string(),
+            }),
+            ActionVariant::SystemReboot(SystemRebootParams { delay_ms: 0 }),
+            ActionVariant::SystemShutdown(SystemShutdownParams { delay_ms: 0 }),
+            ActionVariant::SystemSuspend,
+            ActionVariant::PolicyReload,
+        ];
+        for v in &variants {
+            let p = recovery_policy_for(v);
+            assert_eq!(
+                p.max_retries, 0,
+                "{v:?} should be no_retry, got max_retries={}",
+                p.max_retries
+            );
+        }
+    }
+
+    #[test]
+    fn read_only_actions_have_transient_default_policy() {
+        let variants = [
+            ActionVariant::FileList(FileListParams { path: "/".to_string() }),
+            ActionVariant::FileRead(FileReadParams { path: "/".to_string() }),
+            ActionVariant::ProcessList,
+            ActionVariant::NetworkStatus,
+            ActionVariant::SystemStatus,
+            ActionVariant::StorageStatus,
+            ActionVariant::DisplayList,
+            ActionVariant::DeviceList,
+        ];
+        for v in &variants {
+            let p = recovery_policy_for(v);
+            assert_eq!(
+                p.max_retries, 3,
+                "{v:?} should retry up to 3 times, got {}",
+                p.max_retries
+            );
+        }
+    }
+
+    #[test]
+    fn recovery_policy_for_every_variant() {
+        // Exhaustive coverage: if a new variant is added without
+        // a recovery_policy_for branch, the compiler error here
+        // forces the dev to decide.
+        let variants = [
+            ActionVariant::ApplicationLaunch(ApplicationLaunchParams {
+                application_id: "x".to_string(),
+            }),
+            ActionVariant::ApplicationClose(ApplicationCloseParams {
+                application_id: "x".to_string(),
+            }),
+            ActionVariant::WindowList,
+            ActionVariant::WindowFocus(WindowFocusParams {
+                window_id: Some(1),
+                application_id: None,
+            }),
+            ActionVariant::WindowMinimize(WindowMinimizeParams { window_id: 1 }),
+            ActionVariant::WindowMaximize(WindowMaximizeParams { window_id: 1 }),
+            ActionVariant::WindowClose(WindowCloseParams {
+                window_id: Some(1),
+                application_id: None,
+            }),
+            ActionVariant::FileList(FileListParams { path: "/".to_string() }),
+            ActionVariant::FileRead(FileReadParams { path: "/".to_string() }),
+            ActionVariant::FileCreate(FileCreateParams {
+                path: "/x".to_string(),
+                content: None,
+            }),
+            ActionVariant::FileWrite(FileWriteParams {
+                path: "/x".to_string(),
+                content: "y".to_string(),
+            }),
+            ActionVariant::FileSearch(FileSearchParams {
+                query: "q".to_string(),
+                path: None,
+            }),
+            ActionVariant::FileRename(FileRenameParams {
+                from: "/a".to_string(),
+                to: "/b".to_string(),
+            }),
+            ActionVariant::FileMove(FileMoveParams {
+                from: "/a".to_string(),
+                to: "/b".to_string(),
+            }),
+            ActionVariant::FileDelete(FileDeleteParams { path: "/x".to_string() }),
+            ActionVariant::ProcessList,
+            ActionVariant::ProcessInspect(ProcessInspectParams {
+                pid: Some(1),
+                name: None,
+            }),
+            ActionVariant::NetworkStatus,
+            ActionVariant::NetworkInterfaces,
+            ActionVariant::SystemStatus,
+            ActionVariant::SystemInfo,
+            ActionVariant::SystemResources,
+            ActionVariant::SystemUptime,
+            ActionVariant::StorageStatus,
+            ActionVariant::ContextGet,
+            ActionVariant::DisplayList,
+            ActionVariant::DisplaySetBrightness(DisplaySetBrightnessParams {
+                display_id: "d".to_string(),
+                level: 50,
+            }),
+            ActionVariant::DisplaySetResolution(DisplaySetResolutionParams {
+                display_id: "d".to_string(),
+                width: 1920,
+                height: 1080,
+            }),
+            ActionVariant::DeviceList,
+            ActionVariant::DeviceInspect(DeviceInspectParams {
+                device_id: "d".to_string(),
+            }),
+            ActionVariant::DeviceEnable(DeviceEnableParams {
+                device_id: "d".to_string(),
+            }),
+            ActionVariant::DeviceDisable(DeviceDisableParams {
+                device_id: "d".to_string(),
+            }),
+            ActionVariant::SystemReboot(SystemRebootParams { delay_ms: 0 }),
+            ActionVariant::SystemShutdown(SystemShutdownParams { delay_ms: 0 }),
+            ActionVariant::SystemSuspend,
+            ActionVariant::CredentialSeal(CredentialSealParams {
+                name: "n".to_string(),
+                plaintext: "p".to_string(),
+            }),
+            ActionVariant::CredentialUnseal(CredentialUnsealParams {
+                name: "n".to_string(),
+            }),
+            ActionVariant::PolicyReload,
+        ];
+        for v in &variants {
+            let _ = recovery_policy_for(v);
+        }
     }
 }
