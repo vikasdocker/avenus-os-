@@ -29,6 +29,7 @@ pub mod request;
 pub mod session;
 pub mod structured_intent;
 pub mod tool;
+pub mod tools;
 pub mod validator;
 
 pub use action::{Action, ActionId, ActionVariant};
@@ -58,4 +59,5 @@ pub use structured_intent::{
     INTENT_SCHEMA,
 };
 pub use tool::{ToolDefinition, ToolId, ToolRegistry};
+pub use tools::{register_all_tools, routing_for};
 pub use validator::{ValidationResult, Validator};
