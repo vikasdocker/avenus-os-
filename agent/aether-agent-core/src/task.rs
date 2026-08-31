@@ -154,6 +154,21 @@ impl TaskKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TaskId(String);
 
+impl Default for TaskId {
+    /// Returns a default `TaskId` of
+    /// `"default"`. Used as a last-resort
+    /// fallback; production code should
+    /// always supply a real id via
+    /// `TaskId::new`.
+    fn default() -> Self {
+        // SAFETY: "default" is a
+        // non-empty literal, so
+        // `TaskId::new` always returns
+        // `Some`.
+        Self("default".to_string())
+    }
+}
+
 impl TaskId {
     /// Creates a new `TaskId` from a non-empty string.
     #[must_use]

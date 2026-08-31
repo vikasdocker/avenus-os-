@@ -1,0 +1,13 @@
+[package]
+name = "aether-sandbox-policy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether sandbox policy: typed audit and runtime checks for the declarative SandboxPlan. Engine-agnostic — wraps aether-core's plan with audit records and live-vs-plan diffing."
+
+[dependencies]
+aether-core = { path = "../../core/aether-core" }
+
+[lints]
+workspace = true

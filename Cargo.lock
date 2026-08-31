@@ -310,6 +310,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-sandbox-policy"
+version = "0.1.0"
+dependencies = [
+ "aether-core",
+]
+
+[[package]]
 name = "aether-sdk"
 version = "0.1.0"
 dependencies = [
@@ -434,6 +441,17 @@ version = "0.1.0"
 dependencies = [
  "aether-ocr",
  "aether-vision-core",
+]
+
+[[package]]
+name = "aether-update-agent"
+version = "0.1.0"
+dependencies = [
+ "aether-agent-core",
+ "aether-core",
+ "aether-retry-policy",
+ "aether-security",
+ "aether-update-core",
 ]
 
 [[package]]

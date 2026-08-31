@@ -1,0 +1,17 @@
+[package]
+name = "aether-update-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether update agent: the runtime that drives the update state machine, performs the atomic apply, and rolls back on failure. Builds on aether-update-core's plan/state model. Engine-agnostic — the runtime plugs in the real I/O via the ApplyEngine trait."
+
+[dependencies]
+aether-core = { path = "../../core/aether-core" }
+aether-update-core = { path = "../aether-update-core" }
+aether-retry-policy = { path = "../../agent/aether-retry-policy" }
+aether-agent-core = { path = "../../agent/aether-agent-core" }
+aether-security = { path = "../../security/aether-security" }
+
+[lints]
+workspace = true
