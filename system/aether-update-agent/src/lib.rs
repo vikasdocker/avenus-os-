@@ -53,6 +53,12 @@
 
 extern crate alloc;
 
+mod engine;
+
+pub use engine::{
+    sha256_inline, EngineAudit, FilesystemApplyEngine, FilesystemApplyError,
+};
+
 use alloc::string::String;
 use alloc::vec::Vec;
 
