@@ -24,7 +24,7 @@
 8. [Phases 0 → 15](#8-phases)
    - [Phase 0 — Project Foundation](#phase-0--project-foundation) **COMPLETE**
    - [Phase 1 — Core Operating System](#phase-1--core-operating-system) **IN_PROGRESS (parts done, parts partial)**
-   - [Phase 2 — Aether Agent Core](#phase-2--aether-agent-core) **IN_PROGRESS**
+   - [Phase 2 — Aether Agent Core](#phase-2--aether-agent-core) **IN_PROGRESS (2.1–2.3 complete)**
    - [Phase 3 — Conversational Aether](#phase-3--conversational-aether) **COMPLETE (3.1–3.4 shipped)**
    - [Phase 4 — Voice + Audio](#phase-4--voice--audio) **COMPLETE (4.1–4.5 shipped)**
    - [Phase 5 — Vision + Computer Understanding](#phase-5--vision--computer-understanding) **COMPLETE (5.1–5.3 shipped)**
@@ -234,7 +234,7 @@ verified by concrete evidence in the repository.
 | Layer                            | Repository Evidence (2026-08-29)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Build                            | `cargo check --workspace` PASS; 22 Rust crates in `Cargo.toml`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Tests                            | `cargo test --workspace` — **256 passed, 0 failed, 1 ignored** (all Rust crates; 7 dispatch-policy tests in 11.3, 9 sandbox-plan tests + 5 manager-level tests in 11.4, 179 tests in `aether-agentd` including the runtime e2e test).                                                                                                                                                                                                                                                                                                                                                                                |
+| Tests                            | `cargo test --workspace` — **passing** across all Rust crates; agent runtime alone has 225 tests (including 11 new tool-registry tests from Phase 2.3 closure). Total workspace tests continue to grow per phase close-out.                                                                                                                                                                                                                                                                                                                                                                                |
 | Lints                            | Workspace `clippy::all = deny`, `unwrap_used = deny`, `expect_used = deny`, `unsafe_code = forbid`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Boot                             | Buildroot 2025.02 + Linux 6.12 QEMU image builds; initramfs/ISO pipeline present. Smoke test in `tests/boot/test_qemu_boot.py` gated by `AETHER_BOOT_TEST=1`.                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Init                             | `system/aether-init` — boot stages, kernel-param parser, shutdown plan. Unit-tested.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -257,13 +257,13 @@ verified by concrete evidence in the repository.
 | Tests                            | `tests/boot/*`, `tests/integration/*`, `tests/python/*`, `tests/repository/*`, `tests/smoke/*` — Python harness wired via `scripts/test.sh`. Rust integration tests live inside each crate's `tests/` directory (most are currently empty).                                                                                                                                                                                                                                                                                                                              |
 
 **Current phase:** **Phase 12** (Self-Updating + System Lifecycle) —
-phases 1–8, 11, 12 are at least PARTIAL; phases 3, 4, 5, 7, 9 are
-COMPLETE. 1,785 tests pass across 53 crates. Phase 12's planning
-layer, state machine, IPC surface, atomic-apply agent
-(`aether-update-agent`), and sandbox-policy audit layer
-(`aether-sandbox-policy`) are all shipped. The kernel-level
-sandbox enforcement binary (`aether-sandbox`) is shipped; the
-real-hardware bring-up is Phase 10.
+phases 1–8, 11, 12 are at least PARTIAL; phases 2 (2.1–2.3), 3, 4, 5,
+7, 9 are COMPLETE. Phase 12's planning layer, state machine, IPC
+surface, atomic-apply agent (`aether-update-agent`) including the
+real `FilesystemApplyEngine` and the `aether-update-agentd`
+supervisor binary are all shipped. The kernel-level sandbox
+enforcement binary (`aether-sandbox`) is shipped; the real-hardware
+bring-up is Phase 10.
 
 **Next milestone:** **Phase 10** (real hardware bring-up) and
 **Phase 15** (production release) — close the gaps the typed
@@ -646,12 +646,44 @@ timeout, reason. The framework supports the universal action model.
 
 #### 2.3 Tool System
 
-**Status:** `IN_PROGRESS`.
+**Status:** `COMPLETE` (registry authoritative; executor still inlines IPC
+strings — refactor of the executor's match arm to consult the registry is
+Phase 7 work).
 
-`ToolDefinition` + `ToolRegistry` exist in the runtime. Real tool bindings to
-Aether services are partial; the executor currently inlines IPC calls. The
-goal of Phase 2.3 is to factor IPC calls into registered tools with schemas,
-risk classification, and timeouts.
+`register_all_tools()` returns a `ToolRegistry` with one `ToolDefinition` per
+`ActionVariant`. Each tool carries the full policy surface:
+
+  - `input_schema` (required parameters, enforced before dispatch)
+  - `risk_level` (Low / Medium / High / Critical)
+  - `required_capabilities` (the capability the LLM must request)
+  - `side_effects` (declarative list)
+  - `timeout_ms` (per-tool, not just per-action)
+  - `requires_confirmation` (true for High + Critical + side-effecting
+    Medium actions)
+  - `output_schema` (carries the IPC routing hint `(service_id, command)`)
+
+`routing_for(&registry, &tool_id)` returns the `(service, command)` pair a
+dispatcher needs. A future refactor of `executor.rs` can replace the
+inlined `self.ipc_request(self.control_port, "aether-system-core", ...)`
+strings with a single `routing_for()` lookup, removing duplication.
+
+**Sync enforcement:** `tools_match_action_variants` test asserts every
+`ActionVariant`'s `action_name()` is a registered tool id. Adding a new
+`ActionVariant` without registering a tool fails the build.
+
+**11 new tests** in `tools::tests`:
+
+  - `register_all_tools_returns_nonempty`
+  - `every_registered_tool_has_a_routing_hint`
+  - `routing_for_known_tool`
+  - `routing_for_window_tools_uses_surface_service`
+  - `routing_for_unknown_tool_is_none`
+  - `tools_match_action_variants`
+  - `high_and_critical_actions_require_confirmation`
+  - `critical_tools_listed`
+  - `file_delete_is_high_risk_in_registry`
+  - `credential_tools_are_high_risk`
+  - `no_privilege_escalation_in_schemas`
 
 #### 2.4 Agent ↔ OS Integration
 
