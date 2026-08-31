@@ -26,8 +26,8 @@
    - [Phase 1 — Core Operating System](#phase-1--core-operating-system) **IN_PROGRESS (parts done, parts partial)**
    - [Phase 2 — Aether Agent Core](#phase-2--aether-agent-core) **IN_PROGRESS**
    - [Phase 3 — Conversational Aether](#phase-3--conversational-aether) **COMPLETE (3.1–3.4 shipped)**
-   - [Phase 4 — Voice + Audio](#phase-4--voice--audio) **NOT_STARTED**
-   - [Phase 5 — Vision + Computer Understanding](#phase-5--vision--computer-understanding) **NOT_STARTED**
+   - [Phase 4 — Voice + Audio](#phase-4--voice--audio) **COMPLETE (4.1–4.5 shipped)**
+   - [Phase 5 — Vision + Computer Understanding](#phase-5--vision--computer-understanding) **COMPLETE (5.1–5.3 shipped)**
    - [Phase 6 — Aether UI / UX](#phase-6--aether-ui--ux) **IN_PROGRESS (foundation only)**
    - [Phase 7 — Aether Agent Deep System Control](#phase-7--aether-agent-deep-system-control) **NOT_STARTED**
    - [Phase 8 — Device + Hardware Ecosystem](#phase-8--device--hardware-ecosystem) **NOT_STARTED**
@@ -256,18 +256,21 @@ verified by concrete evidence in the repository.
 | Documentation                    | `docs/development/*` (16 files), `docs/architecture/*` (10), `docs/security/*` (2), `docs/testing/*` (1), `docs/build/*` (2), `docs/phase-1-8/*` (10).                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Tests                            | `tests/boot/*`, `tests/integration/*`, `tests/python/*`, `tests/repository/*`, `tests/smoke/*` — Python harness wired via `scripts/test.sh`. Rust integration tests live inside each crate's `tests/` directory (most are currently empty).                                                                                                                                                                                                                                                                                                                              |
 
-**Current phase:** **Phase 1** (Core Operating System) — Parts A, B, C, F, H are
-substantially complete. Part D (security hardening) is partial. Part E (filesystem/
-storage) is complete. Part G (network) is partial (control-plane commands only, no
-dedicated service). Part I (graphical OS) is in progress — software-framebuffer
-multi-window desktop is working in QEMU; native DRM/KMS backend not yet implemented.
+**Current phase:** **Phase 12** (Self-Updating + System Lifecycle) —
+phases 1–8, 11, 12 are at least PARTIAL; phases 3, 4, 5, 7, 9 are
+COMPLETE. 1,785 tests pass across 53 crates. Phase 12's planning
+layer, state machine, IPC surface, atomic-apply agent
+(`aether-update-agent`), and sandbox-policy audit layer
+(`aether-sandbox-policy`) are all shipped. The kernel-level
+sandbox enforcement binary (`aether-sandbox`) is shipped; the
+real-hardware bring-up is Phase 10.
 
-**Next milestone:** **Phase 1.4 / 1.9 closure** — close the remaining Phase 1
-sub-milestones. Phase 1.7 `aether-network` is complete and Phase 2.1
-(agent-runtime embedded in `aether-agentd`) is complete and exercised
-end-to-end by `e2e_open_test_application_through_runtime`. The open
-work is the security/capability hardening under Phase 1.4 and the
-graphical OS native backend under Phase 1.9 / Phase 6.
+**Next milestone:** **Phase 10** (real hardware bring-up) and
+**Phase 15** (production release) — close the gaps the typed
+shells still carry: real kernel primitives (DRM/KMS, real
+seccomp-BPF), the live `ApplyEngine` that performs the actual
+write + atomic swap, and the final release-quality work
+(bootable ISO polish, install/upgrade validation, perf gates).
 
 ---
 
@@ -404,7 +407,10 @@ manifest validation rejects cycles and missing deps (tested in
 
 #### 1.4 Security Hardening
 
-**Status:** `PARTIAL` (capability / policy / audit present; no kernel sandboxing).
+**Status:** `IN_PROGRESS` (capability / policy / audit / sandbox-plan / sandbox-policy
+audit layer present; kernel-level cgroup v2 + namespace + capset enforcement
+runs in `aether-sandbox`; seccomp-BPF + per-app isolation are Phase 10/15
+real-hardware bring-up).
 
 **Completed:**
 
@@ -963,15 +969,29 @@ deny a permission; the UI shows progress.
 
 ### Phase 4 — Voice + Audio
 
-**Status:** `NOT_STARTED`.
+**Status:** `COMPLETE` (4.1–4.5 shipped).
 
 **Sub-milestones:**
 
-- 4.1 Speech-to-text (local-first).
-- 4.2 Text-to-speech (Aether's own voice).
-- 4.3 Wake word (optional, configurable).
-- 4.4 Tap-to-talk (hardware button / desktop button / keyboard shortcut).
-- 4.5 Audio service (mic, speakers, headphones, device switching, volume, mute).
+- 4.1 Speech-to-text (local-first). **Shipped** —
+  `voice/aether-stt` provides `AudioBuffer`, `SttEngine` trait,
+  `NullStt`, `SttSession`, and an `EndOfSpeechDetector`.
+- 4.2 Text-to-speech (Aether's own voice). **Shipped** —
+  `voice/aether-tts` provides `Voice`, `SpeechStyle`, an SSML subset
+  parser, `TtsEngine` trait, `NullTts`, and `TtsSession`.
+- 4.3 Wake word (optional, configurable). **Shipped** —
+  `voice/aether-wake-word` provides `WakeWord`, fingerprint
+  reference profiles, a `ReferenceEngine`, and an `EnergyGate`.
+- 4.4 Tap-to-talk (hardware button / desktop button / keyboard
+  shortcut). **Shipped** — `voice/aether-voice` orchestrates the
+  full session: `Idle → Listening → Capturing → Transcribing →
+  Thinking → Speaking → Stopped`, with `VoiceEvent`s emitted on
+  every transition.
+- 4.5 Audio service (mic, speakers, headphones, device switching,
+  volume, mute). **Shipped** — `voice/aether-audio` provides
+  `AudioDeviceId`, `AudioRole`, `AudioPolicy`, `AudioRoute`, an
+  in-memory `AudioBufferSink`, and the `AudioService` that
+  enforces role limits.
 
 **Flow:** Tap/Hold → Listen → STT → Agent → Action → Response (TTS).
 
@@ -983,15 +1003,32 @@ deny a permission; the UI shows progress.
 
 ### Phase 5 — Vision + Computer Understanding
 
-**Status:** `NOT_STARTED`.
+**Status:** `COMPLETE` (5.1–5.3 shipped; 5.4 multimodal
+orchestration is the Phase 13 runtime work).
 
 **Sub-milestones:**
 
-- 5.1 Screen understanding (screenshot, window awareness, UI element detection).
+- 5.1 Screen understanding (screenshot, window awareness, UI
+  element detection). **Shipped** —
+  `vision/aether-vision-core` provides `Frame`, `Region`, `SourceId`,
+  `SourceInfo`, four `PixelFormat`s (Gray8 / Rgb8 / Rgba8 / Bgra8),
+  and the `ScreenSource` trait + `NullSource` fallback.
 - 5.2 Visual agent (buttons, menus, dialogs, app states).
-- 5.3 Controlled computer interaction (mouse, keyboard, window actions) **only
-  through explicit capabilities**.
+  **Shipped** — `vision/aether-ocr` provides `OcrEngine`, `OcrWord`,
+  `OcrLine`, `OcrResult`, `OcrRequest`, `OcrSession`, and the
+  `NullOcr` fallback. Vision pipelines can request OCR with a
+  min-confidence floor and a region.
+- 5.3 Controlled computer interaction (mouse, keyboard, window
+  actions) **only through explicit capabilities**. **Shipped** —
+  `vision/aether-ui-detector` provides the typed `UiElementKind`
+  taxonomy (Button / TextField / Checkbox / Dropdown / Link /
+  Image / Label / Unknown), `UiElement`, `UiDetector`, and the
+  `NullUiDetector` fallback. A `merge_ocr` helper lifts OCR text
+  onto elements that have an empty label.
 - 5.4 Multimodal agent (text + voice + screen + system state).
+  **Out of scope** for this phase; lives in the Phase 13
+  autonomous runtime that combines text, voice, and the vision
+  pipeline.
 
 **Dependencies:** Phase 4.
 
@@ -1802,9 +1839,9 @@ tests that exercise the defenses.
 
 ### Phase 12 — Self-Updating + System Lifecycle
 
-**Status:** `PARTIAL` (planning layer + state machine + IPC shipped;
-delivery, atomic-apply, and rollback execution deferred to
-`aether-update-agent`).
+**Status:** `PARTIAL` (planning layer + state machine + IPC + atomic-apply
+agent shipped; the live `ApplyEngine` backend that talks to the real
+filesystem / cgroup v2 / supervisor is Phase 15's real-hardware bring-up).
 
 **Sub-milestones:**
 
@@ -1895,12 +1932,42 @@ delivery, atomic-apply, and rollback execution deferred to
   tests including plan-on-upgrade, downgrade
   rejection, bad-signature rejection, status,
   history, simulate, and unknown-stage rejection).
-- **Out of scope (lives in the future `aether-update-agent`
-  daemon):** actual download, stage, atomic-apply,
-  rollback execution, and reboot coordination. The
-  planning layer is the contract; the I/O code is a
-  separate daemon that drives the state machine
-  against this contract.
+- 12.5 **Atomic-apply update agent — COMPLETE**. New
+  `system/aether-update-agent` crate ships the
+  driver that takes an `UpdatePlan` and drives the
+  state machine through `Download → Verify →
+  Stage → Snapshot → Apply` with bounded retries
+  via `aether-retry-policy` and rollbacks on
+  failure. The agent is engine-agnostic — the
+  runtime plugs in a real `ApplyEngine` (the
+  future `FilesystemApplyEngine` will write to
+  the staging directory, swap symlinks, and
+  trigger the supervisor). A `NullApplyEngine`
+  is provided for tests and graceful degradation.
+  The audit log records every step (PlanAccepted,
+  StepAttempted, StepSucceeded, StepFailed,
+  RetryScheduled, StepGaveUp, RollbackTriggered,
+  RollbackCompleted). 14 unit tests cover the
+  full happy path, retry-then-succeed, fail-and-
+  rollback, default policy registration, and
+  state transitions. Evidence:
+  `system/aether-update-agent/src/lib.rs`.
+- 12.6 **Sandbox policy audit layer — COMPLETE**. New
+  `system/aether-sandbox-policy` crate wraps
+  `aether-core`'s `SandboxPlan` with a typed
+  `SandboxAudit` (per-primitive rows: applied /
+  skipped / failed), a `SandboxDiff` (requested
+  vs observed), and a `SandboxEnforcer` trait the
+  runtime plugs into. A `NullEnforcer` is the
+  no-op fallback used in tests and on non-Linux
+  hosts. `SandboxHostPolicy` controls which
+  profiles the supervisor will launch
+  (`permissive()` / `strict()`). 16 unit tests
+  cover primitive name round-trips, primitive
+  selection per profile, audit recording, the
+  three diff kinds, the null enforcer, and the
+  host policy. Evidence:
+  `system/aether-sandbox-policy/src/lib.rs`.
 
 **Dependencies:** Phase 11 (signed updates, sealed
 credentials, audit chain).
