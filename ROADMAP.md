@@ -24,19 +24,19 @@
 8. [Phases 0 → 15](#8-phases)
    - [Phase 0 — Project Foundation](#phase-0--project-foundation) **COMPLETE**
    - [Phase 1 — Core Operating System](#phase-1--core-operating-system) **IN_PROGRESS (parts done, parts partial)**
-   - [Phase 2 — Aether Agent Core](#phase-2--aether-agent-core) **IN_PROGRESS (2.1–2.3 complete)**
+   - [Phase 2 — Aether Agent Core](#phase-2--aether-agent-core) **COMPLETE (2.1–2.9 shipped)**
    - [Phase 3 — Conversational Aether](#phase-3--conversational-aether) **COMPLETE (3.1–3.4 shipped)**
    - [Phase 4 — Voice + Audio](#phase-4--voice--audio) **COMPLETE (4.1–4.5 shipped)**
    - [Phase 5 — Vision + Computer Understanding](#phase-5--vision--computer-understanding) **COMPLETE (5.1–5.3 shipped)**
    - [Phase 6 — Aether UI / UX](#phase-6--aether-ui--ux) **IN_PROGRESS (foundation only)**
-   - [Phase 7 — Aether Agent Deep System Control](#phase-7--aether-agent-deep-system-control) **NOT_STARTED**
-   - [Phase 8 — Device + Hardware Ecosystem](#phase-8--device--hardware-ecosystem) **NOT_STARTED**
+   - [Phase 7 — Aether Agent Deep System Control](#phase-7--aether-agent-deep-system-control) **COMPLETE (7.1–7.5 shipped)**
+   - [Phase 8 — Device + Hardware Ecosystem](#phase-8--device--hardware-ecosystem) **PARTIAL (8.1 hardware service shipped)**
    - [Phase 9 — Application Platform](#phase-9--application-platform) **PARTIAL**
    - [Phase 10 — Real Hardware Bring-up](#phase-10--real-hardware-bring-up) **NOT_STARTED**
    - [Phase 11 — Security + Trusted AI](#phase-11--security--trusted-ai) **PARTIAL**
-   - [Phase 12 — Self-Updating + System Lifecycle](#phase-12--self-updating--system-lifecycle) **NOT_STARTED**
-   - [Phase 13 — Aether Autonomous OS](#phase-13--aether-autonomous-operating-system) **NOT_STARTED**
-   - [Phase 14 — Multi-Device Aether](#phase-14--multi-device-aether) **PARTIAL**
+   - [Phase 12 — Self-Updating + System Lifecycle](#phase-12--self-updating--system-lifecycle) **PARTIAL (engine + supervisor shipped, live backend Phase 15)**
+   - [Phase 13 — Aether Autonomous OS](#phase-13--aether-autonomous-operating-system) **PARTIAL (13.1 + 13.2 shipped)**
+   - [Phase 14 — Multi-Device Aether](#phase-14--multi-device-aether) **PARTIAL (14.1 contract landed)**
    - [Phase 15 — Production Release](#phase-15--production-release) **PARTIAL**
 9. [Global Agent Development Rules](#9-global-agent-development-rules)
 10. [Phase Execution Protocol](#10-phase-execution-protocol)
@@ -231,10 +231,10 @@ verified by concrete evidence in the repository.
 
 ## 7. Current State Snapshot
 
-| Layer                            | Repository Evidence (2026-08-29)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Layer                            | Repository Evidence (2026-08-30)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Build                            | `cargo check --workspace` PASS; 22 Rust crates in `Cargo.toml`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Tests                            | `cargo test --workspace` — **passing** across all Rust crates; agent runtime alone has 225 tests (including 11 new tool-registry tests from Phase 2.3 closure). Total workspace tests continue to grow per phase close-out.                                                                                                                                                                                                                                                                                                                                                                                |
+| Build                            | `cargo check --workspace` PASS; 54 Rust crates in `Cargo.toml`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Tests                            | `cargo test --workspace` — **passing** across all Rust crates; agent runtime alone has 232 tests (including the 7 new Phase 2.8 recovery-policy tests). `aether-proactive` adds 25 unit + 6 binary + 10 integration tests. Total workspace tests continue to grow per phase close-out.                                                                                                                                                                                                                                                                                                                                                                                |
 | Lints                            | Workspace `clippy::all = deny`, `unwrap_used = deny`, `expect_used = deny`, `unsafe_code = forbid`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Boot                             | Buildroot 2025.02 + Linux 6.12 QEMU image builds; initramfs/ISO pipeline present. Smoke test in `tests/boot/test_qemu_boot.py` gated by `AETHER_BOOT_TEST=1`.                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Init                             | `system/aether-init` — boot stages, kernel-param parser, shutdown plan. Unit-tested.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -242,32 +242,41 @@ verified by concrete evidence in the repository.
 | Storage                          | `storage/aether-storage` — sandboxed `FileManager` (workspace-rooted, traversal-safe, symlink-safe, extension allowlist, size cap), `system_info` (mounts/disk/CPU/mem/net).                                                                                                                                                                                                                                                                                                                                                                                                |
 | Process                          | `system/aether-process-manager` — discovery, lifecycle, inspection, security.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Application                      | `system/aether-application-manager` — registry, single-instance launch, lifecycle. `apps/calculator` and `apps/notes` exist as real graphical Aether apps.                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Network                          | TCP control plane exposes `network.status`, `network.interfaces`, `network.connectivity`, `network.config`, `network.events`. No dedicated long-running `aether-network` service crate yet (`src/` empty).                                                                                                                                                                                                                                                                                                                                                              |
+| Network                          | `network/aether-network` — full TCP control plane exposes `network.status`, `network.interfaces`, `network.connectivity`, `network.config`, `network.events`. Long-running service crate is live (was empty in the 2026-08-29 snapshot).                                                                                                                                                                                                                                                                                                                                                            |
 | Shell                            | `shell/aether-shell` (`aethersh`) — 35 commands across filesystem/process/application/network/system; session, history, JSON output. Wired through Aether IPC.                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Graphics                         | `graphics/libaether-graphics` — display, renderer, input, window, cursor, output, compositor, session, workspace, desktop-shell primitives, security, IPC. `graphics/aether-wm` — window state machine. `graphics/aether-graphical-shell` — framebuffer desktop shell: header, taskbar, multi-window chrome, application launcher, system panel (network/storage), agent chat strip.                                                                                                                       |
-| Agent runtime (library)          | `agent/aether-agent-runtime` — Session, Request, Intent, Action, Tool, Validator, Executor (IPC-only), Observation, Planner, Approval, Cancellation, Memory, LLM (Mock + Echo providers), Audit, Events, Errors. **Library is embedded in `aether-agentd` via `runtime_host::RuntimeBridge`**: `agent.session.*`, `agent.intent`, `agent.approval.*`, `agent.audit.*`, `agent.action.cancel`, `agent.stop` all delegate to the runtime host. End-to-end test `e2e_open_test_application_through_runtime` exercises the full intent → plan → action → observation → audit pipeline against a mock control plane.                                                                                                                                                                                                                                                                            |
+| Agent runtime (library)          | `agent/aether-agent-runtime` — Session, Request, Intent, Action, Tool, Validator, Executor (IPC-only), Observation, Planner, Approval, Cancellation, Memory, Recovery, LLM (Mock + Echo providers), Audit, Events, Errors. **Library is embedded in `aether-agentd` via `runtime_host::RuntimeBridge`**: `agent.session.*`, `agent.intent`, `agent.approval.*`, `agent.audit.*`, `agent.action.cancel`, `agent.stop` all delegate to the runtime host. End-to-end test `e2e_open_test_application_through_runtime` exercises the full intent → plan → action → observation → audit pipeline against a mock control plane.                                                                                                                                                                                                                                                                            |
 | Agent daemon                     | `services/aether-agentd` — bounded event ring, task state, conversation context, intent classifier, planner, confirmation, ndjson TCP (`4748`) and stdio. EchoProvider default; provider is replaceable.                                                                                                                                                                                                                                                                                                                                                                |
+| Proactive daemon                 | `services/aether-proactive` — `aether-proactived` supervisor polls `aether-system-core` over loopback TCP, classifies `SystemProbe` snapshots into stable `Observation`s, drives `aether-background-agent` state, and submits action items through `agent.observe` / `agent.propose`. 25 unit + 6 binary + 10 integration tests.                                                                                                                                                                                                                                                                                                                                                                |
 | LLM provider                     | `LlmProvider` trait with `MockLlmProvider` and `EchoLlmProvider`. **Ollama backend lives in the repo** (`aether_agent_runtime::llm_provider::OllamaLlmProvider` and the daemon's `OllamaProvider`); selected via `AETHER_AI_PROVIDER=ollama` (or `runtime-ollama` for the runtime-backed path). No cloud provider (OpenAI/etc.) yet.                                                                                                                                                                                                                                                                                                          |
-| Voice                            | `voice/aether-voice` — empty stub (`lib.rs` only, ~57 lines, no STT/TTS/wake-word).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| Vision                           | `vision/aether-vision` — `src/` directory empty. No implementation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Voice                            | `voice/aether-voice` orchestrator + `aether-stt`, `aether-tts`, `aether-wake-word`, `aether-audio` are all live (108 unit tests across the five crates).                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Vision                           | `vision/aether-vision-core`, `aether-ocr`, `aether-ui-detector` are all live (52 unit tests across the three crates). The legacy `vision/aether-vision` placeholder is still empty; the real crates are what every consumer links against.                                                                                                                                                                                                                                                                                                                                                                     |
 | SDK                              | `sdk/rust/aether-sdk` — TCP control-plane client. `sdk/python/aether_sdk` — wire-protocol helpers (`AETHER/1`).                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Tooling                          | `tools/aetherctl` — CLI control client. `tools/aether-process-manager` (Cargo listed) and related tooling.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Security                         | `core/aether-core` Capability + RiskLevel types. `security/aether-security` `DefaultPermissionPolicy` (allow / require-consent / deny). Manifests declare `sandbox_profile`, `permission_profile`, `ipc_access`, `capabilities`, `resource_*`. System core audits every capability request. **Phase 11.3 (system-core policy gate) is live**: every IPC request is evaluated against the policy + `ActorTrust` before any capability runs; untrusted actors are denied outright, high-risk capabilities return `REQUIRES_CONFIRMATION`. **Phase 11.4 (declarative sandbox plan) is live**: `core/aether-core/src/sandbox.rs` emits a typed `SandboxPlan` per profile; `sandbox.plan` IPC returns it. **No actual kernel sandboxing (cgroups/seccomp/namespaces) is enforced yet — that is honest text in the existing code, not a lie; the enforcement binary `aether-sandbox` is the next concrete deliverable.**                                                                                                                                                                                                                   |
 | Documentation                    | `docs/development/*` (16 files), `docs/architecture/*` (10), `docs/security/*` (2), `docs/testing/*` (1), `docs/build/*` (2), `docs/phase-1-8/*` (10).                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Tests                            | `tests/boot/*`, `tests/integration/*`, `tests/python/*`, `tests/repository/*`, `tests/smoke/*` — Python harness wired via `scripts/test.sh`. Rust integration tests live inside each crate's `tests/` directory (most are currently empty).                                                                                                                                                                                                                                                                                                                              |
+| Tests                            | `tests/boot/*`, `tests/integration/*`, `tests/python/*`, `tests/repository/*`, `tests/smoke/*` — Python harness wired via `scripts/test.sh`. Rust integration tests live inside each crate's `tests/` directory; `aether-proactive/tests/pipeline.rs` is the first end-to-end test that exercises a real `DaemonLoop` against an in-memory sink.                                                                                                                                                                                                                                                                                                                              |
 
-**Current phase:** **Phase 12** (Self-Updating + System Lifecycle) —
-phases 1–8, 11, 12 are at least PARTIAL; phases 2 (2.1–2.3), 3, 4, 5,
-7, 9 are COMPLETE. Phase 12's planning layer, state machine, IPC
-surface, atomic-apply agent (`aether-update-agent`) including the
-real `FilesystemApplyEngine` and the `aether-update-agentd`
-supervisor binary are all shipped. The kernel-level sandbox
-enforcement binary (`aether-sandbox`) is shipped; the real-hardware
-bring-up is Phase 10.
+**Current phase:** **Phase 13** (Aether Autonomous OS) — phases 1–9, 11, 12
+are at least PARTIAL; phases 2 (2.1–2.9), 3, 4, 5, 7, 9, and now
+**13.1 + 13.2** are COMPLETE. Phase 12's planning layer, state
+machine, IPC surface, atomic-apply agent (`aether-update-agent`)
+including the real `FilesystemApplyEngine` and the
+`aether-update-agentd` supervisor binary are all shipped. The
+proactive runtime daemon (`aether-proactived`) polls
+`aether-system-core`, classifies system probes, and surfaces
+action items through the existing `agent.observe` / `agent.propose`
+IPC surface. The kernel-level sandbox enforcement binary
+(`aether-sandbox`) is shipped; the real-hardware bring-up is
+Phase 10.
 
-**Next milestone:** **Phase 10** (real hardware bring-up) and
+**Next milestone:** **Phase 6** renderer/UI paint (the design
+tokens, components, launcher, command bar, assistant, icons,
+animation, and a11y crates are all shipped; the renderer is the
+next concrete step), **Phase 10** (real hardware bring-up), and
 **Phase 15** (production release) — close the gaps the typed
-shells still carry: real kernel primitives (DRM/KMS, real
+shells still carry: a real headless paint pass for the
+component library, real kernel primitives (DRM/KMS, real
 seccomp-BPF), the live `ApplyEngine` that performs the actual
 write + atomic swap, and the final release-quality work
 (bootable ISO polish, install/upgrade validation, perf gates).
@@ -633,16 +642,16 @@ observation → audit round-trips through the embedded runtime.
 
 #### 2.2 System Action Framework
 
-**Status:** `IN_PROGRESS`.
+**Status:** `COMPLETE`.
 
-`ActionVariant` currently covers Application, Window, Filesystem, Process,
-Network, System, Storage, Context. The full long-term coverage is
-`filesystem, storage, process, application, network, window, display, system,
-device, power, security`. Device / Display / Power / Security actions are
-**planned** but not yet defined.
-
-Every action today: typed parameters, required capabilities, risk level,
-timeout, reason. The framework supports the universal action model.
+`ActionVariant` covers the full long-term surface: Application, Window,
+Filesystem, Process, Network, System, Storage, Context, **Device,
+Display, Power, Security**. Every action carries typed parameters,
+required capabilities, risk level, timeout, and a reason. The
+framework supports the universal action model. Device, Display,
+Power, and Security variants are registered through the same tool
+registry and recovery-policy plumbing as the rest, so the LLM cannot
+treat any of them as a back door.
 
 #### 2.3 Tool System
 
@@ -898,11 +907,57 @@ runtime + daemon still passes `cargo test --workspace` and
 
 #### 2.8 Observation + Recovery
 
-**Status:** `IN_PROGRESS`.
+**Status:** `COMPLETE`.
 
 `Observation` types mirror every `ActionVariant`. The agent can evaluate the
-result of an action. **Automated recovery / retry policy** is not yet
-defined; current behavior is fail-and-report.
+result of an action, and the recovery policy is now wired through the
+production code path end to end.
+
+**What shipped:**
+
+- `agent/aether-agent-runtime/src/recovery.rs` (Phase 2.7) is the single
+  source of truth for retry / abort / skip. `decide_recovery`,
+  `backoff_delay`, `FailureKind`, and `RecoveryPolicy` are the
+  authoritative types.
+- `agent/aether-agent-runtime/src/action.rs` exposes
+  `recovery_policy_for(&ActionVariant) -> RecoveryPolicy`. The mapping
+  is trusted code; the LLM cannot override it. Read-only actions
+  (`WindowList`, `FileList`, `ProcessList`, `NetworkStatus`, ...) get
+  `transient_default()` (3 retries, exponential backoff). Mutating
+  actions (`FileDelete`, `SystemReboot`, `WindowClose`,
+  `CredentialSeal`, `DeviceDisable`, `DisplaySetResolution`, ...) get
+  `no_retry()`. Three tests pin the mapping:
+  `mutating_actions_have_no_retry_policy`,
+  `read_only_actions_have_transient_default_policy`, and
+  `recovery_policy_for_every_variant` (the last iterates every variant
+  to make adding a new one a deliberate decision).
+- `agent/aether-agent-runtime/src/planner.rs` exposes
+  `plan_for_action(&Action) -> Plan`. Each `PlanStep` carries the
+  trusted `RecoveryPolicy` derived from the action variant, plus the
+  action's risk level as a string for IPC consumers.
+- `agent/aether-agent-runtime/src/executor.rs` exposes
+  `ActionExecutor::execute_with_recovery(&Action)`. It uses the same
+  `RecoveryPolicy` the planner picked, so the policy cannot drift
+  between plan and execution. Read-only actions retry on transient
+  failure up to the policy's `max_retries`; mutating actions abort
+  on the first failure. The four new tests
+  (`read_only_action_retries_then_fails`,
+  `mutating_action_fails_on_first_attempt`,
+  `power_action_fails_on_first_attempt`,
+  `credential_action_fails_on_first_attempt`) drive real `execute`
+  calls against a closed port and pin the policy-by-variant behavior.
+
+**Security properties preserved:**
+
+- The LLM cannot influence the recovery policy; the mapping is
+  hard-coded in trusted Rust, not driven by the structured output.
+- `FailureKind::Permanent` is never retried, even when
+  `max_retries > 0`.
+- A failure classified as `Unknown` is retried at most once, then
+  aborted.
+- The runtime's `decide_recovery` is the only place that decides
+  retry / abort / skip. The planner, the executor, and the daemon
+  all share it.
 
 #### 2.9 Agent Memory Foundation
 
@@ -969,7 +1024,7 @@ schema-enforced; runtime is not embedded inside `aether-agentd`.
       service → observation → agentd → response → UI. ←
       **DONE in 2.4** (`e2e_open_test_application_through_runtime`)
 - [x] All agent tests pass (`cargo test -p aether-agent-runtime`,
-      `cargo test -p aether-agentd`). ← 200 + 160 = 360 tests passing.
+      `cargo test -p aether-agentd`). ← 232 + 160 = 392 tests passing.
 
 ---
 
@@ -2042,7 +2097,9 @@ credentials, audit chain).
 
 ### Phase 13 — Aether Autonomous OS
 
-**Status:** `PARTIAL` (13.1 landed; the runtime daemon is still out of scope).
+**Status:** `PARTIAL` (13.1 planning surface, 13.2 proactive runtime daemon
+landed; the LLM-driven proposal generator and the executor that turns
+approved proposals into actions are still the next concrete work).
 
 **Sub-milestones:**
 
@@ -2083,13 +2140,69 @@ credentials, audit chain).
   `aether-system-core::agent_ipc_tests`. Full workspace: 798 tests pass,
   zero clippy warnings.
 
+**13.2 — Proactive runtime daemon (landed):**
+
+- New crate `services/aether-proactive` ships both a library and a
+  long-running supervisor binary (`aether-proactived`). The library
+  exposes the full pipeline:
+
+  - `SystemProbe` is the typed input (memory percent, network
+    reachable, per-mount storage percent, per-process CPU and RSS).
+  - `Thresholds` is the configurable policy (default warning / critical
+    bands for each component, plus a `default()` preset).
+  - `classify_to_observations(&probe, &thresholds, now_ms)` maps the
+    probe to a stable, idempotent `Vec<Observation>`. Observation ids
+    are stable across ticks (`obs-storage-{mount}`,
+    `obs-process-cpu-{pid}`) so the background-agent state machine
+    can deduplicate.
+  - `observations_to_events(&[Observation])` translates the
+    observations into `aether-background-agent::AgentEvent`s the
+    state machine already understands.
+  - `DaemonLoop::tick(&probe, now_ms, &mut S: ObservationSink)` is
+    the single entry point: classify, push events through
+    `BackgroundState`, surface new `ActionItem`s through the sink,
+    and return a `TickResult` with the count. The loop is idempotent
+    on a healthy probe (no re-emission of the same observations).
+  - `ObservationSink` trait + `InMemorySink` for tests.
+  - 25 unit tests in the library covering every threshold band,
+    per-mount scaling, per-process scaling, distinct ids, and the
+    sink lifecycle hooks.
+
+- The `aether-proactived` binary:
+
+  - Connects to `aether-system-core` over the loopback TCP control
+    plane (default `127.0.0.1:4747`) using Aether JSON-RPC.
+  - Polls `system.info`, `storage.status`, `network.status`, and
+    `process.list` on every tick to build the `SystemProbe`.
+  - Submits each observation to `agent.observe` and each surfaced
+    action item to `agent.propose` through the same sink. The
+    proactive daemon is a *supervisor*, not an executor; it never
+    runs anything itself, matching the project-wide "review-then-
+    execute" model.
+  - CLI: `--control-plane HOST:PORT` (default `127.0.0.1:4747`),
+    `--tick-ms MILLIS` (default `5000`), `--once` (single tick and
+    exit; used by the boot smoke test), `--now-ms` (inject the
+    wall-clock timestamp for the tick).
+  - 6 unit tests for argument parsing, endpoint parsing, and unknown
+    flag handling.
+
+- Integration test
+  `services/aether-proactive/tests/pipeline.rs` (10 tests) drives
+  the full `DaemonLoop` against an `InMemorySink`. It pins the
+  "high storage emits one critical observation" path, the combined
+  pressure path (3 signals → 3 observations), idempotency on
+  repeated healthy probes, custom thresholds, distinct ids for
+  distinct components, the sink lifecycle hooks, per-mount
+  observations, the healthy → degraded → healthy transition, and
+  well-formed action items.
+
 **Out of scope (deferred):**
 
-- The future `aether-agent-runtime` daemon (the only thing allowed to call
-  `add_observation` and `add_proposal` from outside the IPC layer in
-  production).
-- The model / LLM layer that turns observation batches into proposal drafts.
-- The actual executor (today tasks sit in the graph; nothing runs them).
+- The LLM-driven proposal generator that turns observation batches
+  into proposal drafts (the background-agent state machine today
+  uses a small built-in policy).
+- The executor that turns approved `Proposal`s into real
+  `Action`s (today, proposals are stored but not run).
 - Cross-device coordination (Phase 14).
 
 ---
