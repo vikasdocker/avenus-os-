@@ -1111,6 +1111,21 @@ fn observation_type_name(t: &ObservationType) -> &'static str {
         ObservationType::ProcessList { .. } => "process.list",
         ObservationType::ProcessInspect { .. } => "process.inspect",
         ObservationType::ContextSnapshot { .. } => "context.snapshot",
+        ObservationType::DisplayList { .. } => "display.list",
+        ObservationType::DisplayBrightnessSet { .. } => "display.brightness_set",
+        ObservationType::DisplayResolutionSet { .. } => "display.resolution_set",
+        ObservationType::DeviceList { .. } => "device.list",
+        ObservationType::DeviceInspect { .. } => "device.inspect",
+        ObservationType::DeviceEnabled { .. } => "device.enabled",
+        ObservationType::DeviceDisabled { .. } => "device.disabled",
+        ObservationType::SystemRebootRequested { .. } => "system.reboot_requested",
+        ObservationType::SystemShutdownRequested { .. } => {
+            "system.shutdown_requested"
+        }
+        ObservationType::SystemSuspendRequested => "system.suspend_requested",
+        ObservationType::CredentialSealed { .. } => "credential.sealed",
+        ObservationType::CredentialUnsealed { .. } => "credential.unsealed",
+        ObservationType::PolicyReloaded => "policy.reloaded",
         ObservationType::Error { .. } => "error",
     }
 }

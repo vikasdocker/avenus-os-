@@ -100,6 +100,29 @@ pub enum ActionVariant {
 
     // Context actions
     ContextGet,
+
+    // Display actions
+    DisplayList,
+    DisplaySetBrightness(DisplaySetBrightnessParams),
+    DisplaySetResolution(DisplaySetResolutionParams),
+
+    // Device actions (typed bridge to
+    // aether-hardware-service capabilities).
+    DeviceList,
+    DeviceInspect(DeviceInspectParams),
+    DeviceEnable(DeviceEnableParams),
+    DeviceDisable(DeviceDisableParams),
+
+    // Power actions
+    SystemReboot(SystemRebootParams),
+    SystemShutdown(SystemShutdownParams),
+    SystemSuspend,
+
+    // Security actions (high-risk;
+    // require explicit user consent).
+    CredentialSeal(CredentialSealParams),
+    CredentialUnseal(CredentialUnsealParams),
+    PolicyReload,
 }
 
 // ---- typed parameter structs ----
@@ -187,6 +210,96 @@ pub struct ProcessInspectParams {
     pub name: Option<String>,
 }
 
+// ---- Display params ----
+
+/// Set the brightness on a display
+/// device. `level` is 0..=100.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisplaySetBrightnessParams {
+    /// The display device id.
+    pub display_id: String,
+    /// 0..=100.
+    pub level: u8,
+}
+
+/// Change the resolution of a
+/// display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisplaySetResolutionParams {
+    /// The display device id.
+    pub display_id: String,
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+}
+
+// ---- Device params ----
+
+/// Inspect a single piece of
+/// hardware. The id is matched
+/// against `aether-hardware-service`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceInspectParams {
+    /// The device id.
+    pub device_id: String,
+}
+
+/// Enable a disabled device.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceEnableParams {
+    /// The device id.
+    pub device_id: String,
+}
+
+/// Disable a device (the runtime
+/// toggles it through the
+/// `Capability::Enable` /
+/// `Capability::Disable` verbs).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceDisableParams {
+    /// The device id.
+    pub device_id: String,
+}
+
+// ---- Power params ----
+
+/// Reboot the system. `delay_ms`
+/// is a graceful shutdown window.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemRebootParams {
+    /// The shutdown window.
+    pub delay_ms: u64,
+}
+
+/// Shut the system down.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemShutdownParams {
+    /// The shutdown window.
+    pub delay_ms: u64,
+}
+
+// ---- Security params ----
+
+/// Seal a credential for
+/// long-term storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CredentialSealParams {
+    /// The credential name.
+    pub name: String,
+    /// The plaintext value (must
+    /// never be logged).
+    pub plaintext: String,
+}
+
+/// Unseal a previously sealed
+/// credential.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CredentialUnsealParams {
+    /// The credential name.
+    pub name: String,
+}
+
 // ---- action builder helpers ----
 
 impl Action {
@@ -240,6 +353,19 @@ impl Action {
             ActionVariant::SystemUptime => "system.uptime",
             ActionVariant::StorageStatus => "storage.status",
             ActionVariant::ContextGet => "context.get",
+            ActionVariant::DisplayList => "display.list",
+            ActionVariant::DisplaySetBrightness(_) => "display.set_brightness",
+            ActionVariant::DisplaySetResolution(_) => "display.set_resolution",
+            ActionVariant::DeviceList => "device.list",
+            ActionVariant::DeviceInspect(_) => "device.inspect",
+            ActionVariant::DeviceEnable(_) => "device.enable",
+            ActionVariant::DeviceDisable(_) => "device.disable",
+            ActionVariant::SystemReboot(_) => "system.reboot",
+            ActionVariant::SystemShutdown(_) => "system.shutdown",
+            ActionVariant::SystemSuspend => "system.suspend",
+            ActionVariant::CredentialSeal(_) => "credential.seal",
+            ActionVariant::CredentialUnseal(_) => "credential.unseal",
+            ActionVariant::PolicyReload => "policy.reload",
         }
     }
 }
@@ -279,6 +405,40 @@ fn classify_action(variant: &ActionVariant) -> (Vec<String>, ActionRisk) {
         ActionVariant::SystemUptime => (vec!["system.uptime".to_string()], ActionRisk::Low),
         ActionVariant::StorageStatus => (vec!["storage.status".to_string()], ActionRisk::Low),
         ActionVariant::ContextGet => (vec!["context.get".to_string()], ActionRisk::Low),
+        // Display: brightness is
+        // benign; resolution changes
+        // can disrupt running apps.
+        ActionVariant::DisplayList => (vec!["display.list".to_string()], ActionRisk::Low),
+        ActionVariant::DisplaySetBrightness(_) => {
+            (vec!["display.set_brightness".to_string()], ActionRisk::Low)
+        }
+        ActionVariant::DisplaySetResolution(_) => {
+            (vec!["display.set_resolution".to_string()], ActionRisk::Medium)
+        }
+        // Device: list / inspect are
+        // benign; enable / disable
+        // can change visible state.
+        ActionVariant::DeviceList => (vec!["device.list".to_string()], ActionRisk::Low),
+        ActionVariant::DeviceInspect(_) => (vec!["device.inspect".to_string()], ActionRisk::Low),
+        ActionVariant::DeviceEnable(_) => (vec!["device.enable".to_string()], ActionRisk::Medium),
+        ActionVariant::DeviceDisable(_) => (vec!["device.disable".to_string()], ActionRisk::Medium),
+        // Power: always critical
+        // (interrupts every user).
+        ActionVariant::SystemReboot(_) => (vec!["system.reboot".to_string()], ActionRisk::Critical),
+        ActionVariant::SystemShutdown(_) => {
+            (vec!["system.shutdown".to_string()], ActionRisk::Critical)
+        }
+        ActionVariant::SystemSuspend => (vec!["system.suspend".to_string()], ActionRisk::High),
+        // Security: credentials are
+        // high-risk; policy reload
+        // is medium.
+        ActionVariant::CredentialSeal(_) => {
+            (vec!["credential.seal".to_string()], ActionRisk::High)
+        }
+        ActionVariant::CredentialUnseal(_) => {
+            (vec!["credential.unseal".to_string()], ActionRisk::High)
+        }
+        ActionVariant::PolicyReload => (vec!["policy.reload".to_string()], ActionRisk::Medium),
     }
 }
 
@@ -343,5 +503,91 @@ mod tests {
         // Verify the ActionVariant enum has no Shell/Command variants
         let variants = std::mem::size_of::<ActionVariant>();
         assert!(variants > 0);
+    }
+
+    #[test]
+    fn display_actions_classify() {
+        let list = Action::new("s1", ActionVariant::DisplayList, "list");
+        assert_eq!(list.risk_level, ActionRisk::Low);
+        assert_eq!(list.action_name(), "display.list");
+
+        let bright = Action::new(
+            "s1",
+            ActionVariant::DisplaySetBrightness(DisplaySetBrightnessParams {
+                display_id: "d-1".to_string(),
+                level: 50,
+            }),
+            "dim",
+        );
+        assert_eq!(bright.risk_level, ActionRisk::Low);
+        assert_eq!(bright.action_name(), "display.set_brightness");
+    }
+
+    #[test]
+    fn device_enable_disable_classify() {
+        let on = Action::new(
+            "s1",
+            ActionVariant::DeviceEnable(DeviceEnableParams {
+                device_id: "wifi-1".to_string(),
+            }),
+            "enable wifi",
+        );
+        assert_eq!(on.risk_level, ActionRisk::Medium);
+        assert!(on.requested_capabilities.contains(&"device.enable".to_string()));
+
+        let off = Action::new(
+            "s1",
+            ActionVariant::DeviceDisable(DeviceDisableParams {
+                device_id: "cam-1".to_string(),
+            }),
+            "disable camera",
+        );
+        assert_eq!(off.risk_level, ActionRisk::Medium);
+    }
+
+    #[test]
+    fn power_actions_are_critical() {
+        let reboot = Action::new(
+            "s1",
+            ActionVariant::SystemReboot(SystemRebootParams { delay_ms: 0 }),
+            "reboot",
+        );
+        assert_eq!(reboot.risk_level, ActionRisk::Critical);
+        assert_eq!(reboot.action_name(), "system.reboot");
+
+        let shutdown = Action::new(
+            "s1",
+            ActionVariant::SystemShutdown(SystemShutdownParams { delay_ms: 5_000 }),
+            "shutdown",
+        );
+        assert_eq!(shutdown.risk_level, ActionRisk::Critical);
+
+        let suspend = Action::new("s1", ActionVariant::SystemSuspend, "suspend");
+        assert_eq!(suspend.risk_level, ActionRisk::High);
+    }
+
+    #[test]
+    fn security_actions_classify() {
+        let seal = Action::new(
+            "s1",
+            ActionVariant::CredentialSeal(CredentialSealParams {
+                name: "api-key".to_string(),
+                plaintext: "redacted".to_string(),
+            }),
+            "seal key",
+        );
+        assert_eq!(seal.risk_level, ActionRisk::High);
+
+        let unseal = Action::new(
+            "s1",
+            ActionVariant::CredentialUnseal(CredentialUnsealParams {
+                name: "api-key".to_string(),
+            }),
+            "unseal key",
+        );
+        assert_eq!(unseal.risk_level, ActionRisk::High);
+
+        let reload = Action::new("s1", ActionVariant::PolicyReload, "reload");
+        assert_eq!(reload.risk_level, ActionRisk::Medium);
     }
 }

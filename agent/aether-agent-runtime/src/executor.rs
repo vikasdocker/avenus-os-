@@ -250,6 +250,150 @@ impl ActionExecutor {
             ActionVariant::ContextGet => {
                 ObservationType::ContextSnapshot { data: serde_json::json!({}) }
             }
+
+            // Display actions → system core
+            ActionVariant::DisplayList => {
+                let resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "display.list",
+                    serde_json::json!({}),
+                )?;
+                ObservationType::DisplayList { displays: resp }
+            }
+            ActionVariant::DisplaySetBrightness(p) => {
+                let _resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "display.set_brightness",
+                    serde_json::json!({"display_id": p.display_id, "level": p.level}),
+                )?;
+                ObservationType::DisplayBrightnessSet {
+                    display_id: p.display_id.clone(),
+                    level: p.level,
+                }
+            }
+            ActionVariant::DisplaySetResolution(p) => {
+                let _resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "display.set_resolution",
+                    serde_json::json!({
+                        "display_id": p.display_id,
+                        "width": p.width,
+                        "height": p.height
+                    }),
+                )?;
+                ObservationType::DisplayResolutionSet {
+                    display_id: p.display_id.clone(),
+                    width: p.width,
+                    height: p.height,
+                }
+            }
+
+            // Device actions → aether-hardware-service via system core
+            ActionVariant::DeviceList => {
+                let resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "device.list",
+                    serde_json::json!({}),
+                )?;
+                ObservationType::DeviceList { devices: resp }
+            }
+            ActionVariant::DeviceInspect(p) => {
+                let resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "device.inspect",
+                    serde_json::json!({"device_id": p.device_id}),
+                )?;
+                ObservationType::DeviceInspect { data: resp }
+            }
+            ActionVariant::DeviceEnable(p) => {
+                let _resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "device.enable",
+                    serde_json::json!({"device_id": p.device_id}),
+                )?;
+                ObservationType::DeviceEnabled {
+                    device_id: p.device_id.clone(),
+                }
+            }
+            ActionVariant::DeviceDisable(p) => {
+                let _resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "device.disable",
+                    serde_json::json!({"device_id": p.device_id}),
+                )?;
+                ObservationType::DeviceDisabled {
+                    device_id: p.device_id.clone(),
+                }
+            }
+
+            // Power actions
+            ActionVariant::SystemReboot(p) => {
+                let _resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "system.reboot",
+                    serde_json::json!({"delay_ms": p.delay_ms}),
+                )?;
+                ObservationType::SystemRebootRequested { delay_ms: p.delay_ms }
+            }
+            ActionVariant::SystemShutdown(p) => {
+                let _resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "system.shutdown",
+                    serde_json::json!({"delay_ms": p.delay_ms}),
+                )?;
+                ObservationType::SystemShutdownRequested { delay_ms: p.delay_ms }
+            }
+            ActionVariant::SystemSuspend => {
+                let _resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "system.suspend",
+                    serde_json::json!({}),
+                )?;
+                ObservationType::SystemSuspendRequested
+            }
+
+            // Security actions
+            ActionVariant::CredentialSeal(p) => {
+                let _resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "credentials.seal",
+                    serde_json::json!({"name": p.name, "plaintext": p.plaintext}),
+                )?;
+                ObservationType::CredentialSealed { name: p.name.clone() }
+            }
+            ActionVariant::CredentialUnseal(p) => {
+                let resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "credentials.unseal",
+                    serde_json::json!({"name": p.name}),
+                )?;
+                let value = resp["plaintext"].as_str().unwrap_or("").to_string();
+                ObservationType::CredentialUnsealed {
+                    name: p.name.clone(),
+                    value,
+                }
+            }
+            ActionVariant::PolicyReload => {
+                let _resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "policy.reload",
+                    serde_json::json!({}),
+                )?;
+                ObservationType::PolicyReloaded
+            }
         };
 
         let duration = start.elapsed().as_millis() as u64;
