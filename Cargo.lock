@@ -276,6 +276,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-proactive"
+version = "0.1.0"
+dependencies = [
+ "aether-agent-core",
+ "aether-background-agent",
+ "aether-core",
+ "aether-diagnostics",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aether-process-manager"
 version = "0.1.0"
 dependencies = [
@@ -452,6 +464,7 @@ dependencies = [
  "aether-retry-policy",
  "aether-security",
  "aether-update-core",
+ "serde_json",
 ]
 
 [[package]]

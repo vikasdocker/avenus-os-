@@ -1,0 +1,26 @@
+[package]
+name = "aether-proactive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Aether proactive daemon: the long-running runtime that observes system state via aether-system-core IPC, classifies symptoms through aether-diagnostics, and surfaces typed ActionItems the user (or the agent runtime) can review and approve. Closes Phase 13.2."
+
+[lib]
+name = "aether_proactive"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aether-proactived"
+path = "src/bin/proactived.rs"
+
+[dependencies]
+aether-core = { path = "../../core/aether-core" }
+aether-agent-core = { path = "../../agent/aether-agent-core" }
+aether-background-agent = { path = "../../agent/aether-background-agent" }
+aether-diagnostics = { path = "../../system/aether-diagnostics" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true
