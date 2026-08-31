@@ -1840,8 +1840,9 @@ tests that exercise the defenses.
 ### Phase 12 — Self-Updating + System Lifecycle
 
 **Status:** `PARTIAL` (planning layer + state machine + IPC + atomic-apply
-agent shipped; the live `ApplyEngine` backend that talks to the real
-filesystem / cgroup v2 / supervisor is Phase 15's real-hardware bring-up).
+agent + `FilesystemApplyEngine` + `aether-update-agentd` binary shipped;
+the live `ApplyEngine` backend that talks to the real filesystem /
+cgroup v2 / supervisor is Phase 15's real-hardware bring-up).
 
 **Sub-milestones:**
 
@@ -1968,6 +1969,39 @@ filesystem / cgroup v2 / supervisor is Phase 15's real-hardware bring-up).
   three diff kinds, the null enforcer, and the
   host policy. Evidence:
   `system/aether-sandbox-policy/src/lib.rs`.
+- 12.7 **`FilesystemApplyEngine` — COMPLETE**. New
+  `system/aether-update-agent/src/engine.rs` adds
+  a second `ApplyEngine` implementation that
+  demonstrates the real filesystem-shaped contract
+  on an in-memory `BTreeMap` store:
+  `Download` writes the payload to
+  `staging/<id>.bin`; `Verify` recomputes
+  SHA-256 (a hand-rolled FIPS 180-4 §6.2
+  implementation, exposed as `sha256_inline` so
+  the crate has no new external dependency) and
+  rejects hash mismatches with `Refused`; `Stage`
+  renames the staging file to `staging/<id>.staged`;
+  `Snapshot` records a `SnapshotComponent`; `Apply`
+  writes the staged bytes into `active/<target>`;
+  `Reboot` is a no-op. Every step appends to an
+  `EngineAudit` log the test can introspect. 13
+  unit tests cover each step, every refusal
+  path, the SHA-256 known-answer (empty / `"abc"`),
+  and the full pipeline end-to-end. 27 tests
+  total in the crate (was 14). Evidence:
+  `system/aether-update-agent/src/engine.rs`.
+- 12.8 **`aether-update-agentd` binary — COMPLETE**.
+  New `src/bin/agentd.rs` is the daemon that
+  owns an `UpdateAgent<NullApplyEngine>`,
+  installs the default retry policies, and
+  drives the full `Download → Verify → Stage →
+  Snapshot → Apply` sequence from a JSON
+  `UpdatePlan` on stdin (or `--plan <PATH>`).
+  The audit log and the final state-machine
+  stage print to stdout; non-zero exit on any
+  step failure (with the rollback path taken).
+  3 unit tests cover arg parsing. Evidence:
+  `system/aether-update-agent/src/bin/agentd.rs`.
 
 **Dependencies:** Phase 11 (signed updates, sealed
 credentials, audit chain).
