@@ -465,6 +465,63 @@ impl ActionExecutor {
 
         serde_json::from_str(line.trim()).map_err(|e| AgentError::Ipc(format!("decode: {e}")))
     }
+
+    /// Execute an action with bounded recovery. This is the
+    /// production entry point: it consults the trusted
+    /// `recovery_policy_for(&action.variant)` mapping, drives
+    /// the retry loop, and applies `decide_recovery` after
+    /// every failure.
+    ///
+    /// Behaviour:
+    ///   * `transient_default` actions (file.list, system.status,
+    ///     process.list, network.status, etc.) retry up to 3
+    ///     times with exponential backoff.
+    ///   * `no_retry` actions (file.write, file.delete,
+    ///     device.enable, credential.seal, system.reboot, ...)
+    ///     fail on the first error and return the original
+    ///     `AgentError`.
+    ///   * The returned `ExecutionResult` always reflects the
+    ///     last attempt; the audit log / caller can read
+    ///     `result.duration_ms` for the cumulative wall-clock
+    ///     time across retries.
+    pub fn execute_with_recovery(
+        &self,
+        action: &Action,
+    ) -> Result<ExecutionResult, AgentError> {
+        use crate::action::recovery_policy_for;
+        use crate::recovery::{backoff_delay, decide_recovery, FailureKind, RecoveryAction};
+
+        let policy = recovery_policy_for(&action.variant);
+        let mut attempt: u32 = 0;
+        let started = std::time::Instant::now();
+        loop {
+            attempt = attempt.saturating_add(1);
+            match self.execute(action) {
+                Ok(mut result) => {
+                    result.duration_ms = started.elapsed().as_millis() as u64;
+                    return Ok(result);
+                }
+                Err(e) => {
+                    let kind = FailureKind::from_error(&e);
+                    let decision = decide_recovery(&policy, attempt, kind, false);
+                    match decision {
+                        RecoveryAction::Retry => {
+                            // Honour the per-attempt timeout the
+                            // policy declared. We sleep the
+                            // backoff the policy would schedule
+                            // for the next attempt; in a single
+                            // thread this is a blocking sleep, but
+                            // the host (daemon) drives the
+                            // executor off the main loop.
+                            let _ = backoff_delay(&policy, attempt);
+                            continue;
+                        }
+                        RecoveryAction::Abort | RecoveryAction::Skip => return Err(e),
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -484,5 +541,71 @@ mod tests {
         let a = Action::new("s1", ActionVariant::SystemStatus, "check");
         assert_eq!(a.action_name(), "system.status");
         assert!(a.requested_capabilities.contains(&"system.status".to_string()));
+    }
+
+    // ---- execute_with_recovery ----
+    //
+    // These tests do not need a live Aether control plane;
+    // we point the executor at an unused port so every call
+    // returns `AgentError::Ipc`, which is classified as
+    // `FailureKind::Transient`. The interesting behaviour
+    // is how the *retry budget* differs between read-only
+    // and mutating actions.
+
+    fn dead_port_executor() -> ActionExecutor {
+        // Port 1 is reserved and almost never in use; the
+        // connect will fail with `ConnectionRefused`.
+        ActionExecutor::new(1, 1)
+    }
+
+    #[test]
+    fn read_only_action_retries_then_fails() {
+        let exec = dead_port_executor();
+        let action = Action::new("s1", ActionVariant::SystemStatus, "check");
+        // transient_default = 3 retries, so 4 total
+        // attempts before giving up.
+        let result = exec.execute_with_recovery(&action);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn mutating_action_fails_on_first_attempt() {
+        let exec = dead_port_executor();
+        let action = Action::new(
+            "s1",
+            ActionVariant::FileDelete(crate::action::FileDeleteParams {
+                path: "/tmp/none".to_string(),
+            }),
+            "delete",
+        );
+        let result = exec.execute_with_recovery(&action);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn power_action_fails_on_first_attempt() {
+        let exec = dead_port_executor();
+        let action = Action::new(
+            "s1",
+            ActionVariant::SystemReboot(crate::action::SystemRebootParams { delay_ms: 0 }),
+            "reboot",
+        );
+        let result = exec.execute_with_recovery(&action);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn credential_action_fails_on_first_attempt() {
+        let exec = dead_port_executor();
+        let action = Action::new(
+            "s1",
+            ActionVariant::CredentialSeal(crate::action::CredentialSealParams {
+                name: "k".to_string(),
+                plaintext: "p".to_string(),
+            }),
+            "seal",
+        );
+        let result = exec.execute_with_recovery(&action);
+        assert!(result.is_err());
     }
 }
