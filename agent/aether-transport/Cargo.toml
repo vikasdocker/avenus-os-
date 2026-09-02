@@ -1,0 +1,13 @@
+[package]
+name = "aether-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Device pairing transport abstractions (BLE, QR, NFC) for Aether OS"
+
+[dependencies]
+aether-device-core = { path = "../aether-device-core" }
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

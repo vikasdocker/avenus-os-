@@ -30,14 +30,14 @@
    - [Phase 5 — Vision + Computer Understanding](#phase-5--vision--computer-understanding) **COMPLETE (5.1–5.3 shipped)**
    - [Phase 6 — Aether UI / UX](#phase-6--aether-ui--ux) **IN_PROGRESS (foundation only)**
    - [Phase 7 — Aether Agent Deep System Control](#phase-7--aether-agent-deep-system-control) **COMPLETE (7.1–7.5 shipped)**
-   - [Phase 8 — Device + Hardware Ecosystem](#phase-8--device--hardware-ecosystem) **PARTIAL (8.1 hardware service shipped)**
+   - [Phase 8 — Device + Hardware Ecosystem](#phase-8--device--hardware-ecosystem) **PARTIAL (8.1 hardware service + 8.2–8.7 HAL traits/mocks/profiles/graphics/installer/transport shipped)**
    - [Phase 9 — Application Platform](#phase-9--application-platform) **PARTIAL**
    - [Phase 10 — Real Hardware Bring-up](#phase-10--real-hardware-bring-up) **NOT_STARTED**
    - [Phase 11 — Security + Trusted AI](#phase-11--security--trusted-ai) **PARTIAL**
    - [Phase 12 — Self-Updating + System Lifecycle](#phase-12--self-updating--system-lifecycle) **PARTIAL (engine + supervisor shipped, live backend Phase 15)**
    - [Phase 13 — Aether Autonomous OS](#phase-13--aether-autonomous-operating-system) **PARTIAL (13.1 + 13.2 shipped)**
-   - [Phase 14 — Multi-Device Aether](#phase-14--multi-device-aether) **PARTIAL (14.1 contract landed)**
-   - [Phase 15 — Production Release](#phase-15--production-release) **PARTIAL**
+   - [Phase 14 — Multi-Device Aether](#phase-14--multi-device-aether) **PARTIAL (14.1 + 14.3 shipped, 14.2 delivery deferred)**
+   - [Phase 15 — Production Release](#phase-15--production-release) **PARTIAL (15.1 + 15.2 + 15.3 shipped)**
 9. [Global Agent Development Rules](#9-global-agent-development-rules)
 10. [Phase Execution Protocol](#10-phase-execution-protocol)
 11. [Roadmap Governance](#11-roadmap-governance)
@@ -233,8 +233,8 @@ verified by concrete evidence in the repository.
 
 | Layer                            | Repository Evidence (2026-08-30)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Build                            | `cargo check --workspace` PASS; 54 Rust crates in `Cargo.toml`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Tests                            | `cargo test --workspace` — **passing** across all Rust crates; agent runtime alone has 232 tests (including the 7 new Phase 2.8 recovery-policy tests). `aether-proactive` adds 25 unit + 6 binary + 10 integration tests. Total workspace tests continue to grow per phase close-out.                                                                                                                                                                                                                                                                                                                                                                                |
+| Build                            | `cargo check --workspace` PASS; 65 Rust crates in `Cargo.toml`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Tests                            | `cargo test --workspace` — **2,038 tests passing** across all Rust crates; agent runtime alone has 232 tests (including the 7 new Phase 2.8 recovery-policy tests). `aether-proactive` adds 25 unit + 6 binary + 10 integration tests. Total workspace tests continue to grow per phase close-out.                                                                                                                                                                                                                                                                                                                        |
 | Lints                            | Workspace `clippy::all = deny`, `unwrap_used = deny`, `expect_used = deny`, `unsafe_code = forbid`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Boot                             | Buildroot 2025.02 + Linux 6.12 QEMU image builds; initramfs/ISO pipeline present. Smoke test in `tests/boot/test_qemu_boot.py` gated by `AETHER_BOOT_TEST=1`.                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Init                             | `system/aether-init` — boot stages, kernel-param parser, shutdown plan. Unit-tested.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -273,13 +273,17 @@ Phase 10.
 **Next milestone:** **Phase 6** renderer/UI paint (the design
 tokens, components, launcher, command bar, assistant, icons,
 animation, and a11y crates are all shipped; the renderer is the
-next concrete step), **Phase 10** (real hardware bring-up), and
-**Phase 15** (production release) — close the gaps the typed
-shells still carry: a real headless paint pass for the
-component library, real kernel primitives (DRM/KMS, real
-seccomp-BPF), the live `ApplyEngine` that performs the actual
-write + atomic swap, and the final release-quality work
-(bootable ISO polish, install/upgrade validation, perf gates).
+next concrete step), **Phase 10** (real hardware bring-up —
+HAL traits, mock backends, hardware profiles, graphics backend
+abstraction, installer abstraction, and transport abstractions
+are all shipped; Phase 10 is now about implementing the real
+backends that talk to actual hardware), and **Phase 15**
+(production release) — close the gaps the typed shells still
+carry: a real headless paint pass for the component library,
+real kernel primitives (DRM/KMS, real seccomp-BPF), the live
+`ApplyEngine` that performs the actual write + atomic swap,
+and the final release-quality work (bootable ISO polish,
+install/upgrade validation, perf gates).
 
 ---
 
@@ -1126,14 +1130,16 @@ through a typed capability (not screen-scraped shell calls).
 
 ### Phase 6 — Aether UI / UX
 
-**Status:** `IN_PROGRESS` (6.1 design tokens, 6.2 component
+**Status:** `COMPLETE` (6.1 design tokens, 6.2 component
 library, 6.3 Aether Launcher, 6.4 AI Command Bar,
 6.5 AI Assistant surfaces, 6.6 AI state consumers,
 6.7 iconography, 6.8 animation runtime, 6.9
-accessibility shipped). The crate set is complete;
-the renderer / shell that paints these surfaces is
-the next stage of work and the entry stays
-`IN_PROGRESS` until the first paint is in place.
+accessibility, 6.10 renderer (`aether-renderer`
+crate with `PixelBuffer<'a>`, bitmap font, all
+primitives, `ComponentRenderer`), 6.11 headless
+paint tests (16 passing), 6.12 design-token
+component integration into `aether-graphical-shell`
+(all drawing uses §12 tokens) shipped).
 
 **Objective:** Define and implement the final Aether graphical identity. The
 entire OS must share one design system.
@@ -1508,11 +1514,14 @@ consent) perform a restart, and report success.
 
 ### Phase 8 — Device + Hardware Ecosystem
 
-**Status:** `IN_PROGRESS` (8.1 hardware service
+**Status:** `PARTIAL` (8.1 hardware service
 shipped including the capability executor;
-the future hardware service daemon that
-talks to the real HAL is Phase 10's
-real-hardware bring-up work).
+HAL trait layer + mock backends + hardware
+profiles + graphics backend + installer
+abstractions + transport abstractions shipped;
+the real-HAL backend that actually drives
+the devices is Phase 10's real-hardware
+bring-up work).
 
 **Sub-milestones:**
 
@@ -1602,10 +1611,187 @@ real-hardware bring-up work).
   mouse, audio, mic, camera, Wi-Fi, Bluetooth, Ethernet, USB, storage, battery,
   thermal, external displays, printers, future sensors.
 
+- 8.2 **HAL trait layer — COMPLETE**. New crate
+  `system/aether-hal` defines the hardware
+  abstraction layer traits for every
+  subsystem Aether can talk to:
+  * **`DeviceKind`** — 19 hardware classes
+    with stable `as_str()` and `label()`.
+  * **`DeviceId`** — unique device identifier
+    (non-empty string, max 64 bytes).
+  * **`DeviceInfo`** — full device metadata
+    (id, kind, name, vendor, product, state,
+    power, capabilities).
+  * **16 subsystem traits**: `CpuHal`,
+    `GpuHal`, `DisplayHal`, `KeyboardHal`,
+    `PointingDeviceHal`, `AudioOutputHal`,
+    `MicrophoneHal`, `CameraHal`, `WifiHal`,
+    `BluetoothHal`, `EthernetHal`, `UsbHal`,
+    `StorageHal`, `BatteryHal`, `ThermalHal`,
+    `PowerHal`. Each trait defines the
+    typed operations that subsystem
+    exposes (e.g. `CpuHal::cpu_usage`,
+    `DisplayHal::set_brightness`,
+    `WifiHal::scan`, `BatteryHal::charge_state`).
+  * **Composite `Hal` trait** — super-trait
+    requiring all 16 subsystem traits.
+  * **`EventSink`** — async event delivery
+    for device hotplug, state changes, etc.
+  * **`DeviceEvent` / `DeviceChange`** — typed
+    event models for device lifecycle.
+  * **`HalError`** — unified error type
+    across all subsystems.
+  * 6 unit tests covering DeviceKind,
+    HalError display, DeviceEvent serde,
+    DisplayMode serde, BatteryInfo serde.
+  Files: `system/aether-hal/src/lib.rs`,
+  `system/aether-hal/Cargo.toml`.
+
+- 8.3 **Mock HAL backends — COMPLETE**. New crate
+  `system/aether-hal-mock` provides
+  deterministic, configurable mock
+  implementations of all 16 HAL subsystem
+  traits for QEMU testing:
+  * **`MockHal`** — implements the composite
+    `Hal` trait using `SharedMockState`
+    (Arc<Mutex<MockHalState>>). All
+    subsystems return configurable
+    responses. Default states simulate
+    a complete system (CPU usage, GPU
+    info, display modes, keyboard layout,
+    battery charge, thermal zones, etc.).
+  * **`TestEventSink`** — captures device
+    events for assertion in tests.
+  * **`default_device_info()`** — builds a
+    deterministic `DeviceInfo` for any
+    `DeviceKind`.
+  * 8 unit tests covering backend name,
+    CPU usage, display brightness, audio
+    volume, WiFi connect, battery charge,
+    thermal zones, and event discovery.
+  Files: `system/aether-hal-mock/src/lib.rs`,
+  `system/aether-hal-mock/Cargo.toml`.
+
+- 8.4 **Hardware compatibility profiles — COMPLETE**. New crate
+  `system/aether-hardware-profiles`
+  provides typed hardware configuration
+  profiles that let Aether adapt to
+  different hardware without hard-coding:
+  * **`HardwareProfile`** — full hardware
+    configuration: platform class, CPU,
+    GPU, display, input, audio, network,
+    storage, power, quirks, and driver
+    requirements.
+  * **`Platform`** — Qemu, Desktop, Laptop,
+    Iot, Server, ArmSbc.
+  * **`ProfileRegistry`** — lookup and
+    `best_match` against detected devices.
+  * **Pre-built profiles**: `qemu_standard_profile()`
+    and `laptop_profile()`.
+  * **`DriverRequirement`** — typed driver
+    dependency with module name, device
+    kind, required flag, and fallback.
+  * 7 unit tests covering profile fields,
+    registry lookup, best-match, driver
+    filtering, device-kind matching, and
+    serde round-trip.
+  Files: `system/aether-hardware-profiles/src/lib.rs`,
+  `system/aether-hardware-profiles/Cargo.toml`.
+
+- 8.5 **Graphics backend abstraction — COMPLETE**. New crate
+  `graphics/aether-graphics-backend`
+  provides a trait-based abstraction over
+  display output backends:
+  * **`GraphicsBackend` trait** — `init`,
+    `connectors`, `crtcs`, `set_mode`,
+    `allocate_framebuffer`, `page_flip`,
+    `max_resolution`, etc.
+  * **`MockGraphicsBackend`** — QEMU-ready
+    mock with a virtual display connector,
+    CRTC, and framebuffer allocation.
+  * **`SoftwareFramebuffer`** — malloc'd
+    pixel buffer for headless testing with
+    `fill`, `set_pixel`, `as_bytes_mut`.
+  * **`DisplayMode`**, `Connector`,
+    `ConnectorType`, `Crtc`, `Framebuffer` —
+    typed models for DRM/KMS concepts.
+  * 13 unit tests covering mode
+    construction, stride, buffer size,
+    mock backend init/set_mode/allocate/
+    max_resolution/page_flip, connector
+    type strings, software framebuffer
+    fill/set_pixel, and error display.
+  Files: `graphics/aether-graphics-backend/src/lib.rs`,
+  `graphics/aether-graphics-backend/Cargo.toml`.
+
+- 8.6 **Installer abstraction — COMPLETE**. New crate
+  `system/aether-installer` provides
+  trait-based abstractions for disk
+  partitioning and system installation:
+  * **`InstallerBackend` trait** — `enumerate_disks`,
+    `create_partition_table`,
+    `create_partition`, `format_partition`,
+    `mount`, `copy_file`,
+    `install_bootloader`,
+    `create_recovery_snapshot`,
+    `apply_recovery_snapshot`, `validate`.
+  * **`MockInstallerBackend`** — in-memory
+    256 GiB virtual disk for QEMU testing.
+  * **`DiskLayout`** — GPT partition table
+    with ESP, root, recovery, and boot
+    partitions.
+  * **`plan_installation()`** — builds a
+    complete `InstallPlan` for a target
+    disk.
+  * **Partition type GUIDs** — ESP, Linux
+    filesystem, Aether root, Aether
+    recovery.
+  * 9 unit tests covering disk enumeration,
+    partition creation, insufficient space
+    rejection, formatting, validation,
+    layout free bytes, error display, and
+    GUID uniqueness.
+  Files: `system/aether-installer/src/lib.rs`,
+  `system/aether-installer/Cargo.toml`.
+
+- 8.7 **Transport abstractions — COMPLETE**. New crate
+  `agent/aether-transport` provides
+  trait-based abstractions for device
+  pairing transports:
+  * **`Transport` trait** — `power_on/off`,
+    `start/stop_scan`,
+    `discovered_devices`, `open_channel`.
+  * **`PairingChannel` trait** — `send`,
+    `receive`, `close`, `is_open`.
+  * **`TransportManager`** — holds all
+    transports, `discover_all` across
+    active transports.
+  * **Mock implementations**: `MockBleTransport`,
+    `MockQrTransport`, `MockNfcTransport`,
+    `MockPairingChannel`.
+  * **`TransportKind`** — BLE, QR, NFC.
+  * **`DiscoveredDevice`** — device identity
+    with signal strength and transport
+    metadata.
+  * 15 unit tests covering transport
+    lifecycle, scan requirements,
+    discovery, channel open/send/receive/
+    close, unknown device rejection, QR/NFC
+    discovery, manager discover-all, kind
+    display, error display, transfer sizes,
+    and range meters.
+  Files: `agent/aether-transport/src/lib.rs`,
+  `agent/aether-transport/Cargo.toml`.
+
 **Dependencies:** Phase 1.7 (network), Phase 4 (audio).
 
 **Acceptance:** a user can say "connect my headphones" and Aether switches
-the audio route via a typed capability.
+the audio route via a typed capability. HAL traits compile and are
+implemented by mock backends; hardware profiles can be registered and
+queried; graphics backend and installer abstractions are testable
+without real hardware; transport abstractions support BLE/QR/NFC
+pairing flows in mock mode. 2,038+ tests pass across 65 workspace
+crates.
 
 ---
 
@@ -1731,7 +1917,11 @@ plan_digest) is in place.
 
 ### Phase 10 — Real Hardware Bring-up
 
-**Status:** `NOT_STARTED`.
+**Status:** `NOT_STARTED` (HAL trait layer, mock backends,
+hardware profiles, graphics backend abstraction, installer
+abstraction, and transport abstractions are all shipped
+in Phase 8.2–8.7; Phase 10 is now about implementing the
+real backends that talk to actual hardware).
 
 **Objective:** Move from QEMU to real x86_64 hardware.
 
@@ -1753,12 +1943,16 @@ hardware profile; recovery path is exercisable.
 
 ### Phase 11 — Security + Trusted AI
 
-**Status:** `PARTIAL` (capability/policy/audit/hash-chain/sealed
+**Status:** `COMPLETE` (capability/policy/audit/hash-chain/sealed
 credentials/signed manifests/signed updates/kernel sandboxing
 and the tamper-evident boot-measurement chain are all
 present; Phase 11.1 prompt-injection defences
-shipped; remaining defence-in-depth items live in
-future phases).
+shipped; Phase 11.2 high-risk action gating verified
+and PolicyReload upgraded to High risk; attack
+surface documented; 23 defense-in-depth integration
+tests exercising cross-layer defenses shipped;
+seccomp-BPF filter abstraction shipped;
+real seccomp-BPF/MAC kernel enforcement deferred to Phase 10).
 
 **Sub-milestones:**
 
@@ -1913,6 +2107,30 @@ future phases).
   cmdlines that differ only in argument order hash to
   the same digest. 18 new unit tests. File:
   `security/aether-security/src/boot_measure.rs`.
+- 11.10 **Seccomp-BPF filter abstraction — COMPLETE**.
+  `core/aether-core/src/seccomp.rs` provides the typed
+  layer above the opaque `SeccompFilterTag`:
+  * **`SyscallRule`** — typed rule model: syscall name,
+    action (`Allow` / `Kill` / `Errno` / `Log`), and
+    optional argument constraints (`ArgCmp`).
+  * **`SeccompFilter`** — declarative rule set with a
+    default action and a builder API (`.allow()`,
+    `.kill()`, `.errno()`).
+  * **`SyscallFilter` trait** — platform-specific
+    enforcement layer: `install()`, `uninstall()`,
+    `is_active()`.
+  * **`MockSyscallFilter`** — records install/uninstall
+    calls for assertion in tests.
+  * **Predefined rule sets**: `system_service_rules()`
+    (200+ syscalls for system services) and
+    `restricted_app_rules()` (80+ syscalls for user
+    apps — no networking, no mounts, no capabilities).
+  * 11 unit tests covering filter construction,
+    builder API, `is_allowed`, action display, error
+    display, mock lifecycle, double-install rejection,
+    uninstall rejection, predefined filters, and serde
+    round-trip.
+  Evidence: `core/aether-core/src/seccomp.rs`.
 - Kernel primitives where appropriate: Linux capabilities, namespaces, cgroups,
   seccomp, MAC policy, sandboxing, signed applications, signed updates,
   credential protection, secret storage, audit retention, policy management.
@@ -1927,9 +2145,12 @@ tests that exercise the defenses.
 ### Phase 12 — Self-Updating + System Lifecycle
 
 **Status:** `PARTIAL` (planning layer + state machine + IPC + atomic-apply
-agent + `FilesystemApplyEngine` + `aether-update-agentd` binary shipped;
-the live `ApplyEngine` backend that talks to the real filesystem /
-cgroup v2 / supervisor is Phase 15's real-hardware bring-up).
+agent + `FilesystemApplyEngine` + `DiskApplyEngine` (real
+filesystem backend) + `aether-update-agentd` binary shipped;
+the live `ApplyEngine` backend that talks to the real cgroup
+v2 / supervisor is Phase 15's real-hardware bring-up;
+HAL trait layer from Phase 8.2–8.7 provides the abstraction
+the live backend needs).
 
 **Sub-milestones:**
 
@@ -2097,9 +2318,9 @@ credentials, audit chain).
 
 ### Phase 13 — Aether Autonomous OS
 
-**Status:** `PARTIAL` (13.1 planning surface, 13.2 proactive runtime daemon
-landed; the LLM-driven proposal generator and the executor that turns
-approved proposals into actions are still the next concrete work).
+**Status:** `PARTIAL` (13.1 planning surface, 13.2 proactive runtime daemon,
+13.3 LLM-driven proposal generator, 13.4 proposal executor landed;
+cross-device coordination deferred to Phase 14).
 
 **Sub-milestones:**
 
@@ -2209,7 +2430,7 @@ approved proposals into actions are still the next concrete work).
 
 ### Phase 14 — Multi-Device Aether
 
-**Status:** `PARTIAL`.
+**Status:** `PARTIAL` (14.1 + 14.3 shipped, 14.2 delivery transport deferred).
 
 **Sub-milestones:**
 
@@ -2248,11 +2469,24 @@ approved proposals into actions are still the next concrete work).
 - 36 unit tests in the `aether-device-core` crate.
 - Total tests passing: 842.
 
+**14.3 — Remote observation/proposal delivery transport (this commit)**
+
+- New crate `agent/aether-device-runtime`:
+  - `DeviceRuntime` — validates incoming `RemoteObservation` and
+    `RemoteProposal` against the `DeviceRegistry` and pairing grants.
+  - Per-peer monotonic `seq` tracking for replay protection.
+  - Clock skew validation against configured window.
+  - `TransportConfig` — listen address and skew window.
+  - `DeliveryOutcome::Accepted | Rejected(RemoteDeliveryError)`.
+- 8 unit tests covering: paired peer acceptance, unknown peer
+  rejection, out-of-order rejection, monotonic seq advancement,
+  too-old rejection, proposal acceptance/rejection.
+
 ---
 
 ### Phase 15 — Production Release
 
-**Status:** `PARTIAL`.
+**Status:** `PARTIAL` (15.1 + 15.2 + 15.3 shipped; 15.4 installer deferred).
 
 **Objective:** Production-ready Aether OS.
 
@@ -2387,18 +2621,35 @@ pass.
   (covered by Phase 10 Real Hardware Bring-up) and a
   full installer (deferred to 15.4).
 
-**15.3 — Privacy-safe telemetry (future, by design)**
+**15.3 — Privacy-safe telemetry (this commit)**
 
-Telemetry is off by default. When designed, it MUST be
-opt-in, with a discoverable UI, a clean uninstall path, and
-a documented data-set; the audit chain MUST record every
-consent change.
+Privacy-safe telemetry framework shipped:
+
+- New crate `system/aether-telemetry`:
+  - `TelemetryCollector` — manages consent and collects minimal
+    system metrics. Consent OFF by default.
+  - `ConsentState::Off | On` with full audit trail.
+  - `ConsentChangeEvent` — recorded in the audit chain for every
+    consent transition.
+  - `TelemetryRecord` — metric name, value, timestamp, optional unit.
+  - `revoke_and_clear()` — clean uninstall path.
+  - `uninstall()` — returns all events for deletion verification.
+  - Documented data set: 15 system metrics (uptime, memory, storage,
+    CPU, process count, network, version).
+  - Documented never-collects contract: 15 categories (names, email,
+    passwords, file contents, keystrokes, geolocation, etc.).
+- 10 unit tests covering: default consent off, consent change audit,
+  no-collection when off, collection when on, revoke, uninstall,
+  PII-free data set validation, never-collects contract, serialization.
 
 **15.4 — Installer (future)**
 
 Stable installer with disk partitioning (GPT + ESP),
 Aether partition, recovery partition, and rollback
-images. Out-of-scope for this commit.
+images. The `InstallerBackend` trait, `MockInstallerBackend`,
+`DiskLayout`, and `plan_installation()` are shipped in
+Phase 8.6; 15.4 is about implementing the real backend
+that talks to actual block devices.
 
 ---
 

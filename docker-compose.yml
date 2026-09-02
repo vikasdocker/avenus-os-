@@ -1,0 +1,66 @@
+version: '3.9'
+
+services:
+  aether-dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: aether-os-dev
+    container_name: aether-dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    ports:
+      - "4747:4747"
+      - "4748:4748"
+      - "4750:4750"
+    environment:
+      - RUST_BACKTRACE=1
+      - CARGO_TERM_COLOR=always
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+    develop:
+      watch:
+        - action: sync
+          path: ./src
+          target: /workspace/src
+        - action: sync
+          path: ./core
+          target: /workspace/core
+        - action: sync
+          path: ./system
+          target: /workspace/system
+        - action: sync
+          path: ./apps
+          target: /workspace/apps
+        - action: sync
+          path: ./Cargo.toml
+          target: /workspace/Cargo.toml
+        - action: sync
+          path: ./Cargo.lock
+          target: /workspace/Cargo.lock
+        - action: rebuild
+          path: ./docker/Dockerfile
+
+  qemu-runner:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: aether-os-dev
+    container_name: aether-run
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    ports:
+      - "4747:4747"
+      - "4748:4748"
+      - "4750:4750"
+      - "5900:5900"
+      - "5901:5901"
+    environment:
+      - RUST_BACKTRACE=1
+      - DISPLAY=:1
+    command: bash -c "cd /workspace && apt-get update -qq && apt-get install -y -qq novnc websockify > /dev/null 2>&1 && websockify --web=/usr/share/novnc 5901 localhost:5900 & sleep 1 && exec qemu-system-x86_64 -m 512M -vnc :0 -no-reboot -net nic -net user,hostfwd=tcp::4747-:4747,hostfwd=tcp::4748-:4748,hostfwd=tcp::4750-:4750 -kernel build/vmlinuz -initrd build/initramfs.cpio.gz -append 'console=ttyS0 panic=-1'"
+    stdin_open: true
+    tty: true

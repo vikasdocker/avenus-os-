@@ -301,13 +301,7 @@ impl Workflow {
         if name.is_empty() {
             return None;
         }
-        Some(Self {
-            id,
-            name,
-            description: description.into(),
-            trigger,
-            steps: Vec::new(),
-        })
+        Some(Self { id, name, description: description.into(), trigger, steps: Vec::new() })
     }
 
     /// Append a step.
@@ -369,10 +363,7 @@ impl WorkflowRegistry {
     /// everything that should run at 09:00".
     #[must_use]
     pub fn with_trigger(&self, trigger: &Trigger) -> Vec<&Workflow> {
-        self.workflows
-            .iter()
-            .filter(|w| &w.trigger == trigger)
-            .collect()
+        self.workflows.iter().filter(|w| &w.trigger == trigger).collect()
     }
 
     /// The number of registered workflows.
@@ -472,12 +463,16 @@ pub fn default_registry() -> WorkflowRegistry {
                 "Open the email app",
                 StepAction::LaunchApp { app_id: "aether.mail".into() },
             ))
-            .with_step(WorkflowStep::new(
-                "Drop the page cache to free memory",
-                StepAction::RecoveryAction {
-                    action_summary: "Drop page cache: free kernel page cache for a fresh day.".into(),
-                },
-            ).with_failure_policy(FailurePolicy::Skip))
+            .with_step(
+                WorkflowStep::new(
+                    "Drop the page cache to free memory",
+                    StepAction::RecoveryAction {
+                        action_summary: "Drop page cache: free kernel page cache for a fresh day."
+                            .into(),
+                    },
+                )
+                .with_failure_policy(FailurePolicy::Skip),
+            )
             .with_step(WorkflowStep::new(
                 "Surface the day's agenda",
                 StepAction::Notify {
@@ -504,9 +499,7 @@ pub fn default_registry() -> WorkflowRegistry {
             ))
             .with_step(WorkflowStep::new(
                 "Notify the user",
-                StepAction::Notify {
-                    body: "Wrapping up — see you tomorrow.".into(),
-                },
+                StepAction::Notify { body: "Wrapping up — see you tomorrow.".into() },
             )),
         );
     }
@@ -520,12 +513,15 @@ pub fn default_registry() -> WorkflowRegistry {
         Trigger::Manual,
     ) {
         let _ = reg.register(
-            w.with_step(WorkflowStep::new(
-                "Drop the page cache",
-                StepAction::RecoveryAction {
-                    action_summary: "Drop page cache: pre-meeting cleanup.".into(),
-                },
-            ).with_failure_policy(FailurePolicy::Skip))
+            w.with_step(
+                WorkflowStep::new(
+                    "Drop the page cache",
+                    StepAction::RecoveryAction {
+                        action_summary: "Drop page cache: pre-meeting cleanup.".into(),
+                    },
+                )
+                .with_failure_policy(FailurePolicy::Skip),
+            )
             .with_step(WorkflowStep::new(
                 "Open the notes app",
                 StepAction::LaunchApp { app_id: "aether.notes".into() },
@@ -543,8 +539,14 @@ mod tests {
 
     #[test]
     fn step_action_summary() {
-        assert_eq!(StepAction::LaunchApp { app_id: "aether.notes".into() }.summary(), "Launch `aether.notes`");
-        assert_eq!(StepAction::OpenFile { target: "/etc/hosts".into() }.summary(), "Open `/etc/hosts`");
+        assert_eq!(
+            StepAction::LaunchApp { app_id: "aether.notes".into() }.summary(),
+            "Launch `aether.notes`"
+        );
+        assert_eq!(
+            StepAction::OpenFile { target: "/etc/hosts".into() }.summary(),
+            "Open `/etc/hosts`"
+        );
         assert_eq!(StepAction::Notify { body: "hi".into() }.summary(), "Notify: hi");
         assert_eq!(StepAction::Wait { seconds: 5 }.summary(), "Wait 5s");
     }
@@ -613,8 +615,12 @@ mod tests {
     fn registry_with_trigger() {
         let mut reg = WorkflowRegistry::new();
         let _ = reg.register(Workflow::new("a", "A", "", Trigger::Manual).unwrap());
-        let _ = reg.register(Workflow::new("b", "B", "", Trigger::TimeOfDay { hour: 9, minute: 0 }).unwrap());
-        let _ = reg.register(Workflow::new("c", "C", "", Trigger::TimeOfDay { hour: 9, minute: 0 }).unwrap());
+        let _ = reg.register(
+            Workflow::new("b", "B", "", Trigger::TimeOfDay { hour: 9, minute: 0 }).unwrap(),
+        );
+        let _ = reg.register(
+            Workflow::new("c", "C", "", Trigger::TimeOfDay { hour: 9, minute: 0 }).unwrap(),
+        );
         let m = reg.with_trigger(&Trigger::Manual);
         assert_eq!(m.len(), 1);
         let t = reg.with_trigger(&Trigger::TimeOfDay { hour: 9, minute: 0 });
@@ -638,10 +644,10 @@ mod tests {
 
     #[test]
     fn compile_to_tasks_encodes_failure_policy() {
-        let w = Workflow::new("w", "W", "D", Trigger::Manual)
-            .unwrap()
-            .with_step(WorkflowStep::new("s1", StepAction::Notify { body: "x".into() })
-                .with_failure_policy(FailurePolicy::RetryThenSkip));
+        let w = Workflow::new("w", "W", "D", Trigger::Manual).unwrap().with_step(
+            WorkflowStep::new("s1", StepAction::Notify { body: "x".into() })
+                .with_failure_policy(FailurePolicy::RetryThenSkip),
+        );
         let tasks = compile_to_tasks(&w, "wf", 0);
         assert_eq!(tasks.len(), 1);
         let args = tasks[0].arguments.as_ref().expect("args");
@@ -712,6 +718,9 @@ mod tests {
         assert_eq!(Trigger::Manual.summary(), "Manual");
         assert_eq!(Trigger::TimeOfDay { hour: 9, minute: 0 }.summary(), "Daily at 09:00");
         assert_eq!(Trigger::TimeOfDay { hour: 18, minute: 30 }.summary(), "Daily at 18:30");
-        assert_eq!(Trigger::OnEvent { event_id: "battery.low".into() }.summary(), "On event `battery.low`");
+        assert_eq!(
+            Trigger::OnEvent { event_id: "battery.low".into() }.summary(),
+            "On event `battery.low`"
+        );
     }
 }

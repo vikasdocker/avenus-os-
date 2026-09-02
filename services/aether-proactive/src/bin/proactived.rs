@@ -37,8 +37,8 @@ use std::net::TcpStream;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use aether_proactive::{DaemonLoop, ObservationSink, SystemProbe, TickResult};
 use aether_agent_core::Observation;
+use aether_proactive::{DaemonLoop, ObservationSink, SystemProbe, TickResult};
 
 /// The default loopback control plane endpoint.
 const DEFAULT_CONTROL_PLANE: &str = "127.0.0.1:4747";
@@ -109,28 +109,19 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
         match args[i].as_str() {
             "--control-plane" => {
                 i += 1;
-                let v = args
-                    .get(i)
-                    .ok_or_else(|| "--control-plane requires a value".to_string())?;
+                let v =
+                    args.get(i).ok_or_else(|| "--control-plane requires a value".to_string())?;
                 control_plane = v.clone();
             }
             "--tick-ms" => {
                 i += 1;
-                let v = args
-                    .get(i)
-                    .ok_or_else(|| "--tick-ms requires a value".to_string())?;
-                tick_ms = v
-                    .parse::<u64>()
-                    .map_err(|e| format!("invalid --tick-ms: {e}"))?;
+                let v = args.get(i).ok_or_else(|| "--tick-ms requires a value".to_string())?;
+                tick_ms = v.parse::<u64>().map_err(|e| format!("invalid --tick-ms: {e}"))?;
             }
             "--now-ms" => {
                 i += 1;
-                let v = args
-                    .get(i)
-                    .ok_or_else(|| "--now-ms requires a value".to_string())?;
-                now_ms = v
-                    .parse::<u64>()
-                    .map_err(|e| format!("invalid --now-ms: {e}"))?;
+                let v = args.get(i).ok_or_else(|| "--now-ms requires a value".to_string())?;
+                now_ms = v.parse::<u64>().map_err(|e| format!("invalid --now-ms: {e}"))?;
             }
             "--once" => {
                 once = true;
@@ -154,7 +145,9 @@ fn print_help() {
     println!("    aether-proactived --once [--control-plane HOST:PORT] [--now-ms MILLIS]");
     println!();
     println!("OPTIONS:");
-    println!("    --control-plane <HOST:PORT>   system-core TCP endpoint. Default: 127.0.0.1:4747.");
+    println!(
+        "    --control-plane <HOST:PORT>   system-core TCP endpoint. Default: 127.0.0.1:4747."
+    );
     println!("    --tick-ms <MILLIS>            poll interval. Default: 5000.");
     println!("    --once                        run a single tick and exit.");
     println!("    --now-ms <MILLIS>             wall-clock timestamp for the tick.");
@@ -250,13 +243,9 @@ impl IpcSink {
             "command": command,
             "parameters": parameters,
         });
-        stream
-            .write_all(format!("{req}\n").as_bytes())
-            .map_err(|e| format!("send: {e}"))?;
+        stream.write_all(format!("{req}\n").as_bytes()).map_err(|e| format!("send: {e}"))?;
         let mut line = String::new();
-        BufReader::new(stream)
-            .read_line(&mut line)
-            .map_err(|e| format!("recv: {e}"))?;
+        BufReader::new(stream).read_line(&mut line).map_err(|e| format!("recv: {e}"))?;
         if line.is_empty() {
             return Err("empty response".to_string());
         }
@@ -306,19 +295,15 @@ impl ObservationSink for IpcSink {
 }
 
 fn parse_endpoint(endpoint: &str) -> Result<(String, u16), String> {
-    let (host, port) = endpoint
-        .rsplit_once(':')
-        .ok_or_else(|| format!("invalid endpoint: {endpoint}"))?;
+    let (host, port) =
+        endpoint.rsplit_once(':').ok_or_else(|| format!("invalid endpoint: {endpoint}"))?;
     let port = port.parse::<u16>().map_err(|e| format!("invalid port: {e}"))?;
     Ok((host.to_string(), port))
 }
 
 fn system_time_now_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
 #[cfg(test)]

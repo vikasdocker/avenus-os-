@@ -102,12 +102,7 @@ impl UiElement {
         label: impl Into<String>,
         confidence: f32,
     ) -> Self {
-        Self {
-            kind,
-            bbox,
-            label: label.into(),
-            confidence: confidence.clamp(0.0, 1.0),
-        }
+        Self { kind, bbox, label: label.into(), confidence: confidence.clamp(0.0, 1.0) }
     }
 
     /// `true` if the element is
@@ -164,10 +159,7 @@ impl UiDetectionResult {
     /// The interactive elements.
     #[must_use]
     pub fn interactive(&self) -> Vec<&UiElement> {
-        self.elements
-            .iter()
-            .filter(|e| e.is_interactive())
-            .collect()
+        self.elements.iter().filter(|e| e.is_interactive()).collect()
     }
 
     /// Merge in OCR text: any element
@@ -177,9 +169,7 @@ impl UiDetectionResult {
     pub fn merge_ocr(&mut self, ocr: &OcrResult) {
         for word in ocr.lines.iter().flat_map(|l| l.words.iter()) {
             for element in &mut self.elements {
-                if element.bbox.contains(word.bbox.x, word.bbox.y)
-                    && element.label.is_empty()
-                {
+                if element.bbox.contains(word.bbox.x, word.bbox.y) && element.label.is_empty() {
                     element.label = word.text.clone();
                     break;
                 }
@@ -206,11 +196,7 @@ impl UiDetectionRequest {
     /// A new request for all kinds.
     #[must_use]
     pub fn all(frame: Frame) -> Self {
-        Self {
-            frame,
-            kinds: Vec::new(),
-            min_confidence: 0.0,
-        }
+        Self { frame, kinds: Vec::new(), min_confidence: 0.0 }
     }
 
     /// Limit to a specific kind.
@@ -261,10 +247,7 @@ pub trait UiDetector {
 pub struct NullUiDetector;
 
 impl UiDetector for NullUiDetector {
-    fn detect(
-        &self,
-        request: &UiDetectionRequest,
-    ) -> Result<UiDetectionResult, UiDetectionError> {
+    fn detect(&self, request: &UiDetectionRequest) -> Result<UiDetectionResult, UiDetectionError> {
         if request.frame.data.is_empty() {
             return Err(UiDetectionError::EmptyFrame);
         }
@@ -282,10 +265,7 @@ impl<D: UiDetector> UiDetectorSession<D> {
     /// A new session.
     #[must_use]
     pub fn new(detector: D) -> Self {
-        Self {
-            detector,
-            last_result: None,
-        }
+        Self { detector, last_result: None }
     }
 
     /// The most recent result.
@@ -326,14 +306,7 @@ mod tests {
     use aether_vision_core::{PixelFormat, SourceId};
 
     fn frame() -> Frame {
-        Frame::solid(
-            100,
-            100,
-            PixelFormat::Rgb8,
-            [255, 255, 255, 255],
-            SourceId::new("t"),
-            0,
-        )
+        Frame::solid(100, 100, PixelFormat::Rgb8, [255, 255, 255, 255], SourceId::new("t"), 0)
     }
 
     #[test]
@@ -459,17 +432,13 @@ mod tests {
     #[test]
     fn ui_error_display() {
         assert_eq!(UiDetectionError::EmptyFrame.to_string(), "frame has no data");
-        assert!(UiDetectionError::EngineFailure(String::from("x"))
-            .to_string()
-            .contains("x"));
+        assert!(UiDetectionError::EngineFailure(String::from("x")).to_string().contains("x"));
     }
 
     #[test]
     fn session_detect_with_min_confidence() {
         let mut s = UiDetectorSession::new(NullUiDetector);
-        let r = s
-            .detect(&UiDetectionRequest::all(frame()).with_min_confidence(0.5), None)
-            .unwrap();
+        let r = s.detect(&UiDetectionRequest::all(frame()).with_min_confidence(0.5), None).unwrap();
         assert!(r.is_empty());
         assert!(s.last_result().is_some());
     }
@@ -477,9 +446,7 @@ mod tests {
     #[test]
     fn session_detect_with_ocr() {
         let mut s = UiDetectorSession::new(NullUiDetector);
-        let r = s
-            .detect(&UiDetectionRequest::all(frame()), None)
-            .unwrap();
+        let r = s.detect(&UiDetectionRequest::all(frame()), None).unwrap();
         assert!(r.is_empty());
     }
 }

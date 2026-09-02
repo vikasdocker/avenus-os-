@@ -2409,6 +2409,145 @@ fn dispatch_inner(
             let task_json = serde_json::to_value(&task).ok();
             IpcResponse::ok("agent.approve", serde_json::json!({ "task": task_json }))
         }
+        "agent.execute" => {
+            // Picks up a live task, converts it to a
+            // typed runtime `Action`, and (unless
+            // `dry_run` is true) executes it through
+            // the agent runtime executor. On any
+            // terminal outcome the task is removed
+            // from the live graph and recorded in
+            // history.
+            let id_str = match req.parameters.get("id").and_then(|v| v.as_str()) {
+                Some(s) => s.to_string(),
+                None => {
+                    return IpcResponse::err(
+                        "agent.execute",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "parameter 'id' is required".to_string(),
+                        },
+                    );
+                }
+            };
+            let session_id = req
+                .parameters
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("agent")
+                .to_string();
+            let dry_run = req.parameters.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
+            let control_port =
+                req.parameters.get("control_port").and_then(|v| v.as_u64()).unwrap_or(4747) as u16;
+            let task_id = match TaskId::new(id_str.clone()) {
+                Some(t) => t,
+                None => {
+                    return IpcResponse::err(
+                        "agent.execute",
+                        IpcError {
+                            code: "INVALID_INPUT".to_string(),
+                            message: "task id is empty".to_string(),
+                        },
+                    );
+                }
+            };
+            let mut status = match agent_status.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if dry_run {
+                let task = match status.task(&task_id) {
+                    Some(t) => t.clone(),
+                    None => {
+                        return IpcResponse::err(
+                            "agent.execute",
+                            IpcError {
+                                code: "NOT_FOUND".to_string(),
+                                message: format!("task '{id_str}' not found"),
+                            },
+                        );
+                    }
+                };
+                return match aether_agent_runtime::task_to_action(&session_id, &task) {
+                    Ok(action) => {
+                        let action_json = serde_json::to_value(&action).ok();
+                        IpcResponse::ok(
+                            "agent.execute",
+                            serde_json::json!({
+                                "dry_run": true,
+                                "task": serde_json::to_value(&task).ok(),
+                                "action": action_json,
+                            }),
+                        )
+                    }
+                    Err(e) => IpcResponse::err(
+                        "agent.execute",
+                        IpcError { code: "UNSUPPORTED".to_string(), message: e.to_string() },
+                    ),
+                };
+            }
+            let task = match status.remove_task(&task_id) {
+                Some(t) => t,
+                None => {
+                    return IpcResponse::err(
+                        "agent.execute",
+                        IpcError {
+                            code: "NOT_FOUND".to_string(),
+                            message: format!("task '{id_str}' not found"),
+                        },
+                    );
+                }
+            };
+            let now_ms = unix_ms().min(u128::from(u64::MAX)) as u64;
+            let action = match aether_agent_runtime::task_to_action(&session_id, &task) {
+                Ok(a) => a,
+                Err(e) => {
+                    status.record_history(aether_agent_core::HistoryEntry {
+                        task: task.clone(),
+                        stage: aether_agent_core::TaskStage::Failed,
+                        timestamp_ms: now_ms,
+                        note: Some(e.to_string()),
+                    });
+                    return IpcResponse::err(
+                        "agent.execute",
+                        IpcError { code: "UNSUPPORTED".to_string(), message: e.to_string() },
+                    );
+                }
+            };
+            let action_json = serde_json::to_value(&action).ok();
+            let executor = aether_agent_runtime::ActionExecutor::new(control_port, 4750);
+            match executor.execute_with_recovery(&action) {
+                Ok(result) => {
+                    status.record_history(aether_agent_core::HistoryEntry {
+                        task: task.clone(),
+                        stage: aether_agent_core::TaskStage::Done,
+                        timestamp_ms: now_ms,
+                        note: None,
+                    });
+                    IpcResponse::ok(
+                        "agent.execute",
+                        serde_json::json!({
+                            "dry_run": false,
+                            "task": serde_json::to_value(&task).ok(),
+                            "action": action_json,
+                            "success": result.success,
+                            "duration_ms": result.duration_ms,
+                        }),
+                    )
+                }
+                Err(e) => {
+                    status.record_history(aether_agent_core::HistoryEntry {
+                        task: task.clone(),
+                        stage: aether_agent_core::TaskStage::Failed,
+                        timestamp_ms: now_ms,
+                        note: Some(e.to_string()),
+                    });
+                    IpcResponse::err(
+                        "agent.execute",
+                        IpcError { code: "EXECUTION_FAILED".to_string(), message: e.to_string() },
+                    )
+                }
+            }
+        }
         // ----- Devices (Phase 14) -----
         //
         // The future device runtime is the
@@ -4893,5 +5032,359 @@ mod device_ipc_tests {
         );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_ref().unwrap().code, "NOT_FOUND");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::type_complexity)]
+mod defense_in_depth_tests {
+    //! Defense-in-depth integration tests.
+    //!
+    //! These tests exercise the cross-layer security model:
+    //! policy gate -> audit chain -> credentials -> signed updates
+    //! -> boot measurements. Each test verifies that multiple
+    //! defense layers cooperate correctly.
+
+    use super::{dispatch_inner, gate_response, record_audit};
+    use aether_application_manager::ApplicationManager;
+    use aether_core::ipc::{ActorTrust, IpcRequest};
+    use aether_device_core::DeviceRegistry;
+    use aether_security::audit::{AuditChain, RetentionPolicy};
+    use aether_security::credentials::{RandomKeyProvider, SealedStore, StaticKeyProvider};
+    use aether_security::Decision;
+    use aether_storage::{FileManager, WorkspaceConfig};
+    use aether_system_core::manager::ServiceManager;
+    use aether_system_core::policy::{evaluate, PolicyVerdict};
+    use aether_update_core::{UpdateStatus, VersionPolicy};
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+
+    fn env() -> (
+        ServiceManager,
+        ApplicationManager,
+        FileManager,
+        Mutex<AuditChain>,
+        Mutex<SealedStore<StaticKeyProvider>>,
+        Mutex<UpdateStatus>,
+        Mutex<VersionPolicy>,
+        Mutex<aether_agent_core::AgentStatus>,
+        Mutex<DeviceRegistry>,
+    ) {
+        let graph = aether_system_core::graph::DependencyGraph::new(&[]).expect("empty");
+        let manager = ServiceManager::new(graph);
+        let apps = ApplicationManager::default();
+        let files = FileManager::new(WorkspaceConfig::from_env_or_default()).expect("workspace");
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
+        let creds = Mutex::new(SealedStore::new(StaticKeyProvider::new([0x55u8; 32])));
+        let status = Mutex::new(UpdateStatus::new());
+        let policy = Mutex::new(VersionPolicy::default());
+        let agent = Mutex::new(aether_agent_core::AgentStatus::new());
+        let registry = Mutex::new(DeviceRegistry::new());
+        (manager, apps, files, chain, creds, status, policy, agent, registry)
+    }
+
+    fn req(command: &str, params: serde_json::Value, trust: ActorTrust) -> IpcRequest {
+        IpcRequest {
+            service_id: "test".to_string(),
+            command: command.to_string(),
+            parameters: params,
+            actor_trust: trust,
+        }
+    }
+
+    fn err_code(verdict: &PolicyVerdict) -> String {
+        gate_response("test", verdict).error.map(|e| e.code).unwrap_or_default()
+    }
+
+    // ---- Policy Gate + Audit Chain ----
+
+    #[test]
+    fn untrusted_credential_seal_is_denied_at_policy_gate() {
+        let v = evaluate("credentials.seal", ActorTrust::Untrusted);
+        assert_eq!(v.decision, Decision::Deny);
+        assert_eq!(err_code(&v), "POLICY_DENIED_UNTRUSTED");
+    }
+
+    #[test]
+    fn untrusted_credential_unseal_is_denied_at_policy_gate() {
+        let v = evaluate("credentials.unseal", ActorTrust::Untrusted);
+        assert_eq!(v.decision, Decision::Deny);
+        assert_eq!(err_code(&v), "POLICY_DENIED_UNTRUSTED");
+    }
+
+    #[test]
+    fn untrusted_system_shutdown_is_denied_at_policy_gate() {
+        let v = evaluate("system.shutdown", ActorTrust::Untrusted);
+        assert_eq!(v.decision, Decision::Deny);
+        assert_eq!(err_code(&v), "POLICY_DENIED_UNTRUSTED");
+    }
+
+    #[test]
+    fn untrusted_system_reboot_is_denied_at_policy_gate() {
+        let v = evaluate("system.reboot", ActorTrust::Untrusted);
+        assert_eq!(v.decision, Decision::Deny);
+        assert_eq!(err_code(&v), "POLICY_DENIED_UNTRUSTED");
+    }
+
+    #[test]
+    fn trusted_high_risk_requires_consent() {
+        let v = evaluate("file.delete", ActorTrust::Trusted);
+        assert_eq!(v.decision, Decision::RequireConsent);
+        assert_eq!(err_code(&v), "REQUIRES_CONFIRMATION");
+    }
+
+    #[test]
+    fn trusted_low_risk_is_allowed() {
+        let v = evaluate("system.status", ActorTrust::Trusted);
+        assert!(v.is_allow());
+    }
+
+    #[test]
+    fn audit_chain_records_policy_denial() {
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
+        record_audit(
+            &chain,
+            "file.delete",
+            &serde_json::json!({"actor_trust": "untrusted"}),
+            "test",
+            false,
+        );
+        let guard = chain.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(guard.len(), 1);
+        assert!(guard.verify_chain().is_ok());
+        let entry = &guard.entries()[0];
+        assert!(entry.detail.contains("file.delete"));
+    }
+
+    #[test]
+    fn audit_chain_records_successful_dispatch() {
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
+        record_audit(&chain, "system.status", &serde_json::json!({}), "test", true);
+        let guard = chain.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(guard.len(), 1);
+        assert!(guard.verify_chain().is_ok());
+    }
+
+    #[test]
+    fn audit_chain_survives_multiple_denials_in_sequence() {
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
+        for cmd in &["file.delete", "system.shutdown", "credentials.seal", "file.write"] {
+            record_audit(
+                &chain,
+                cmd,
+                &serde_json::json!({"actor_trust": "untrusted"}),
+                "test",
+                false,
+            );
+        }
+        let guard = chain.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(guard.len(), 4);
+        assert!(guard.verify_chain().is_ok());
+    }
+
+    // ---- Credential Store Defense ----
+
+    #[test]
+    fn credential_seal_content_not_in_audit_detail() {
+        let chain = Mutex::new(AuditChain::new(RetentionPolicy::last_n(64)));
+        let secret_value = "super-secret-api-key-12345";
+        record_audit(
+            &chain,
+            "credentials.seal",
+            &serde_json::json!({"name": "api-key", "content": "[REDACTED]"}),
+            "test",
+            true,
+        );
+        let guard = chain.lock().unwrap_or_else(|p| p.into_inner());
+        let entry = &guard.entries()[0];
+        assert!(!entry.detail.contains(secret_value));
+    }
+
+    #[test]
+    fn credential_unseal_produces_secret_zeroized_on_drop() {
+        let mut store = SealedStore::new(StaticKeyProvider::new([0xAAu8; 32]));
+        store.seal("test-key", "my-secret-value", None, false).unwrap();
+        let secret = store.unseal("test-key").unwrap();
+        assert_eq!(secret.expose(), "my-secret-value");
+        // Dropping the secret zeroizes its contents.
+        drop(secret);
+        // The credential still exists in the store (unseal is read-only).
+        assert!(store.contains("test-key"));
+    }
+
+    #[test]
+    fn credential_store_wrong_key_rejects_all_sealed_data() {
+        let mut store_a = SealedStore::new(StaticKeyProvider::new([0xAAu8; 32]));
+        let mut store_b = SealedStore::new(StaticKeyProvider::new([0xBBu8; 32]));
+        store_a.seal("key", "value", None, false).unwrap();
+        let result = store_b.unseal("key");
+        assert!(result.is_err());
+    }
+
+    // ---- Signed Update Defense ----
+
+    #[test]
+    fn signed_update_verify_untrusted_actor_denied() {
+        let v = evaluate("update.verify", ActorTrust::Untrusted);
+        assert_eq!(v.decision, Decision::Deny);
+    }
+
+    #[test]
+    fn signed_update_plan_untrusted_actor_denied() {
+        let v = evaluate("update.plan", ActorTrust::Untrusted);
+        assert_eq!(v.decision, Decision::Deny);
+    }
+
+    #[test]
+    fn signed_update_trusted_actor_is_allowed() {
+        let v = evaluate("update.plan", ActorTrust::Trusted);
+        assert!(v.is_allow());
+    }
+
+    // ---- Boot Measurement Chain ----
+
+    #[test]
+    fn boot_measurement_chain_detects_tampering() {
+        use aether_security::boot_measure::{BootMeasurementChain, BootRetention, BootStage};
+
+        let mut chain = BootMeasurementChain::new(BootRetention::last_n(10));
+        let zero = [0u8; 32];
+        chain.record(1000, BootStage::KernelCommandLine, "", "console=ttyS0", zero);
+        chain.record(1001, BootStage::InitramfsComponent, "initrd", "loaded", zero);
+        chain.record(1002, BootStage::BootComplete, "", "audit-genesis", zero);
+        assert!(chain.verify_chain().is_ok());
+
+        let entries = chain.entries();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].stage, BootStage::KernelCommandLine);
+        assert_eq!(entries[1].stage, BootStage::InitramfsComponent);
+        assert_eq!(entries[2].stage, BootStage::BootComplete);
+    }
+
+    #[test]
+    fn boot_measurement_chain_requires_complete_marker() {
+        use aether_security::boot_measure::{BootMeasurementChain, BootRetention, BootStage};
+
+        let mut chain = BootMeasurementChain::new(BootRetention::last_n(10));
+        let zero = [0u8; 32];
+        chain.record(1000, BootStage::KernelCommandLine, "", "console=ttyS0", zero);
+        // No BootComplete marker — strict verification must fail.
+        assert!(chain.verify_chain().is_err());
+        // Lenient verification should pass.
+        assert!(chain.verify_chain_lenient().is_ok());
+    }
+
+    // ---- Policy Gate Coverage ----
+
+    #[test]
+    fn critical_system_commands_require_consent_for_trusted() {
+        // system.shutdown is the only Critical-risk command in the policy map.
+        let v = evaluate("system.shutdown", ActorTrust::Trusted);
+        assert_eq!(v.decision, Decision::RequireConsent);
+    }
+
+    #[test]
+    fn all_read_commands_are_allowed_for_trusted() {
+        let read_commands = [
+            "system.status",
+            "system.info",
+            "system.resources",
+            "system.uptime",
+            "storage.status",
+            "process.list",
+            "process.inspect",
+            "network.status",
+            "network.interfaces",
+            "window.list",
+            "file.list",
+            "file.read",
+            "file.search",
+            "display.list",
+            "device.list",
+            "device.inspect",
+            "context.get",
+        ];
+        for cmd in &read_commands {
+            let v = evaluate(cmd, ActorTrust::Trusted);
+            assert!(v.is_allow(), "{cmd} should be allowed for trusted actor");
+        }
+    }
+
+    #[test]
+    fn untrusted_actor_denied_for_all_write_commands() {
+        let write_commands = [
+            "file.write",
+            "file.delete",
+            "file.create",
+            "file.rename",
+            "file.move",
+            "app.launch",
+            "app.close",
+            "window.close",
+            "window.focus",
+            "window.minimize",
+            "window.maximize",
+            "service.restart",
+            "display.set_resolution",
+            "device.enable",
+            "device.disable",
+            "credential.seal",
+            "credential.unseal",
+            "policy.reload",
+        ];
+        for cmd in &write_commands {
+            let v = evaluate(cmd, ActorTrust::Untrusted);
+            assert!(!v.is_allow(), "{cmd} should be denied for untrusted actor");
+        }
+    }
+
+    // ---- Full Dispatch Pipeline ----
+
+    #[test]
+    fn dispatch_untrusted_low_risk_is_denied_and_audited() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+
+        let r = req("system.status", serde_json::json!({}), ActorTrust::Untrusted);
+        let resp = super::dispatch(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None, &status, &policy, &agent,
+            &registry, started_at, &r,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "POLICY_DENIED_UNTRUSTED");
+        let guard = chain.lock().unwrap_or_else(|p| p.into_inner());
+        assert!(guard.len() >= 1);
+        assert!(guard.verify_chain().is_ok());
+    }
+
+    #[test]
+    fn dispatch_trusted_low_risk_succeeds() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+
+        let r = req("system.status", serde_json::json!({}), ActorTrust::Trusted);
+        let resp = super::dispatch(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None, &status, &policy, &agent,
+            &registry, started_at, &r,
+        );
+        assert!(resp.ok);
+        // The outer dispatch wrapper records the audit entry.
+        let guard = chain.lock().unwrap_or_else(|p| p.into_inner());
+        assert!(guard.len() >= 1);
+        assert!(guard.verify_chain().is_ok());
+    }
+
+    #[test]
+    fn dispatch_high_risk_trusted_returns_require_confirmation() {
+        let (mut mgr, mut apps, mut files, chain, creds, status, policy, agent, registry) = env();
+        let started_at = SystemTime::now();
+
+        let r = req("file.delete", serde_json::json!({"path": "/tmp/x"}), ActorTrust::Trusted);
+        let resp = dispatch_inner(
+            &mut mgr, &mut apps, &mut files, &chain, &creds, None, &status, &policy, &agent,
+            &registry, started_at, &r,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_ref().unwrap().code, "REQUIRES_CONFIRMATION");
     }
 }

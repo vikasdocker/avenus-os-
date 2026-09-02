@@ -128,7 +128,12 @@ impl Description {
     /// A description with just a label.
     #[must_use]
     pub fn new(label: impl Into<String>) -> Self {
-        Self { label: label.into(), detail: String::new(), state: String::new(), shortcut: String::new() }
+        Self {
+            label: label.into(),
+            detail: String::new(),
+            state: String::new(),
+            shortcut: String::new(),
+        }
     }
 
     /// Add a detail.
@@ -184,12 +189,7 @@ impl Focusable {
     /// and label.
     #[must_use]
     pub fn new(id: impl Into<String>, role: Role, label: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            role,
-            description: Description::new(label),
-            disabled: false,
-        }
+        Self { id: id.into(), role, description: Description::new(label), disabled: false }
     }
 
     /// Override the description.

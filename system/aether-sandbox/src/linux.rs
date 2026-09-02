@@ -10,7 +10,6 @@
 use std::ffi::CString;
 use std::fs;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -167,7 +166,7 @@ pub fn apply_and_exec(plan: &SandboxPlan, cmd: &[String]) -> ExitCode {
         // SAFETY: unshare(2) is a one-shot call; the only failure
         // modes are EINVAL (bad flag) and ENOMEM. We bubble both
         // up as a non-zero exit so the supervisor can react.
-        let rc = unsafe { libc::unshare(flags) };
+        let rc = unsafe { libc::unshare(flags as i32) };
         if rc != 0 {
             let err = std::io::Error::last_os_error();
             eprintln!(
@@ -232,6 +231,24 @@ fn write_cgroup_slice(slice: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Raw `__user_cap_header_struct` for the capset(2) syscall.
+#[repr(C)]
+struct CapHeader {
+    version: u32,
+    pid: i32,
+}
+
+/// Raw `__user_cap_data_struct` for the capset(2) syscall.
+#[repr(C)]
+struct CapData {
+    effective: u32,
+    permitted: u32,
+    inheritable: u32,
+}
+
+// SYS_capset on x86_64 = 126, SYS_capget = 125.
+const SYS_CAPSET: i64 = 126;
+
 /// Build a `__user_cap_data_struct` pair and call capset() to keep
 /// only the capabilities in `keep`. The c[0] / c[1] / c[2] fields
 /// each cover 32 bits; we set the bit only for capabilities the
@@ -240,28 +257,24 @@ fn set_capabilities(keep: &[LinuxCapability]) -> std::io::Result<()> {
     // SAFETY: zeroed structs are valid for the capset() syscall
     // input; the kernel reads them, returns the previous value
     // in the same buffer, and we ignore the output.
-    let mut header: libc::cap_user_header_t = unsafe { std::mem::zeroed() };
+    let mut header: CapHeader = unsafe { std::mem::zeroed() };
     // version 0x2000302 is LINUX_CAPABILITY_VERSION_3 with
     // 64-bit caps; this is what every modern glibc / musl uses.
     header.version = 0x2000_302;
     header.pid = 0; // 0 == current thread.
-    let mut data: [libc::cap_user_data_t; 2] = unsafe { std::mem::zeroed() };
+    let mut data: [CapData; 2] = unsafe { std::mem::zeroed() };
     for c in keep {
         let bit = cap_number(*c);
         let (idx, mask) = if bit < 32 { (0, 1u32 << bit) } else { (1, 1u32 << (bit - 32)) };
-        // `effective` / `permitted` / `inheritable` are all
-        // u32 fields inside the cap_user_data_t struct; setting
-        // the same bit in all three is the documented "keep this
-        // capability" operation.
         let d = &mut data[idx];
         d.effective |= mask;
         d.permitted |= mask;
         d.inheritable |= mask;
     }
-    // SAFETY: capset() with valid header + data and 2 entries
+    // SAFETY: raw syscall with valid header + data and 2 entries
     // (the standard 64-bit-cap shape) either succeeds or returns
     // EINVAL. We propagate the error.
-    let rc = unsafe { libc::capset(&mut header as *mut _, data.as_mut_ptr()) };
+    let rc = unsafe { libc::syscall(SYS_CAPSET, &mut header as *mut CapHeader, data.as_mut_ptr()) };
     if rc != 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -291,7 +304,7 @@ fn exec_child(cmd: &[String]) -> ! {
     }
     argv.push(std::ptr::null());
 
-    let envp: [*const libc::c_char; 1] = [std::ptr::null()];
+    let _envp: [*const libc::c_char; 1] = [std::ptr::null()];
 
     // SAFETY: execvp(3) replaces the entire process image; on
     // success it does not return. We pass argv[0] as the path

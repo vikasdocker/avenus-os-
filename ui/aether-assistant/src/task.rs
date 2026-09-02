@@ -13,9 +13,7 @@
 //! steps.
 
 use aether_design_tokens::{AiVisualState, Color};
-use aether_ui_components::{
-    Component, ComponentStyle, Insets, LayoutBox, Panel, PanelSide,
-};
+use aether_ui_components::{Component, ComponentStyle, Insets, LayoutBox, Panel, PanelSide};
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -249,12 +247,7 @@ impl TaskView {
     /// the title and the state accent dot.
     #[must_use]
     pub fn header_box(&self) -> LayoutBox {
-        LayoutBox::new(
-            self.panel.origin.0,
-            self.panel.origin.1,
-            self.panel.width,
-            56,
-        )
+        LayoutBox::new(self.panel.origin.0, self.panel.origin.1, self.panel.width, 56)
     }
 
     /// The inputs region: a card that lists the
@@ -374,8 +367,7 @@ mod tests {
 
     #[test]
     fn state_needs_decision_false_when_no_permission() {
-        let s = TaskViewState::new("task")
-            .with_state(AiVisualState::WaitingForPermission);
+        let s = TaskViewState::new("task").with_state(AiVisualState::WaitingForPermission);
         assert!(!s.needs_decision());
     }
 

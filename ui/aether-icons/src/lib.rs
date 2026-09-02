@@ -485,10 +485,7 @@ mod tests {
     fn calculator_has_pastel_blue_background() {
         // Tiles have a pastel background; calculator
         // gets blue.
-        assert_eq!(
-            IconKind::Calculator.default_background(),
-            Some(Color::PASTEL_BLUE)
-        );
+        assert_eq!(IconKind::Calculator.default_background(), Some(Color::PASTEL_BLUE));
     }
 
     #[test]

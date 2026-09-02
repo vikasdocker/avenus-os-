@@ -238,6 +238,15 @@ impl ActionExecutor {
                 )?;
                 ObservationType::SystemUptime { data: resp }
             }
+            ActionVariant::ServiceRestart(p) => {
+                let _resp = self.ipc_request(
+                    self.control_port,
+                    "aether-system-core",
+                    "restart",
+                    serde_json::json!({"service": p.service_id}),
+                )?;
+                ObservationType::ServiceRestarted { service_id: p.service_id.clone() }
+            }
             ActionVariant::StorageStatus => {
                 let resp = self.ipc_request(
                     self.control_port,
@@ -317,9 +326,7 @@ impl ActionExecutor {
                     "device.enable",
                     serde_json::json!({"device_id": p.device_id}),
                 )?;
-                ObservationType::DeviceEnabled {
-                    device_id: p.device_id.clone(),
-                }
+                ObservationType::DeviceEnabled { device_id: p.device_id.clone() }
             }
             ActionVariant::DeviceDisable(p) => {
                 let _resp = self.ipc_request(
@@ -328,9 +335,7 @@ impl ActionExecutor {
                     "device.disable",
                     serde_json::json!({"device_id": p.device_id}),
                 )?;
-                ObservationType::DeviceDisabled {
-                    device_id: p.device_id.clone(),
-                }
+                ObservationType::DeviceDisabled { device_id: p.device_id.clone() }
             }
 
             // Power actions
@@ -380,10 +385,7 @@ impl ActionExecutor {
                     serde_json::json!({"name": p.name}),
                 )?;
                 let value = resp["plaintext"].as_str().unwrap_or("").to_string();
-                ObservationType::CredentialUnsealed {
-                    name: p.name.clone(),
-                    value,
-                }
+                ObservationType::CredentialUnsealed { name: p.name.clone(), value }
             }
             ActionVariant::PolicyReload => {
                 let _resp = self.ipc_request(
@@ -484,10 +486,7 @@ impl ActionExecutor {
     ///     last attempt; the audit log / caller can read
     ///     `result.duration_ms` for the cumulative wall-clock
     ///     time across retries.
-    pub fn execute_with_recovery(
-        &self,
-        action: &Action,
-    ) -> Result<ExecutionResult, AgentError> {
+    pub fn execute_with_recovery(&self, action: &Action) -> Result<ExecutionResult, AgentError> {
         use crate::action::recovery_policy_for;
         use crate::recovery::{backoff_delay, decide_recovery, FailureKind, RecoveryAction};
 

@@ -1,0 +1,12 @@
+[package]
+name = "aether-graphics-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Graphics backend abstraction (DRM/KMS, framebuffer) for Aether OS"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

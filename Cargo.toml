@@ -16,6 +16,7 @@ members = [
   "system/aether-update-core",
   "system/aether-update-agent",
   "system/aether-sandbox",
+  "system/aether-telemetry",
   "system/aether-sandbox-policy",
   "system/aether-store",
   "system/aether-diagnostics",
@@ -46,6 +47,7 @@ members = [
   "tools/aetherctl",
   "tools/aether-bench",
   "agent/aether-agent-runtime",
+  "agent/aether-device-runtime",
   "ui/aether-design-tokens",
   "ui/aether-ui-components",
   "ui/aether-launcher",
@@ -53,7 +55,14 @@ members = [
   "ui/aether-assistant",
   "ui/aether-icons",
   "ui/aether-animation",
-  "ui/aether-a11y"
+  "ui/aether-a11y",
+  "ui/aether-renderer",
+  "system/aether-hal",
+  "system/aether-hal-mock",
+  "system/aether-hardware-profiles",
+  "graphics/aether-graphics-backend",
+  "system/aether-installer",
+  "agent/aether-transport"
 ]
 
 [workspace.package]

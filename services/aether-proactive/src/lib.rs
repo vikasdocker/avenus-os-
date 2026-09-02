@@ -38,8 +38,7 @@
 
 use aether_agent_core::{Observation, ObservationSeverity};
 use aether_background_agent::{
-    default_state as default_background_state, ActionItem, ActionQueue, AgentEvent,
-    BackgroundState,
+    default_state as default_background_state, ActionItem, ActionQueue, AgentEvent, BackgroundState,
 };
 use aether_diagnostics::Signal;
 use serde::{Deserialize, Serialize};
@@ -212,13 +211,9 @@ pub fn classify_to_observations(
                 "Process {pid} is using {cpu}% CPU. The agent may \
                  propose to throttle or restart it."
             );
-            if let Some(obs) = Observation::new(
-                &id,
-                "process",
-                summary,
-                ObservationSeverity::Warning,
-                now_ms,
-            ) {
+            if let Some(obs) =
+                Observation::new(&id, "process", summary, ObservationSeverity::Warning, now_ms)
+            {
                 out.push(obs.with_detail(detail).with_data(serde_json::json!({
                     "pid": pid,
                     "percent": cpu,
@@ -236,13 +231,9 @@ pub fn classify_to_observations(
                  (warning at {} MiB). The agent may propose to restart it.",
                 thresholds.process_memory_warning_mib
             );
-            if let Some(obs) = Observation::new(
-                &id,
-                "process",
-                summary,
-                ObservationSeverity::Warning,
-                now_ms,
-            ) {
+            if let Some(obs) =
+                Observation::new(&id, "process", summary, ObservationSeverity::Warning, now_ms)
+            {
                 out.push(obs.with_detail(detail).with_data(serde_json::json!({
                     "pid": pid,
                     "mib": mib,
@@ -370,10 +361,7 @@ impl DaemonLoop {
     /// default recovery policy, default workflow
     /// registry) and default thresholds.
     pub fn new() -> Self {
-        Self {
-            state: default_background_state(),
-            thresholds: Thresholds::default(),
-        }
+        Self { state: default_background_state(), thresholds: Thresholds::default() }
     }
 
     /// Construct a daemon loop with custom thresholds.
@@ -476,7 +464,10 @@ mod tests {
         assert_eq!(obs.len(), 1);
         assert_eq!(obs[0].component, "storage");
         assert_eq!(obs[0].severity, ObservationSeverity::Warning);
-        assert_eq!(obs[0].data.as_ref().and_then(|d| d.get("percent")).and_then(|p| p.as_u64()), Some(90));
+        assert_eq!(
+            obs[0].data.as_ref().and_then(|d| d.get("percent")).and_then(|p| p.as_u64()),
+            Some(90)
+        );
     }
 
     #[test]
@@ -490,10 +481,7 @@ mod tests {
 
     #[test]
     fn unreachable_network_emits_warning() {
-        let probe = SystemProbe {
-            network_reachable: Some(false),
-            ..Default::default()
-        };
+        let probe = SystemProbe { network_reachable: Some(false), ..Default::default() };
         let obs = classify_to_observations(&probe, &Thresholds::default(), now());
         assert_eq!(obs.len(), 1);
         assert_eq!(obs[0].component, "network");
@@ -502,10 +490,7 @@ mod tests {
 
     #[test]
     fn reachable_network_emits_nothing() {
-        let probe = SystemProbe {
-            network_reachable: Some(true),
-            ..Default::default()
-        };
+        let probe = SystemProbe { network_reachable: Some(true), ..Default::default() };
         let obs = classify_to_observations(&probe, &Thresholds::default(), now());
         assert!(obs.is_empty());
     }
@@ -576,22 +561,10 @@ mod tests {
     #[test]
     fn observations_to_events_one_event_per_observation() {
         let obs = vec![
-            Observation::new(
-                "obs-1",
-                "storage",
-                "x",
-                ObservationSeverity::Warning,
-                now(),
-            )
-            .expect("valid"),
-            Observation::new(
-                "obs-2",
-                "memory",
-                "y",
-                ObservationSeverity::Critical,
-                now(),
-            )
-            .expect("valid"),
+            Observation::new("obs-1", "storage", "x", ObservationSeverity::Warning, now())
+                .expect("valid"),
+            Observation::new("obs-2", "memory", "y", ObservationSeverity::Critical, now())
+                .expect("valid"),
         ];
         let events = observations_to_events(&obs);
         assert_eq!(events.len(), 2);
@@ -611,8 +584,7 @@ mod tests {
     #[test]
     fn in_memory_sink_captures_observations_and_actions() {
         let mut sink = InMemorySink::default();
-        let obs =
-            Observation::new("o1", "c", "s", ObservationSeverity::Warning, now()).expect("v");
+        let obs = Observation::new("o1", "c", "s", ObservationSeverity::Warning, now()).expect("v");
         sink.submit_observation(obs);
         assert_eq!(sink.observations.len(), 1);
         assert_eq!(sink.started, 0);

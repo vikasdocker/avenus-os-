@@ -23,9 +23,7 @@
 //!   input at the bottom.
 
 use aether_design_tokens::{AiVisualState, Color, Spacing};
-use aether_ui_components::{
-    Component, ComponentStyle, Insets, LayoutBox, Panel, PanelSide,
-};
+use aether_ui_components::{Component, ComponentStyle, Insets, LayoutBox, Panel, PanelSide};
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -234,12 +232,7 @@ impl AssistantPanel {
     /// the state label and the state accent dot.
     #[must_use]
     pub fn header_box(&self) -> LayoutBox {
-        LayoutBox::new(
-            self.panel.origin.0,
-            self.panel.origin.1,
-            self.panel.width,
-            48,
-        )
+        LayoutBox::new(self.panel.origin.0, self.panel.origin.1, self.panel.width, 48)
     }
 
     /// The history region: the area between the
@@ -332,9 +325,7 @@ mod tests {
 
     #[test]
     fn state_push_assistant_increments_index() {
-        let s = AssistantPanelState::new()
-            .push_user("hi")
-            .push_assistant("hello");
+        let s = AssistantPanelState::new().push_user("hi").push_assistant("hello");
         assert_eq!(s.history.len(), 2);
         assert_eq!(s.next_index, 2);
         assert_eq!(s.history[0].role, AssistantRole::User);

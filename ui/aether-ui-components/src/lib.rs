@@ -55,6 +55,7 @@ pub mod launcher;
 pub mod list;
 pub mod nav;
 pub mod panel;
+pub mod system_monitor;
 pub mod taskbar;
 
 pub use button::{Button, ButtonSize, ButtonVariant};
@@ -64,6 +65,7 @@ pub use launcher::{Launcher, LauncherTile};
 pub use list::{List, ListItem, ListSelection};
 pub use nav::{Nav, NavItem, NavOrientation};
 pub use panel::{Panel, PanelSide};
+pub use system_monitor::{StatRow, SystemMonitor, SystemSnapshot};
 pub use taskbar::TaskbarItem;
 
 use aether_design_tokens::{Color, Radius, Role, Spacing};
@@ -264,8 +266,8 @@ mod tests {
     fn style_from_roles_resolves_through_tokens() {
         let s =
             ComponentStyle::from_roles(Role::BgBase, Role::TextPrimary, Role::Hairline, Radius::Lg);
-        // BgBase = warm white; TextPrimary = INK_900.
-        assert_eq!(s.fill.r, 252);
-        assert_eq!(s.text, Color::INK_900);
+        // Default theme is DarkCrystal; BgBase = DARK_CRYSTAL_CANVAS (12).
+        assert_eq!(s.fill.r, 12);
+        assert_eq!(s.text, Color::role(Role::TextPrimary));
     }
 }

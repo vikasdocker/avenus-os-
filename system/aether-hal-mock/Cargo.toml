@@ -1,0 +1,13 @@
+[package]
+name = "aether-hal-mock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Mock HAL backends for QEMU testing and validation"
+
+[dependencies]
+aether-hal = { path = "../aether-hal" }
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

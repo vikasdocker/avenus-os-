@@ -1,0 +1,13 @@
+[package]
+name = "aether-renderer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Aether OS renderer — bridges UI components to framebuffer pixels"
+
+[dependencies]
+aether-design-tokens = { path = "../aether-design-tokens" }
+aether-ui-components = { path = "../aether-ui-components" }
+
+[lints]
+workspace = true

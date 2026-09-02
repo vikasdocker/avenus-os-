@@ -257,6 +257,6 @@ mod tests {
 
     #[test]
     fn scrim_is_shadow_color() {
-        assert_eq!(SCRIM, Color::role(Role::Shadow));
+        assert_eq!(SCRIM, Color::theme_role(Role::Shadow, aether_design_tokens::Theme::Light));
     }
 }

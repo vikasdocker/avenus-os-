@@ -305,10 +305,7 @@ impl Capability {
     #[must_use]
     pub const fn requires_consent(&self) -> bool {
         match self {
-            Self::RouteAudio
-            | Self::SetBrightness { .. }
-            | Self::Enable
-            | Self::Disable => false,
+            Self::RouteAudio | Self::SetBrightness { .. } | Self::Enable | Self::Disable => false,
             Self::CaptureAudio
             | Self::CaptureVideo
             | Self::ConnectWifi { .. }
@@ -473,9 +470,7 @@ impl HardwareService {
     /// speaker".
     #[must_use]
     pub fn find_capable(&self, cap: &Capability) -> Option<&Device> {
-        self.devices
-            .iter()
-            .find(|d| d.is_usable() && d.has_capability(cap))
+        self.devices.iter().find(|d| d.is_usable() && d.has_capability(cap))
     }
 
     /// Find all usable devices that claim a
@@ -484,10 +479,7 @@ impl HardwareService {
     /// to".
     #[must_use]
     pub fn all_capable(&self, cap: &Capability) -> Vec<&Device> {
-        self.devices
-            .iter()
-            .filter(|d| d.is_usable() && d.has_capability(cap))
-            .collect()
+        self.devices.iter().filter(|d| d.is_usable() && d.has_capability(cap)).collect()
     }
 
     /// Set a device's state. The hardware
@@ -691,10 +683,7 @@ mod tests {
     fn capability_verb() {
         assert_eq!(Capability::RouteAudio.verb(), "route-audio");
         assert_eq!(Capability::Enable.verb(), "enable");
-        assert_eq!(
-            Capability::ConnectWifi { ssid: "x".into() }.verb(),
-            "connect-wifi"
-        );
+        assert_eq!(Capability::ConnectWifi { ssid: "x".into() }.verb(), "connect-wifi");
     }
 
     #[test]
@@ -870,10 +859,7 @@ mod tests {
     #[test]
     fn bluetooth_mouse_has_battery() {
         let m = bt_mouse("a", 850);
-        assert_eq!(
-            m.power,
-            PowerState::Battery { level_per_mille: Some(850) }
-        );
+        assert_eq!(m.power, PowerState::Battery { level_per_mille: Some(850) });
         assert!(m.has_capability(&Capability::Enable));
     }
 

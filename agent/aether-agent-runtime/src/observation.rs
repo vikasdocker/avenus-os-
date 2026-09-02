@@ -49,6 +49,7 @@ pub enum ObservationType {
     SystemInfo { data: serde_json::Value },
     SystemResources { data: serde_json::Value },
     SystemUptime { data: serde_json::Value },
+    ServiceRestarted { service_id: String },
     StorageStatus { data: serde_json::Value },
     ProcessList { processes: serde_json::Value },
     ProcessInspect { data: serde_json::Value },

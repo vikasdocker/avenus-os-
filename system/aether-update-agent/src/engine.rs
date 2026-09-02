@@ -82,19 +82,12 @@ pub enum FilesystemApplyError {
 impl core::fmt::Display for FilesystemApplyError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::NoPayloadRegistered => {
-                f.write_str("no payload registered for plan id")
+            Self::NoPayloadRegistered => f.write_str("no payload registered for plan id"),
+            Self::StagedFileMissing => f.write_str("staged file missing when verify was asked"),
+            Self::HashMismatch { expected, observed } => {
+                write!(f, "sha-256 mismatch: expected {expected}, observed {observed}")
             }
-            Self::StagedFileMissing => {
-                f.write_str("staged file missing when verify was asked")
-            }
-            Self::HashMismatch { expected, observed } => write!(
-                f,
-                "sha-256 mismatch: expected {expected}, observed {observed}"
-            ),
-            Self::StagedBytesMissing => {
-                f.write_str("staged bytes missing when apply was asked")
-            }
+            Self::StagedBytesMissing => f.write_str("staged bytes missing when apply was asked"),
         }
     }
 }
@@ -106,10 +99,7 @@ impl FilesystemApplyError {
     /// `ApplyError::Refused`.
     #[must_use]
     pub fn into_apply_error(self, step: ApplyStep) -> ApplyError {
-        ApplyError::Refused {
-            step,
-            reason: self.to_string(),
-        }
+        ApplyError::Refused { step, reason: self.to_string() }
     }
 }
 
@@ -235,10 +225,7 @@ impl FilesystemApplyEngine {
     ) {
         let plan_id = plan_id.into();
         let bytes = payload.len();
-        self.payloads
-            .write()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(plan_id.clone(), payload);
+        self.payloads.write().unwrap_or_else(|p| p.into_inner()).insert(plan_id.clone(), payload);
         self.expected_sha256
             .write()
             .unwrap_or_else(|p| p.into_inner())
@@ -252,15 +239,8 @@ impl FilesystemApplyEngine {
     /// Register an active file that
     /// `Snapshot` will record and
     /// `Apply` will replace.
-    pub fn seed_active(
-        &self,
-        path: impl Into<String>,
-        bytes: Vec<u8>,
-    ) {
-        self.fs
-            .write()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(path.into(), bytes);
+    pub fn seed_active(&self, path: impl Into<String>, bytes: Vec<u8>) {
+        self.fs.write().unwrap_or_else(|p| p.into_inner()).insert(path.into(), bytes);
     }
 
     /// The simulated filesystem.
@@ -272,20 +252,14 @@ impl FilesystemApplyEngine {
     /// The post-snapshot log.
     #[must_use]
     pub fn snapshot(&self) -> Vec<SnapshotComponent> {
-        self.snapshot
-            .read()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
+        self.snapshot.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     /// The engine-internal audit
     /// log.
     #[must_use]
     pub fn audit(&self) -> Vec<EngineAudit> {
-        self.audit
-            .read()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
+        self.audit.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     /// SHA-256 over `bytes`,
@@ -314,11 +288,7 @@ impl FilesystemApplyEngine {
 }
 
 impl ApplyEngine for FilesystemApplyEngine {
-    fn run(
-        &self,
-        step: ApplyStep,
-        plan: &UpdatePlan,
-    ) -> Result<(), ApplyError> {
+    fn run(&self, step: ApplyStep, plan: &UpdatePlan) -> Result<(), ApplyError> {
         // We need a plan id; the
         // plan itself does not carry
         // one (it is constructed by
@@ -331,23 +301,13 @@ impl ApplyEngine for FilesystemApplyEngine {
         match step {
             ApplyStep::Download => {
                 let payload = {
-                    let payloads = self
-                        .payloads
-                        .read()
-                        .unwrap_or_else(|p| p.into_inner());
-                    payloads
-                        .get(&plan_id)
-                        .or_else(|| payloads.get(&plan.target))
-                        .cloned()
+                    let payloads = self.payloads.read().unwrap_or_else(|p| p.into_inner());
+                    payloads.get(&plan_id).or_else(|| payloads.get(&plan.target)).cloned()
                 }
-                .ok_or_else(|| {
-                    FilesystemApplyError::NoPayloadRegistered
-                        .into_apply_error(step)
-                })?;
+                .ok_or_else(|| FilesystemApplyError::NoPayloadRegistered.into_apply_error(step))?;
                 let bytes = payload.len();
                 {
-                    let mut fs =
-                        self.fs.write().unwrap_or_else(|p| p.into_inner());
+                    let mut fs = self.fs.write().unwrap_or_else(|p| p.into_inner());
                     fs.insert(Self::staging_path(&plan_id), payload);
                 }
                 self.audit
@@ -358,62 +318,35 @@ impl ApplyEngine for FilesystemApplyEngine {
             }
             ApplyStep::Verify => {
                 let staged = {
-                    let fs = self
-                        .fs
-                        .read()
-                        .unwrap_or_else(|p| p.into_inner());
+                    let fs = self.fs.read().unwrap_or_else(|p| p.into_inner());
                     fs.get(&Self::staging_path(&plan_id)).cloned()
                 }
-                .ok_or_else(|| {
-                    FilesystemApplyError::StagedFileMissing
-                        .into_apply_error(step)
-                })?;
+                .ok_or_else(|| FilesystemApplyError::StagedFileMissing.into_apply_error(step))?;
                 let observed = Self::sha256_hex(&staged);
                 let expected = {
-                    let expected = self
-                        .expected_sha256
-                        .read()
-                        .unwrap_or_else(|p| p.into_inner());
-                    expected
-                        .get(&plan_id)
-                        .or_else(|| expected.get(&plan.target))
-                        .cloned()
+                    let expected = self.expected_sha256.read().unwrap_or_else(|p| p.into_inner());
+                    expected.get(&plan_id).or_else(|| expected.get(&plan.target)).cloned()
                 }
-                .ok_or_else(|| {
-                    FilesystemApplyError::StagedFileMissing
-                        .into_apply_error(step)
-                })?;
+                .ok_or_else(|| FilesystemApplyError::StagedFileMissing.into_apply_error(step))?;
                 if observed != expected {
-                    return Err(FilesystemApplyError::HashMismatch {
-                        expected,
-                        observed,
-                    }
-                    .into_apply_error(step));
+                    return Err(FilesystemApplyError::HashMismatch { expected, observed }
+                        .into_apply_error(step));
                 }
                 self.audit
                     .write()
                     .unwrap_or_else(|p| p.into_inner())
-                    .push(EngineAudit::Verified {
-                        plan_id,
-                        sha256: observed,
-                    });
+                    .push(EngineAudit::Verified { plan_id, sha256: observed });
                 Ok(())
             }
             ApplyStep::Stage => {
                 let path = Self::staged_path(&plan_id);
                 {
-                    let mut fs = self
-                        .fs
-                        .write()
-                        .unwrap_or_else(|p| p.into_inner());
-                    if let Some(bytes) =
-                        fs.get(&Self::staging_path(&plan_id)).cloned()
-                    {
+                    let mut fs = self.fs.write().unwrap_or_else(|p| p.into_inner());
+                    if let Some(bytes) = fs.get(&Self::staging_path(&plan_id)).cloned() {
                         fs.remove(&Self::staging_path(&plan_id));
                         fs.insert(path.clone(), bytes);
                     } else {
-                        return Err(FilesystemApplyError::StagedFileMissing
-                            .into_apply_error(step));
+                        return Err(FilesystemApplyError::StagedFileMissing.into_apply_error(step));
                     }
                 }
                 self.audit
@@ -424,16 +357,10 @@ impl ApplyEngine for FilesystemApplyEngine {
             }
             ApplyStep::Snapshot => {
                 let stash = Self::snapshot_path(plan);
-                let component = SnapshotComponent::new(
-                    plan.target.clone(),
-                    plan.version.clone(),
-                    stash,
-                );
+                let component =
+                    SnapshotComponent::new(plan.target.clone(), plan.version.clone(), stash);
                 {
-                    let mut snap = self
-                        .snapshot
-                        .write()
-                        .unwrap_or_else(|p| p.into_inner());
+                    let mut snap = self.snapshot.write().unwrap_or_else(|p| p.into_inner());
                     snap.push(component);
                 }
                 // Touch the active path
@@ -447,40 +374,25 @@ impl ApplyEngine for FilesystemApplyEngine {
                 self.audit
                     .write()
                     .unwrap_or_else(|p| p.into_inner())
-                    .push(EngineAudit::Snapshotted {
-                        plan_id,
-                        components: 1,
-                    });
+                    .push(EngineAudit::Snapshotted { plan_id, components: 1 });
                 Ok(())
             }
             ApplyStep::Apply => {
                 let staged_path = Self::staged_path(&plan_id);
                 let bytes = {
-                    let fs = self
-                        .fs
-                        .read()
-                        .unwrap_or_else(|p| p.into_inner());
+                    let fs = self.fs.read().unwrap_or_else(|p| p.into_inner());
                     fs.get(&staged_path).cloned()
                 }
-                .ok_or_else(|| {
-                    FilesystemApplyError::StagedBytesMissing
-                        .into_apply_error(step)
-                })?;
+                .ok_or_else(|| FilesystemApplyError::StagedBytesMissing.into_apply_error(step))?;
                 let active = Self::active_path(plan);
                 {
-                    let mut fs = self
-                        .fs
-                        .write()
-                        .unwrap_or_else(|p| p.into_inner());
+                    let mut fs = self.fs.write().unwrap_or_else(|p| p.into_inner());
                     fs.insert(active.clone(), bytes);
                 }
                 self.audit
                     .write()
                     .unwrap_or_else(|p| p.into_inner())
-                    .push(EngineAudit::Applied {
-                        plan_id,
-                        path: staged_path,
-                    });
+                    .push(EngineAudit::Applied { plan_id, path: staged_path });
                 Ok(())
             }
             ApplyStep::Reboot => {
@@ -505,27 +417,21 @@ impl ApplyEngine for FilesystemApplyEngine {
 #[allow(clippy::many_single_char_names, missing_docs)]
 pub fn sha256_inline(input: &[u8]) -> String {
     const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
-        0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
-        0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
     ];
 
     let mut h: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
 
     let bit_len = (input.len() as u64).wrapping_mul(8);
@@ -539,21 +445,12 @@ pub fn sha256_inline(input: &[u8]) -> String {
     for block in msg.chunks(64) {
         let mut w = [0u32; 64];
         for (i, chunk) in block.chunks(4).enumerate() {
-            w[i] = u32::from_be_bytes([
-                chunk[0], chunk[1], chunk[2], chunk[3],
-            ]);
+            w[i] = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         }
         for i in 16..64 {
-            let s0 = w[i - 15].rotate_right(7)
-                ^ w[i - 15].rotate_right(18)
-                ^ (w[i - 15] >> 3);
-            let s1 = w[i - 2].rotate_right(17)
-                ^ w[i - 2].rotate_right(19)
-                ^ (w[i - 2] >> 10);
-            w[i] = w[i - 16]
-                .wrapping_add(s0)
-                .wrapping_add(w[i - 7])
-                .wrapping_add(s1);
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
         }
         let mut a = h[0];
         let mut b = h[1];
@@ -566,11 +463,7 @@ pub fn sha256_inline(input: &[u8]) -> String {
         for i in 0..64 {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let ch = (e & f) ^ ((!e) & g);
-            let t1 = hh
-                .wrapping_add(s1)
-                .wrapping_add(ch)
-                .wrapping_add(K[i])
-                .wrapping_add(w[i]);
+            let t1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
             let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
             let mj = (a & b) ^ (a & c) ^ (b & c);
             let t2 = s0.wrapping_add(mj);
@@ -614,9 +507,7 @@ mod tests {
     use super::*;
     use aether_security::signed_update::UpdateKind;
     use aether_update_core::plan::UpdateAction;
-    use aether_update_core::version::{
-        VersionPolicyDecision, VersionRequirement,
-    };
+    use aether_update_core::version::{VersionPolicyDecision, VersionRequirement};
 
     fn plan() -> UpdatePlan {
         UpdatePlan {
@@ -686,13 +577,7 @@ mod tests {
         e.register_payload(pid.clone(), b"hello".to_vec(), "0".repeat(64));
         e.run(ApplyStep::Download, &p).unwrap();
         let err = e.run(ApplyStep::Verify, &p).unwrap_err();
-        assert!(matches!(
-            err,
-            ApplyError::Refused {
-                step: ApplyStep::Verify,
-                ..
-            }
-        ));
+        assert!(matches!(err, ApplyError::Refused { step: ApplyStep::Verify, .. }));
     }
 
     #[test]
@@ -712,13 +597,7 @@ mod tests {
         let p = plan();
         let e = FilesystemApplyEngine::new();
         let err = e.run(ApplyStep::Verify, &p).unwrap_err();
-        assert!(matches!(
-            err,
-            ApplyError::Refused {
-                step: ApplyStep::Verify,
-                ..
-            }
-        ));
+        assert!(matches!(err, ApplyError::Refused { step: ApplyStep::Verify, .. }));
     }
 
     #[test]
@@ -765,13 +644,7 @@ mod tests {
         let p = plan();
         let e = FilesystemApplyEngine::new();
         let err = e.run(ApplyStep::Apply, &p).unwrap_err();
-        assert!(matches!(
-            err,
-            ApplyError::Refused {
-                step: ApplyStep::Apply,
-                ..
-            }
-        ));
+        assert!(matches!(err, ApplyError::Refused { step: ApplyStep::Apply, .. }));
     }
 
     #[test]

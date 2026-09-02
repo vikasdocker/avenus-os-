@@ -7,6 +7,7 @@ authors.workspace = true
 description = "Aether Agent Runtime - structured agent execution foundation"
 
 [dependencies]
+aether-agent-core = { path = "../aether-agent-core" }
 aether-core = { path = "../../core/aether-core" }
 aether-sdk = { path = "../../sdk/rust/aether-sdk" }
 serde = { version = "1", features = ["derive"] }

@@ -145,17 +145,8 @@ pub struct PrimitiveAudit {
 impl PrimitiveAudit {
     /// A new audit row.
     #[must_use]
-    pub fn new(
-        primitive: SandboxPrimitive,
-        status: PrimitiveStatus,
-        return_code: i32,
-    ) -> Self {
-        Self {
-            primitive,
-            status,
-            return_code,
-            reason: String::new(),
-        }
+    pub fn new(primitive: SandboxPrimitive, status: PrimitiveStatus, return_code: i32) -> Self {
+        Self { primitive, status, return_code, reason: String::new() }
     }
 
     /// Set the reason.
@@ -240,12 +231,7 @@ impl SandboxAudit {
     /// A new audit.
     #[must_use]
     pub fn new(plan: SandboxPlan, service: impl Into<String>, timestamp_ms: u64) -> Self {
-        Self {
-            plan,
-            rows: Vec::new(),
-            timestamp_ms,
-            service: service.into(),
-        }
+        Self { plan, rows: Vec::new(), timestamp_ms, service: service.into() }
     }
 
     /// Add a row.
@@ -356,11 +342,9 @@ impl SandboxEnforcer for NullEnforcer {
     fn apply(&self, plan: &SandboxPlan, service: &str, now_ms: u64) -> SandboxAudit {
         let mut audit = SandboxAudit::new(plan.clone(), service, now_ms);
         for p in primitives_for(plan) {
-            audit.record(PrimitiveAudit::new(
-                p,
-                PrimitiveStatus::Skipped,
-                0,
-            ).with_reason("null enforcer"));
+            audit.record(
+                PrimitiveAudit::new(p, PrimitiveStatus::Skipped, 0).with_reason("null enforcer"),
+            );
         }
         audit
     }
@@ -423,8 +407,8 @@ impl SandboxHostPolicy {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use aether_core::sandbox::plan_sandbox;
     use aether_core::manifest::SandboxProfile;
+    use aether_core::sandbox::plan_sandbox;
 
     #[test]
     fn primitive_as_str() {
@@ -441,20 +425,18 @@ mod tests {
 
     #[test]
     fn row_with_reason() {
-        let r = PrimitiveAudit::new(
-            SandboxPrimitive::NoNewPrivs,
-            PrimitiveStatus::Skipped,
-            0,
-        )
-        .with_reason("not supported");
+        let r = PrimitiveAudit::new(SandboxPrimitive::NoNewPrivs, PrimitiveStatus::Skipped, 0)
+            .with_reason("not supported");
         assert_eq!(r.reason, "not supported");
         assert!(r.is_skipped());
     }
 
     #[test]
     fn row_status_predicates() {
-        let applied = PrimitiveAudit::new(SandboxPrimitive::NoNewPrivs, PrimitiveStatus::Applied, 0);
-        let skipped = PrimitiveAudit::new(SandboxPrimitive::NoNewPrivs, PrimitiveStatus::Skipped, 0);
+        let applied =
+            PrimitiveAudit::new(SandboxPrimitive::NoNewPrivs, PrimitiveStatus::Applied, 0);
+        let skipped =
+            PrimitiveAudit::new(SandboxPrimitive::NoNewPrivs, PrimitiveStatus::Skipped, 0);
         let failed = PrimitiveAudit::new(SandboxPrimitive::NoNewPrivs, PrimitiveStatus::Failed, -1);
         assert!(applied.is_applied());
         assert!(skipped.is_skipped());
@@ -490,11 +472,7 @@ mod tests {
         let plan = plan_sandbox(SandboxProfile::SystemService);
         let mut audit = SandboxAudit::new(plan, "aether-agentd", 100);
         for p in primitives_for(&audit.plan) {
-            audit.record(PrimitiveAudit::new(
-                p,
-                PrimitiveStatus::Applied,
-                0,
-            ));
+            audit.record(PrimitiveAudit::new(p, PrimitiveStatus::Applied, 0));
         }
         assert_eq!(audit.applied_count(), audit.rows.len());
         assert_eq!(audit.skipped_count(), 0);
@@ -520,11 +498,7 @@ mod tests {
         let plan = plan_sandbox(SandboxProfile::SystemService);
         let mut audit = SandboxAudit::new(plan.clone(), "s", 0);
         for p in primitives_for(&plan) {
-            audit.record(PrimitiveAudit::new(
-                p,
-                PrimitiveStatus::Applied,
-                0,
-            ));
+            audit.record(PrimitiveAudit::new(p, PrimitiveStatus::Applied, 0));
         }
         let d = diff_plan_vs_audit(&plan, &audit);
         assert!(d.is_clean());

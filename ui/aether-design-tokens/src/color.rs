@@ -129,18 +129,136 @@ impl Color {
 
     /// Soft shadow — for window drop shadows.
     pub const SHADOW_SOFT: Color = Color::rgb(36, 28, 48);
+    /// Deep shadow — for elevated glass panels.
+    pub const SHADOW_DEEP: Color = Color::rgb(20, 16, 32);
     /// Hairline divider.
     pub const HAIRLINE: Color = Color::rgb(220, 212, 224);
 
+    // ------------------------------------------------------- glass palette
+
+    /// Glass panel base — near-white with high translucency.
+    pub const GLASS_BG: Color = Color::rgb(255, 255, 255);
+    /// Glass panel border — subtle prismatic edge.
+    pub const GLASS_BORDER: Color = Color::rgb(220, 215, 235);
+    /// Glass highlight — top-edge shine.
+    pub const GLASS_HIGHLIGHT: Color = Color::rgb(255, 255, 255);
+    /// Glass frosted overlay — desaturated lavender.
+    pub const GLASS_FROST: Color = Color::rgb(235, 230, 245);
+
+    // ------------------------------------------------------- crystal palette
+
+    /// Crystal prismatic — soft iridescent blue-pink.
+    pub const CRYSTAL_PRISM: Color = Color::rgb(200, 180, 255);
+    /// Crystal refraction — warm pink-gold.
+    pub const CRYSTAL_REFRACT: Color = Color::rgb(255, 190, 210);
+    /// Crystal highlight — bright white-blue shine.
+    pub const CRYSTAL_SHINE: Color = Color::rgb(230, 240, 255);
+    /// Crystal edge — prismatic border accent.
+    pub const CRYSTAL_EDGE: Color = Color::rgb(180, 160, 240);
+
+    // ------------------------------------------------------- glow palette
+
+    /// Glow blue — soft ambient light.
+    pub const GLOW_BLUE: Color = Color::rgb(140, 180, 255);
+    /// Glow pink — warm ambient light.
+    pub const GLOW_PINK: Color = Color::rgb(255, 160, 200);
+    /// Glow mint — cool ambient light.
+    pub const GLOW_MINT: Color = Color::rgb(140, 230, 190);
+    /// Glow lavender — soft ambient light.
+    pub const GLOW_LAVENDER: Color = Color::rgb(180, 160, 240);
+
+    // -------------------------------------------------- dark crystal palette
+
+    /// Dark crystal canvas — deep navy base.
+    pub const DARK_CRYSTAL_CANVAS: Color = Color::rgb(12, 14, 24);
+    /// Dark crystal surface — slightly lighter navy.
+    pub const DARK_CRYSTAL_SURFACE: Color = Color::rgb(18, 20, 35);
+    /// Dark crystal surface strong — elevated panels.
+    pub const DARK_CRYSTAL_SURFACE_STRONG: Color = Color::rgb(24, 28, 48);
+    /// Dark crystal surface hover — interactive hover.
+    pub const DARK_CRYSTAL_HOVER: Color = Color::rgb(30, 34, 56);
+    /// Dark crystal surface active — pressed state.
+    pub const DARK_CRYSTAL_ACTIVE: Color = Color::rgb(36, 40, 64);
+
+    /// Dark crystal text — near-white for high contrast.
+    pub const DARK_CRYSTAL_TEXT: Color = Color::rgb(235, 232, 245);
+    /// Dark crystal muted text — soft lavender-grey.
+    pub const DARK_CRYSTAL_MUTED: Color = Color::rgb(140, 136, 160);
+    /// Dark crystal disabled text.
+    pub const DARK_CRYSTAL_DISABLED: Color = Color::rgb(80, 76, 100);
+
+    /// Dark crystal border — subtle prismatic line.
+    pub const DARK_CRYSTAL_BORDER: Color = Color::rgb(50, 48, 72);
+    /// Dark crystal border strong — focused/active borders.
+    pub const DARK_CRYSTAL_BORDER_STRONG: Color = Color::rgb(100, 92, 160);
+
+    /// Dark crystal accent — vibrant lavender-blue.
+    pub const DARK_CRYSTAL_ACCENT: Color = Color::rgb(130, 120, 220);
+    /// Dark crystal accent ink — text on accent surfaces.
+    pub const DARK_CRYSTAL_ACCENT_INK: Color = Color::rgb(255, 255, 255);
+    /// Dark crystal accent soft — tinted accent background.
+    pub const DARK_CRYSTAL_ACCENT_SOFT: Color = Color::rgb(40, 36, 72);
+
+    /// Dark crystal secondary — teal accent.
+    pub const DARK_CRYSTAL_SECONDARY: Color = Color::rgb(80, 200, 180);
+    /// Dark crystal tertiary — warm peach accent.
+    pub const DARK_CRYSTAL_TERTIARY: Color = Color::rgb(220, 140, 100);
+
+    /// Dark crystal focus ring — bright accent.
+    pub const DARK_CRYSTAL_FOCUS: Color = Color::rgb(130, 120, 220);
+    /// Dark crystal danger — soft red.
+    pub const DARK_CRYSTAL_DANGER: Color = Color::rgb(220, 80, 80);
+    /// Dark crystal danger ink — text on danger.
+    pub const DARK_CRYSTAL_DANGER_INK: Color = Color::rgb(255, 255, 255);
+    /// Dark crystal success — soft green.
+    pub const DARK_CRYSTAL_SUCCESS: Color = Color::rgb(60, 200, 120);
+    /// Dark crystal success ink — text on success.
+    pub const DARK_CRYSTAL_SUCCESS_INK: Color = Color::rgb(12, 14, 24);
+    /// Dark crystal warning — soft amber.
+    pub const DARK_CRYSTAL_WARNING: Color = Color::rgb(240, 180, 60);
+    /// Dark crystal warning ink — text on warning.
+    pub const DARK_CRYSTAL_WARNING_INK: Color = Color::rgb(12, 14, 24);
+
+    /// Dark crystal glass fill — translucent white.
+    pub const DARK_CRYSTAL_GLASS: Color = Color::rgb(255, 255, 255);
+    /// Dark crystal glass border — prismatic edge.
+    pub const DARK_CRYSTAL_GLASS_BORDER: Color = Color::rgb(100, 96, 140);
+    /// Dark crystal glass highlight — top edge shine.
+    pub const DARK_CRYSTAL_GLASS_HIGHLIGHT: Color = Color::rgb(255, 255, 255);
+    /// Dark crystal glass frost — tinted overlay.
+    pub const DARK_CRYSTAL_GLASS_FROST: Color = Color::rgb(40, 36, 64);
+
+    /// Dark crystal shadow — deep dark.
+    pub const DARK_CRYSTAL_SHADOW: Color = Color::rgb(4, 4, 12);
+    /// Dark crystal shadow deep — for elevated panels.
+    pub const DARK_CRYSTAL_SHADOW_DEEP: Color = Color::rgb(2, 2, 8);
+
     // ----------------------------------------------------------------- role indirection
 
-    /// Resolve a semantic `Role` to a concrete `Color`.
+    /// Resolve a semantic `Role` to a concrete `Color`
+    /// using the default theme (DarkCrystal).
     ///
     /// Every UI surface calls this. If the role's value
     /// changes, every screen that asked for it picks up the
     /// new color on the next paint.
     #[must_use]
     pub const fn role(role: Role) -> Self {
+        Self::theme_role(role, Theme::DarkCrystal)
+    }
+
+    /// Resolve a semantic `Role` to a concrete `Color`
+    /// for the given theme. This is the theme-aware
+    /// accessor; `role()` defaults to DarkCrystal.
+    #[must_use]
+    pub const fn theme_role(role: Role, theme: Theme) -> Self {
+        match theme {
+            Theme::Light => Self::light_role(role),
+            Theme::DarkCrystal => Self::dark_crystal_role(role),
+        }
+    }
+
+    /// Light theme role resolution (the original §12 pastel palette).
+    const fn light_role(role: Role) -> Self {
         match role {
             Role::BgBase => Self::SURFACE_WARM_WHITE,
             Role::BgPanel => Self::SURFACE_CREAM,
@@ -161,7 +279,100 @@ impl Color {
             Role::AccentYellow => Self::PASTEL_YELLOW,
             Role::AccentYellowStrong => Self::PASTEL_YELLOW_DEEP,
             Role::Shadow => Self::SHADOW_SOFT,
+            Role::ShadowDeep => Self::SHADOW_DEEP,
             Role::Hairline => Self::HAIRLINE,
+            Role::GlassBg => Self::GLASS_BG,
+            Role::GlassBorder => Self::GLASS_BORDER,
+            Role::GlassHighlight => Self::GLASS_HIGHLIGHT,
+            Role::GlassFrost => Self::GLASS_FROST,
+            Role::CrystalPrism => Self::CRYSTAL_PRISM,
+            Role::CrystalRefract => Self::CRYSTAL_REFRACT,
+            Role::CrystalShine => Self::CRYSTAL_SHINE,
+            Role::CrystalEdge => Self::CRYSTAL_EDGE,
+            Role::GlowBlue => Self::GLOW_BLUE,
+            Role::GlowPink => Self::GLOW_PINK,
+            Role::GlowMint => Self::GLOW_MINT,
+            Role::GlowLavender => Self::GLOW_LAVENDER,
+            // Dark crystal roles map to their light equivalents
+            // for backward compatibility.
+            Role::DcCanvas => Self::SURFACE_WARM_WHITE,
+            Role::DcSurface => Self::SURFACE_CREAM,
+            Role::DcSurfaceStrong => Self::SURFACE_CREAM_DEEP,
+            Role::DcSurfaceHover => Self::SURFACE_CREAM_DEEP,
+            Role::DcSurfaceActive => Self::SURFACE_CREAM_DEEP,
+            Role::DcText => Self::INK_900,
+            Role::DcMuted => Self::INK_700,
+            Role::DcDisabled => Self::INK_400,
+            Role::DcBorder => Self::HAIRLINE,
+            Role::DcBorderStrong => Self::INK_700,
+            Role::DcAccent => Self::PASTEL_LAVENDER,
+            Role::DcAccentInk => Self::INK_900,
+            Role::DcAccentSoft => Self::PASTEL_LAVENDER,
+            Role::DcSecondary => Self::PASTEL_MINT,
+            Role::DcTertiary => Self::PASTEL_PEACH,
+            Role::DcFocus => Self::PASTEL_LAVENDER_DEEP,
+            Role::DcDanger => Self::PASTEL_PEACH_DEEP,
+            Role::DcSuccess => Self::PASTEL_MINT_DEEP,
+            Role::DcWarning => Self::PASTEL_YELLOW_DEEP,
+        }
+    }
+
+    /// Dark Crystal theme role resolution.
+    const fn dark_crystal_role(role: Role) -> Self {
+        match role {
+            Role::BgBase => Self::DARK_CRYSTAL_CANVAS,
+            Role::BgPanel => Self::DARK_CRYSTAL_SURFACE,
+            Role::BgPanelHover => Self::DARK_CRYSTAL_HOVER,
+            Role::TextPrimary => Self::DARK_CRYSTAL_TEXT,
+            Role::TextSecondary => Self::DARK_CRYSTAL_MUTED,
+            Role::TextDisabled => Self::DARK_CRYSTAL_DISABLED,
+            Role::AccentPink => Self::GLOW_PINK,
+            Role::AccentPinkStrong => Self::CRYSTAL_REFRACT,
+            Role::AccentBlue => Self::GLOW_BLUE,
+            Role::AccentBlueStrong => Self::PASTEL_BLUE_DEEP,
+            Role::AccentMint => Self::GLOW_MINT,
+            Role::AccentMintStrong => Self::DARK_CRYSTAL_SUCCESS,
+            Role::AccentLavender => Self::DARK_CRYSTAL_ACCENT,
+            Role::AccentLavenderStrong => Self::CRYSTAL_PRISM,
+            Role::AccentPeach => Self::DARK_CRYSTAL_TERTIARY,
+            Role::AccentPeachStrong => Self::PASTEL_PEACH_DEEP,
+            Role::AccentYellow => Self::DARK_CRYSTAL_WARNING,
+            Role::AccentYellowStrong => Self::PASTEL_YELLOW_DEEP,
+            Role::Shadow => Self::DARK_CRYSTAL_SHADOW,
+            Role::ShadowDeep => Self::DARK_CRYSTAL_SHADOW_DEEP,
+            Role::Hairline => Self::DARK_CRYSTAL_BORDER,
+            Role::GlassBg => Self::DARK_CRYSTAL_GLASS,
+            Role::GlassBorder => Self::DARK_CRYSTAL_GLASS_BORDER,
+            Role::GlassHighlight => Self::DARK_CRYSTAL_GLASS_HIGHLIGHT,
+            Role::GlassFrost => Self::DARK_CRYSTAL_GLASS_FROST,
+            Role::CrystalPrism => Self::CRYSTAL_PRISM,
+            Role::CrystalRefract => Self::CRYSTAL_REFRACT,
+            Role::CrystalShine => Self::CRYSTAL_SHINE,
+            Role::CrystalEdge => Self::CRYSTAL_EDGE,
+            Role::GlowBlue => Self::GLOW_BLUE,
+            Role::GlowPink => Self::GLOW_PINK,
+            Role::GlowMint => Self::GLOW_MINT,
+            Role::GlowLavender => Self::GLOW_LAVENDER,
+            // Dark crystal specific roles.
+            Role::DcCanvas => Self::DARK_CRYSTAL_CANVAS,
+            Role::DcSurface => Self::DARK_CRYSTAL_SURFACE,
+            Role::DcSurfaceStrong => Self::DARK_CRYSTAL_SURFACE_STRONG,
+            Role::DcSurfaceHover => Self::DARK_CRYSTAL_HOVER,
+            Role::DcSurfaceActive => Self::DARK_CRYSTAL_ACTIVE,
+            Role::DcText => Self::DARK_CRYSTAL_TEXT,
+            Role::DcMuted => Self::DARK_CRYSTAL_MUTED,
+            Role::DcDisabled => Self::DARK_CRYSTAL_DISABLED,
+            Role::DcBorder => Self::DARK_CRYSTAL_BORDER,
+            Role::DcBorderStrong => Self::DARK_CRYSTAL_BORDER_STRONG,
+            Role::DcAccent => Self::DARK_CRYSTAL_ACCENT,
+            Role::DcAccentInk => Self::DARK_CRYSTAL_ACCENT_INK,
+            Role::DcAccentSoft => Self::DARK_CRYSTAL_ACCENT_SOFT,
+            Role::DcSecondary => Self::DARK_CRYSTAL_SECONDARY,
+            Role::DcTertiary => Self::DARK_CRYSTAL_TERTIARY,
+            Role::DcFocus => Self::DARK_CRYSTAL_FOCUS,
+            Role::DcDanger => Self::DARK_CRYSTAL_DANGER,
+            Role::DcSuccess => Self::DARK_CRYSTAL_SUCCESS,
+            Role::DcWarning => Self::DARK_CRYSTAL_WARNING,
         }
     }
 }
@@ -222,8 +433,86 @@ pub enum Role {
     // Utility.
     /// Soft shadow color for window drop shadows.
     Shadow,
+    /// Deep shadow for elevated glass panels.
+    ShadowDeep,
     /// Hairline divider color.
     Hairline,
+
+    // Glass.
+    /// Glass panel background.
+    GlassBg,
+    /// Glass panel border.
+    GlassBorder,
+    /// Glass top-edge highlight.
+    GlassHighlight,
+    /// Glass frosted overlay.
+    GlassFrost,
+
+    // Crystal.
+    /// Crystal prismatic accent.
+    CrystalPrism,
+    /// Crystal refraction accent.
+    CrystalRefract,
+    /// Crystal shine highlight.
+    CrystalShine,
+    /// Crystal edge border.
+    CrystalEdge,
+
+    // Glow.
+    /// Blue ambient glow.
+    GlowBlue,
+    /// Pink ambient glow.
+    GlowPink,
+    /// Mint ambient glow.
+    GlowMint,
+    /// Lavender ambient glow.
+    GlowLavender,
+
+    // Dark Crystal — theme-aware surface roles.
+    /// Canvas background (desktop).
+    DcCanvas,
+    /// Surface (panels, cards).
+    DcSurface,
+    /// Elevated surface (modals, popovers).
+    DcSurfaceStrong,
+    /// Hovered surface.
+    DcSurfaceHover,
+    /// Active/pressed surface.
+    DcSurfaceActive,
+
+    // Dark Crystal — text roles.
+    /// Primary text on dark surfaces.
+    DcText,
+    /// Muted/secondary text.
+    DcMuted,
+    /// Disabled text.
+    DcDisabled,
+
+    // Dark Crystal — border roles.
+    /// Subtle border.
+    DcBorder,
+    /// Strong/focused border.
+    DcBorderStrong,
+
+    // Dark Crystal — accent roles.
+    /// Primary accent (lavender-blue).
+    DcAccent,
+    /// Text on accent surfaces.
+    DcAccentInk,
+    /// Tinted accent background.
+    DcAccentSoft,
+    /// Secondary accent (teal).
+    DcSecondary,
+    /// Tertiary accent (warm peach).
+    DcTertiary,
+    /// Focus ring color.
+    DcFocus,
+    /// Danger/error state.
+    DcDanger,
+    /// Success state.
+    DcSuccess,
+    /// Warning state.
+    DcWarning,
 }
 
 /// The active palette bundle. Right now Aether ships one
@@ -237,16 +526,63 @@ pub enum Palette {
     Pastel,
 }
 
-/// The active theme. Currently fixed to `Light`; the enum
-/// is here so a future `Dark` variant doesn't change every
-/// call site.
+/// The active theme. `Light` is the original pastel
+/// palette; `DarkCrystal` is the premium glass UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum Theme {
-    /// Light, pastel theme (the only one Aether ships
-    /// today; §12 says "light-first").
-    #[default]
+    /// Light, pastel theme (the original §12 identity).
     Light,
+    /// Dark crystal glass theme — the premium UI.
+    #[default]
+    DarkCrystal,
+}
+
+/// Glass material level. Each material has a different
+/// frost amount and translucency, following the OpenGlass
+/// philosophy: CLEAR for hero surfaces, REGULAR for
+/// default panels, FROSTED for overlays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum GlassMaterial {
+    /// 4% frost — hero surfaces, lenses over imagery.
+    Clear,
+    /// 24% frost — the default. Cards, panels, windows.
+    Regular,
+    /// 66% frost — menus, dialogs, toasts over busy content.
+    Frosted,
+}
+
+impl GlassMaterial {
+    /// Frost amount (0.0 = no frost, 1.0 = fully frosted).
+    #[must_use]
+    pub const fn frost(self) -> f32 {
+        match self {
+            Self::Clear => 0.04,
+            Self::Regular => 0.24,
+            Self::Frosted => 0.66,
+        }
+    }
+
+    /// Base alpha (opacity) for the glass fill.
+    #[must_use]
+    pub const fn alpha(self) -> f32 {
+        match self {
+            Self::Clear => 0.12,
+            Self::Regular => 0.35,
+            Self::Frosted => 0.72,
+        }
+    }
+
+    /// Border opacity.
+    #[must_use]
+    pub const fn border_alpha(self) -> f32 {
+        match self {
+            Self::Clear => 0.15,
+            Self::Regular => 0.30,
+            Self::Frosted => 0.50,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -256,7 +592,7 @@ mod tests {
 
     #[test]
     fn warm_white_is_warm_white() {
-        let c = Color::role(Role::BgBase);
+        let c = Color::theme_role(Role::BgBase, Theme::Light);
         assert_eq!(c, Color::SURFACE_WARM_WHITE);
         assert_eq!(c.r, 252);
         assert_eq!(c.g, 250);
@@ -283,43 +619,43 @@ mod tests {
 
     #[test]
     fn role_pink_resolves_to_pastel_pink() {
-        let c = Color::role(Role::AccentPink);
+        let c = Color::theme_role(Role::AccentPink, Theme::Light);
         assert_eq!(c, Color::PASTEL_PINK);
     }
 
     #[test]
     fn role_blue_resolves_to_pastel_blue() {
-        let c = Color::role(Role::AccentBlue);
+        let c = Color::theme_role(Role::AccentBlue, Theme::Light);
         assert_eq!(c, Color::PASTEL_BLUE);
     }
 
     #[test]
     fn role_mint_resolves_to_pastel_mint() {
-        let c = Color::role(Role::AccentMint);
+        let c = Color::theme_role(Role::AccentMint, Theme::Light);
         assert_eq!(c, Color::PASTEL_MINT);
     }
 
     #[test]
     fn role_lavender_resolves_to_pastel_lavender() {
-        let c = Color::role(Role::AccentLavender);
+        let c = Color::theme_role(Role::AccentLavender, Theme::Light);
         assert_eq!(c, Color::PASTEL_LAVENDER);
     }
 
     #[test]
     fn role_peach_resolves_to_pastel_peach() {
-        let c = Color::role(Role::AccentPeach);
+        let c = Color::theme_role(Role::AccentPeach, Theme::Light);
         assert_eq!(c, Color::PASTEL_PEACH);
     }
 
     #[test]
     fn role_yellow_resolves_to_pastel_yellow() {
-        let c = Color::role(Role::AccentYellow);
+        let c = Color::theme_role(Role::AccentYellow, Theme::Light);
         assert_eq!(c, Color::PASTEL_YELLOW);
     }
 
     #[test]
     fn role_text_primary_is_dark_ink() {
-        let c = Color::role(Role::TextPrimary);
+        let c = Color::theme_role(Role::TextPrimary, Theme::Light);
         // Per §12 the dark text is "near-black, not pure
         // black" for AA contrast on pastels.
         assert_eq!(c, Color::INK_900);
@@ -328,7 +664,7 @@ mod tests {
 
     #[test]
     fn shadow_color_is_dark() {
-        let c = Color::role(Role::Shadow);
+        let c = Color::theme_role(Role::Shadow, Theme::Light);
         assert_eq!(c, Color::SHADOW_SOFT);
         // Pastel shadow is a desaturated dark, not pure
         // black.
@@ -361,7 +697,39 @@ mod tests {
             Role::AccentYellow,
             Role::AccentYellowStrong,
             Role::Shadow,
+            Role::ShadowDeep,
             Role::Hairline,
+            Role::GlassBg,
+            Role::GlassBorder,
+            Role::GlassHighlight,
+            Role::GlassFrost,
+            Role::CrystalPrism,
+            Role::CrystalRefract,
+            Role::CrystalShine,
+            Role::CrystalEdge,
+            Role::GlowBlue,
+            Role::GlowPink,
+            Role::GlowMint,
+            Role::GlowLavender,
+            Role::DcCanvas,
+            Role::DcSurface,
+            Role::DcSurfaceStrong,
+            Role::DcSurfaceHover,
+            Role::DcSurfaceActive,
+            Role::DcText,
+            Role::DcMuted,
+            Role::DcDisabled,
+            Role::DcBorder,
+            Role::DcBorderStrong,
+            Role::DcAccent,
+            Role::DcAccentInk,
+            Role::DcAccentSoft,
+            Role::DcSecondary,
+            Role::DcTertiary,
+            Role::DcFocus,
+            Role::DcDanger,
+            Role::DcSuccess,
+            Role::DcWarning,
         ];
         for r in roles {
             let c = Color::role(r);
@@ -372,8 +740,71 @@ mod tests {
     }
 
     #[test]
-    fn pastel_palette_is_default_theme() {
-        assert_eq!(Theme::default(), Theme::Light);
+    fn dark_crystal_is_default_theme() {
+        assert_eq!(Theme::default(), Theme::DarkCrystal);
+    }
+
+    #[test]
+    fn light_theme_bg_base_is_warm_white() {
+        let c = Color::theme_role(Role::BgBase, Theme::Light);
+        assert_eq!(c, Color::SURFACE_WARM_WHITE);
+    }
+
+    #[test]
+    fn dark_crystal_theme_bg_base_is_canvas() {
+        let c = Color::theme_role(Role::BgBase, Theme::DarkCrystal);
+        assert_eq!(c, Color::DARK_CRYSTAL_CANVAS);
+    }
+
+    #[test]
+    fn dark_crystal_theme_text_is_light() {
+        let c = Color::theme_role(Role::TextPrimary, Theme::DarkCrystal);
+        assert_eq!(c, Color::DARK_CRYSTAL_TEXT);
+        // Text on dark must be bright.
+        assert!(c.r > 200, "dark crystal text should be bright: {c:?}");
+    }
+
+    #[test]
+    fn dark_crystal_roles_resolve() {
+        let dc_roles = [
+            Role::DcCanvas,
+            Role::DcSurface,
+            Role::DcSurfaceStrong,
+            Role::DcSurfaceHover,
+            Role::DcSurfaceActive,
+            Role::DcText,
+            Role::DcMuted,
+            Role::DcDisabled,
+            Role::DcBorder,
+            Role::DcBorderStrong,
+            Role::DcAccent,
+            Role::DcAccentInk,
+            Role::DcAccentSoft,
+            Role::DcSecondary,
+            Role::DcTertiary,
+            Role::DcFocus,
+            Role::DcDanger,
+            Role::DcSuccess,
+            Role::DcWarning,
+        ];
+        for r in dc_roles {
+            let c = Color::theme_role(r, Theme::DarkCrystal);
+            let _ = c.to_hex();
+        }
+    }
+
+    #[test]
+    fn glass_material_frost_values() {
+        assert!((GlassMaterial::Clear.frost() - 0.04).abs() < f32::EPSILON);
+        assert!((GlassMaterial::Regular.frost() - 0.24).abs() < f32::EPSILON);
+        assert!((GlassMaterial::Frosted.frost() - 0.66).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn glass_material_alpha_values() {
+        assert!((GlassMaterial::Clear.alpha() - 0.12).abs() < f32::EPSILON);
+        assert!((GlassMaterial::Regular.alpha() - 0.35).abs() < f32::EPSILON);
+        assert!((GlassMaterial::Frosted.alpha() - 0.72).abs() < f32::EPSILON);
     }
 
     #[test]

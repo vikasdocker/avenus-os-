@@ -101,6 +101,7 @@ pub enum ActionVariant {
     SystemInfo,
     SystemResources,
     SystemUptime,
+    ServiceRestart(ServiceRestartParams),
 
     // Storage actions
     StorageStatus,
@@ -133,6 +134,11 @@ pub enum ActionVariant {
 }
 
 // ---- typed parameter structs ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceRestartParams {
+    pub service_id: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApplicationLaunchParams {
@@ -358,6 +364,7 @@ impl Action {
             ActionVariant::SystemInfo => "system.info",
             ActionVariant::SystemResources => "system.resources",
             ActionVariant::SystemUptime => "system.uptime",
+            ActionVariant::ServiceRestart(_) => "service.restart",
             ActionVariant::StorageStatus => "storage.status",
             ActionVariant::ContextGet => "context.get",
             ActionVariant::DisplayList => "display.list",
@@ -410,6 +417,9 @@ fn classify_action(variant: &ActionVariant) -> (Vec<String>, ActionRisk) {
         ActionVariant::SystemInfo => (vec!["system.info".to_string()], ActionRisk::Low),
         ActionVariant::SystemResources => (vec!["system.resources".to_string()], ActionRisk::Low),
         ActionVariant::SystemUptime => (vec!["system.uptime".to_string()], ActionRisk::Low),
+        ActionVariant::ServiceRestart(_) => {
+            (vec!["service.restart".to_string()], ActionRisk::Medium)
+        }
         ActionVariant::StorageStatus => (vec!["storage.status".to_string()], ActionRisk::Low),
         ActionVariant::ContextGet => (vec!["context.get".to_string()], ActionRisk::Low),
         // Display: brightness is
@@ -439,13 +449,11 @@ fn classify_action(variant: &ActionVariant) -> (Vec<String>, ActionRisk) {
         // Security: credentials are
         // high-risk; policy reload
         // is medium.
-        ActionVariant::CredentialSeal(_) => {
-            (vec!["credential.seal".to_string()], ActionRisk::High)
-        }
+        ActionVariant::CredentialSeal(_) => (vec!["credential.seal".to_string()], ActionRisk::High),
         ActionVariant::CredentialUnseal(_) => {
             (vec!["credential.unseal".to_string()], ActionRisk::High)
         }
-        ActionVariant::PolicyReload => (vec!["policy.reload".to_string()], ActionRisk::Medium),
+        ActionVariant::PolicyReload => (vec!["policy.reload".to_string()], ActionRisk::High),
     }
 }
 
@@ -480,6 +488,7 @@ pub fn recovery_policy_for(variant: &ActionVariant) -> RecoveryPolicy {
         SystemStatus | SystemInfo | SystemResources | SystemUptime => {
             RecoveryPolicy::transient_default()
         }
+        ServiceRestart(_) => RecoveryPolicy::no_retry(),
         StorageStatus | ContextGet => RecoveryPolicy::transient_default(),
         DisplayList => RecoveryPolicy::transient_default(),
         DeviceList | DeviceInspect(_) => RecoveryPolicy::transient_default(),
@@ -571,9 +580,7 @@ mod tests {
     fn device_enable_disable_classify() {
         let on = Action::new(
             "s1",
-            ActionVariant::DeviceEnable(DeviceEnableParams {
-                device_id: "wifi-1".to_string(),
-            }),
+            ActionVariant::DeviceEnable(DeviceEnableParams { device_id: "wifi-1".to_string() }),
             "enable wifi",
         );
         assert_eq!(on.risk_level, ActionRisk::Medium);
@@ -581,9 +588,7 @@ mod tests {
 
         let off = Action::new(
             "s1",
-            ActionVariant::DeviceDisable(DeviceDisableParams {
-                device_id: "cam-1".to_string(),
-            }),
+            ActionVariant::DeviceDisable(DeviceDisableParams { device_id: "cam-1".to_string() }),
             "disable camera",
         );
         assert_eq!(off.risk_level, ActionRisk::Medium);
@@ -624,15 +629,13 @@ mod tests {
 
         let unseal = Action::new(
             "s1",
-            ActionVariant::CredentialUnseal(CredentialUnsealParams {
-                name: "api-key".to_string(),
-            }),
+            ActionVariant::CredentialUnseal(CredentialUnsealParams { name: "api-key".to_string() }),
             "unseal key",
         );
         assert_eq!(unseal.risk_level, ActionRisk::High);
 
         let reload = Action::new("s1", ActionVariant::PolicyReload, "reload");
-        assert_eq!(reload.risk_level, ActionRisk::Medium);
+        assert_eq!(reload.risk_level, ActionRisk::High);
     }
 
     #[test]
@@ -647,9 +650,7 @@ mod tests {
                 content: "y".to_string(),
             }),
             ActionVariant::FileDelete(FileDeleteParams { path: "/x".to_string() }),
-            ActionVariant::DeviceEnable(DeviceEnableParams {
-                device_id: "x".to_string(),
-            }),
+            ActionVariant::DeviceEnable(DeviceEnableParams { device_id: "x".to_string() }),
             ActionVariant::CredentialSeal(CredentialSealParams {
                 name: "n".to_string(),
                 plaintext: "p".to_string(),
@@ -683,11 +684,7 @@ mod tests {
         ];
         for v in &variants {
             let p = recovery_policy_for(v);
-            assert_eq!(
-                p.max_retries, 3,
-                "{v:?} should retry up to 3 times, got {}",
-                p.max_retries
-            );
+            assert_eq!(p.max_retries, 3, "{v:?} should retry up to 3 times, got {}", p.max_retries);
         }
     }
 
@@ -716,18 +713,12 @@ mod tests {
             }),
             ActionVariant::FileList(FileListParams { path: "/".to_string() }),
             ActionVariant::FileRead(FileReadParams { path: "/".to_string() }),
-            ActionVariant::FileCreate(FileCreateParams {
-                path: "/x".to_string(),
-                content: None,
-            }),
+            ActionVariant::FileCreate(FileCreateParams { path: "/x".to_string(), content: None }),
             ActionVariant::FileWrite(FileWriteParams {
                 path: "/x".to_string(),
                 content: "y".to_string(),
             }),
-            ActionVariant::FileSearch(FileSearchParams {
-                query: "q".to_string(),
-                path: None,
-            }),
+            ActionVariant::FileSearch(FileSearchParams { query: "q".to_string(), path: None }),
             ActionVariant::FileRename(FileRenameParams {
                 from: "/a".to_string(),
                 to: "/b".to_string(),
@@ -738,16 +729,16 @@ mod tests {
             }),
             ActionVariant::FileDelete(FileDeleteParams { path: "/x".to_string() }),
             ActionVariant::ProcessList,
-            ActionVariant::ProcessInspect(ProcessInspectParams {
-                pid: Some(1),
-                name: None,
-            }),
+            ActionVariant::ProcessInspect(ProcessInspectParams { pid: Some(1), name: None }),
             ActionVariant::NetworkStatus,
             ActionVariant::NetworkInterfaces,
             ActionVariant::SystemStatus,
             ActionVariant::SystemInfo,
             ActionVariant::SystemResources,
             ActionVariant::SystemUptime,
+            ActionVariant::ServiceRestart(ServiceRestartParams {
+                service_id: "aether-agentd".to_string(),
+            }),
             ActionVariant::StorageStatus,
             ActionVariant::ContextGet,
             ActionVariant::DisplayList,
@@ -761,15 +752,9 @@ mod tests {
                 height: 1080,
             }),
             ActionVariant::DeviceList,
-            ActionVariant::DeviceInspect(DeviceInspectParams {
-                device_id: "d".to_string(),
-            }),
-            ActionVariant::DeviceEnable(DeviceEnableParams {
-                device_id: "d".to_string(),
-            }),
-            ActionVariant::DeviceDisable(DeviceDisableParams {
-                device_id: "d".to_string(),
-            }),
+            ActionVariant::DeviceInspect(DeviceInspectParams { device_id: "d".to_string() }),
+            ActionVariant::DeviceEnable(DeviceEnableParams { device_id: "d".to_string() }),
+            ActionVariant::DeviceDisable(DeviceDisableParams { device_id: "d".to_string() }),
             ActionVariant::SystemReboot(SystemRebootParams { delay_ms: 0 }),
             ActionVariant::SystemShutdown(SystemShutdownParams { delay_ms: 0 }),
             ActionVariant::SystemSuspend,
@@ -777,9 +762,7 @@ mod tests {
                 name: "n".to_string(),
                 plaintext: "p".to_string(),
             }),
-            ActionVariant::CredentialUnseal(CredentialUnsealParams {
-                name: "n".to_string(),
-            }),
+            ActionVariant::CredentialUnseal(CredentialUnsealParams { name: "n".to_string() }),
             ActionVariant::PolicyReload,
         ];
         for v in &variants {

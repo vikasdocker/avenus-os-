@@ -12,6 +12,11 @@ path = "src/main.rs"
 
 [dependencies]
 aether-wm = { path = "../aether-wm" }
+aether-renderer = { path = "../../ui/aether-renderer" }
+aether-design-tokens = { path = "../../ui/aether-design-tokens" }
+aether-animation = { path = "../../ui/aether-animation" }
+aether-a11y = { path = "../../ui/aether-a11y" }
+aether-ui-components = { path = "../../ui/aether-ui-components" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

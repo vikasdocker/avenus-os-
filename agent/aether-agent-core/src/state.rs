@@ -361,4 +361,26 @@ impl AgentStatus {
     pub fn insert_task(&mut self, task: AgentTask) -> Result<(), crate::task::TaskDependencyError> {
         self.tasks.insert(task)
     }
+
+    /// Returns a live task by id.
+    #[must_use]
+    pub fn task(&self, id: &TaskId) -> Option<&AgentTask> {
+        self.tasks.get(id)
+    }
+
+    /// Removes a task from the live graph and
+    /// records it in the bounded history with
+    /// the given terminal stage.
+    pub fn complete_task(
+        &mut self,
+        id: &TaskId,
+        stage: TaskStage,
+        timestamp_ms: u64,
+        note: Option<String>,
+    ) -> Option<AgentTask> {
+        debug_assert!(stage.is_terminal());
+        let task = self.remove_task(id)?;
+        self.record_history(HistoryEntry { task: task.clone(), stage, timestamp_ms, note });
+        Some(task)
+    }
 }

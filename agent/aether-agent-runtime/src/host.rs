@@ -1107,6 +1107,7 @@ fn observation_type_name(t: &ObservationType) -> &'static str {
         ObservationType::SystemInfo { .. } => "system.info",
         ObservationType::SystemResources { .. } => "system.resources",
         ObservationType::SystemUptime { .. } => "system.uptime",
+        ObservationType::ServiceRestarted { .. } => "service.restarted",
         ObservationType::StorageStatus { .. } => "storage.status",
         ObservationType::ProcessList { .. } => "process.list",
         ObservationType::ProcessInspect { .. } => "process.inspect",
@@ -1119,9 +1120,7 @@ fn observation_type_name(t: &ObservationType) -> &'static str {
         ObservationType::DeviceEnabled { .. } => "device.enabled",
         ObservationType::DeviceDisabled { .. } => "device.disabled",
         ObservationType::SystemRebootRequested { .. } => "system.reboot_requested",
-        ObservationType::SystemShutdownRequested { .. } => {
-            "system.shutdown_requested"
-        }
+        ObservationType::SystemShutdownRequested { .. } => "system.shutdown_requested",
         ObservationType::SystemSuspendRequested => "system.suspend_requested",
         ObservationType::CredentialSealed { .. } => "credential.sealed",
         ObservationType::CredentialUnsealed { .. } => "credential.unsealed",

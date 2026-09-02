@@ -7,6 +7,7 @@ pub mod identity;
 pub mod ipc;
 pub mod manifest;
 pub mod sandbox;
+pub mod seccomp;
 pub mod types;
 
 pub mod app;
@@ -17,5 +18,9 @@ pub use identity::{AetherIdentity, ComponentId};
 pub use manifest::ServiceManifest;
 pub use sandbox::{
     plan_sandbox, LinuxCapability, LinuxNamespace, ResourceLimits, SandboxPlan, SeccompFilterTag,
+};
+pub use seccomp::{
+    ArgCmp, ArgConstraint, FilterError, MockSyscallFilter, SeccompFilter, SyscallAction,
+    SyscallFilter, SyscallRule,
 };
 pub use types::{HealthStatus, ServiceStatus};

@@ -273,10 +273,7 @@ impl PolicyEngine {
     /// Look up a policy for a task.
     #[must_use]
     pub fn policy_for(&self, task_id: &TaskId) -> Option<&RetryPolicy> {
-        self.policies
-            .iter()
-            .find(|(id, _)| id == task_id)
-            .map(|(_, p)| p)
+        self.policies.iter().find(|(id, _)| id == task_id).map(|(_, p)| p)
     }
 
     /// Reset the circuit-breaker counter
@@ -464,10 +461,7 @@ mod tests {
     #[test]
     fn engine_decide_fallback_when_exhausted() {
         let mut e = PolicyEngine::new();
-        e.register(
-            task("a"),
-            RetryPolicy::no_retry().with_fallback(task("fb")),
-        );
+        e.register(task("a"), RetryPolicy::no_retry().with_fallback(task("fb")));
         let d = e.decide(&task("a"), 1);
         assert!(matches!(d, Decision::Fallback { fallback_id } if fallback_id == task("fb")));
     }
@@ -475,14 +469,8 @@ mod tests {
     #[test]
     fn engine_circuit_breaker_trips_at_threshold() {
         let mut e = PolicyEngine::new();
-        e.register(
-            task("a"),
-            RetryPolicy::exponential(5, 100, 1000, "g", 3),
-        );
-        e.register(
-            task("b"),
-            RetryPolicy::exponential(5, 100, 1000, "g", 3),
-        );
+        e.register(task("a"), RetryPolicy::exponential(5, 100, 1000, "g", 3));
+        e.register(task("b"), RetryPolicy::exponential(5, 100, 1000, "g", 3));
         // 3 failures in group -> breaker
         // trips.
         let _ = e.decide(&task("a"), 1);
@@ -495,10 +483,7 @@ mod tests {
     #[test]
     fn engine_reset_breaker() {
         let mut e = PolicyEngine::new();
-        e.register(
-            task("a"),
-            RetryPolicy::exponential(5, 100, 1000, "g", 2),
-        );
+        e.register(task("a"), RetryPolicy::exponential(5, 100, 1000, "g", 2));
         let _ = e.decide(&task("a"), 1);
         let _ = e.decide(&task("a"), 1);
         // Breaker is at threshold.
@@ -527,10 +512,7 @@ mod tests {
         assert_eq!(Decision::Retry { delay_ms: 0 }.as_str(), "retry");
         assert_eq!(Decision::CircuitBreak.as_str(), "circuit-break");
         assert_eq!(Decision::GiveUp.as_str(), "give-up");
-        assert_eq!(
-            Decision::Fallback { fallback_id: task("x") }.as_str(),
-            "fallback"
-        );
+        assert_eq!(Decision::Fallback { fallback_id: task("x") }.as_str(), "fallback");
     }
 
     #[test]
@@ -544,14 +526,8 @@ mod tests {
     #[test]
     fn reset_all_breakers() {
         let mut e = PolicyEngine::new();
-        e.register(
-            task("a"),
-            RetryPolicy::exponential(5, 100, 1000, "g1", 1),
-        );
-        e.register(
-            task("b"),
-            RetryPolicy::exponential(5, 100, 1000, "g2", 1),
-        );
+        e.register(task("a"), RetryPolicy::exponential(5, 100, 1000, "g1", 1));
+        e.register(task("b"), RetryPolicy::exponential(5, 100, 1000, "g2", 1));
         let _ = e.decide(&task("a"), 1);
         let _ = e.decide(&task("b"), 1);
         e.reset_all_breakers();

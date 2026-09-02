@@ -1,0 +1,15 @@
+[package]
+name = "aether-hal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Hardware Abstraction Layer traits for Aether OS"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

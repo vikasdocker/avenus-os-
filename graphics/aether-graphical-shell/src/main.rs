@@ -14,6 +14,11 @@ pub mod fb;
 pub mod input;
 pub mod surface_server;
 
+use aether_a11y::KeyboardNav;
+use aether_animation::Animation;
+use aether_design_tokens::{AiVisualState, Color, Role};
+use aether_renderer::{centered_x, draw_text, ComponentRenderer, PixelBuffer};
+use aether_ui_components::system_monitor::{StatRow, SystemMonitor, SystemSnapshot};
 use aether_wm::{ScreenArea, WindowAction, WindowManager};
 use fb::{Rgb, Screen};
 use serde_json::{json, Value};
@@ -22,15 +27,9 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-const BG: Rgb = Rgb(14, 17, 22);
-const PANEL: Rgb = Rgb(28, 34, 44);
-const PANEL_HI: Rgb = Rgb(40, 48, 62);
-const CYAN: Rgb = Rgb(34, 211, 238);
-const FG: Rgb = Rgb(230, 237, 243);
-const DIM: Rgb = Rgb(122, 132, 142);
-const GREEN: Rgb = Rgb(74, 222, 128);
-const RED: Rgb = Rgb(248, 113, 113);
-const YELLOW: Rgb = Rgb(250, 204, 21);
+// Design-token-backed colors (the §12 Aether identity).
+// Dark Crystal theme: deep navy canvas.
+const BG: Rgb = Rgb(12, 14, 24); // DARK_CRYSTAL_CANVAS
 
 const HEADER_H: i64 = 36;
 const TASKBAR_H: i64 = 44;
@@ -57,9 +56,17 @@ enum UiEvent {
 #[derive(Clone)]
 struct ChatEntry {
     prefix: &'static str,
-    color: Rgb,
+    color: Color,
     text: String,
 }
+
+// Color variants for ChatEntry — dark crystal palette.
+const CHAT_CYAN: Color = Color::rgb(140, 180, 255); // GLOW_BLUE
+const CHAT_FG: Color = Color::rgb(235, 232, 245); // DARK_CRYSTAL_TEXT
+const CHAT_GREEN: Color = Color::rgb(140, 230, 190); // GLOW_MINT
+const CHAT_RED: Color = Color::rgb(220, 80, 80); // DARK_CRYSTAL_DANGER
+const CHAT_YELLOW: Color = Color::rgb(240, 180, 60); // DARK_CRYSTAL_WARNING
+const CHAT_DIM: Color = Color::rgb(140, 136, 160); // DARK_CRYSTAL_MUTED
 
 // --------------------------------------------------------------- app info
 
@@ -67,6 +74,44 @@ struct ChatEntry {
 struct AppInfo {
     id: String,
     name: String,
+}
+
+/// Toast notification severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToastKind {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+/// A frosted glass toast notification.
+#[derive(Debug, Clone)]
+struct Toast {
+    message: String,
+    kind: ToastKind,
+    /// Time when the toast was created (Instant::now() as u64 millis).
+    created_ms: u64,
+}
+
+impl ToastKind {
+    fn color(self) -> Color {
+        match self {
+            Self::Info => Color::role(Role::DcAccent),
+            Self::Success => Color::role(Role::DcSuccess),
+            Self::Warning => Color::role(Role::DcWarning),
+            Self::Error => Color::role(Role::DcDanger),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Info => "INFO",
+            Self::Success => "OK",
+            Self::Warning => "WARN",
+            Self::Error => "ERR",
+        }
+    }
 }
 
 fn query_registered_apps() -> Vec<AppInfo> {
@@ -113,6 +158,22 @@ struct UiState {
     selected_launcher: usize,
     network_up: bool,
     storage_up: bool,
+    /// Animation queue for smooth transitions.
+    animations: Vec<(String, Animation, f32)>,
+    /// Keyboard navigation state (Tab/Shift+Tab focus cycling).
+    keyboard_nav: KeyboardNav,
+    /// System monitor panel.
+    monitor: SystemMonitor,
+    /// Current AI visual state for the orb.
+    ai_state: AiVisualState,
+    /// Orb pulse phase (0.0..=2*PI), advances each frame.
+    orb_phase: f32,
+    /// Hovered launcher item index (usize::MAX = none).
+    hovered_launcher: usize,
+    /// Active toast notifications (bottom-right overlay).
+    toasts: Vec<Toast>,
+    /// Monotonic frame counter for toast timing.
+    frame_ms: u64,
 }
 
 impl UiState {
@@ -133,7 +194,56 @@ impl UiState {
             selected_launcher: 0,
             network_up: false,
             storage_up: false,
+            animations: Vec::new(),
+            keyboard_nav: KeyboardNav::new(),
+            monitor: SystemMonitor::new(),
+            ai_state: AiVisualState::Idle,
+            orb_phase: 0.0,
+            hovered_launcher: usize::MAX,
+            toasts: Vec::new(),
+            frame_ms: 0,
         }
+    }
+
+    /// Start a named animation.
+    fn start_animation(&mut self, name: &str, anim: Animation) {
+        self.animations.retain(|(n, _, _)| n != name);
+        self.animations.push((name.to_string(), anim, 0.0));
+    }
+
+    /// Advance all running animations by `delta_ms`.
+    fn tick_animations(&mut self, delta_ms: u32) {
+        for (_, anim, elapsed) in &mut self.animations {
+            *elapsed = (*elapsed + delta_ms as f32).min(anim.duration.as_ms() as f32);
+        }
+        self.animations.retain(|(_, anim, elapsed)| *elapsed < anim.duration.as_ms() as f32);
+        // Advance orb pulse phase (sine wave, ~2s period).
+        self.orb_phase += delta_ms as f32 * 0.003;
+        if self.orb_phase > std::f32::consts::TAU {
+            self.orb_phase -= std::f32::consts::TAU;
+        }
+        // Advance frame counter and expire old toasts (5s lifetime).
+        self.frame_ms += delta_ms as u64;
+        self.toasts.retain(|t| self.frame_ms.saturating_sub(t.created_ms) < 5000);
+    }
+
+    /// Push a toast notification.
+    fn push_toast(&mut self, message: &str, kind: ToastKind) {
+        self.toasts.push(Toast { message: message.to_string(), kind, created_ms: self.frame_ms });
+        // Keep at most 5 toasts.
+        while self.toasts.len() > 5 {
+            self.toasts.remove(0);
+        }
+    }
+
+    /// Get the current progress (0.0..=1.0) of a named
+    /// animation, or 1.0 if not running.
+    fn animation_progress(&self, name: &str) -> f32 {
+        self.animations
+            .iter()
+            .find(|(n, _, _)| n == name)
+            .map(|(_, anim, elapsed)| anim.progress(*elapsed as u16))
+            .unwrap_or(1.0)
     }
 }
 
@@ -211,25 +321,56 @@ fn refresh_status(state: &mut UiState) {
 // -------------------------------------------------------------- rendering
 
 fn draw_desktop(fb: &mut Screen, ui: &UiState, wm: &mut WindowManager, cursor: Option<(i32, i32)>) {
-    fb.fill(BG);
+    // Wrap the screen buffer in a PixelBuffer for the renderer.
+    let buf_slice = &mut fb.buf[..];
+    let mut pbuf = PixelBuffer::from_raw(fb.width, fb.height, fb.stride, buf_slice);
+    let mut renderer = ComponentRenderer::new(&mut pbuf);
 
-    // Header bar.
-    fb.rect(0, 0, fb.width, HEADER_H as u32, PANEL);
-    fb.text("AETHER OS", 20, 10, 2, FG);
-    fb.rect(0, HEADER_H - 2, fb.width, 2, CYAN);
+    renderer.buf.fill(Color::role(Role::BgBase));
+
+    // Ambient prismatic glow — top-left corner.
+    renderer.buf.gradient_glow(0, 0, 300, 200, Color::role(Role::CrystalPrism), 0.06);
+    // Ambient glow — bottom-right corner.
+    renderer.buf.gradient_glow(
+        fb.width as i64 - 300,
+        fb.height as i64 - 200,
+        300,
+        200,
+        Color::role(Role::CrystalRefract),
+        0.04,
+    );
+
+    // Header bar — glass panel with crystal accent.
+    renderer.buf.glass_panel(0, 0, fb.width, HEADER_H as u32, 0, 0.6);
+    renderer.buf.glow_line(0, HEADER_H - 1, fb.width, Color::role(Role::CrystalEdge), 0.4);
+
+    // AETHER OS label.
+    draw_text(renderer.buf, "AETHER OS", 20, 10, 2, Color::role(Role::TextPrimary));
+
+    // AI Orb — prismatic centerpiece in the header.
+    let orb_x = fb.width as i64 / 2 - 80;
+    let orb_y = HEADER_H / 2;
+    let orb_color = ui.ai_state.color();
+    // Pulse animation: sine wave, 0.0..=1.0.
+    let orb_pulse = ui.orb_phase.sin() * 0.5 + 0.5;
+    renderer.buf.ai_orb(orb_x, orb_y, 10, orb_color, orb_pulse, 0.9);
 
     // Clock (center of header).
     let clock_label = &ui.clock;
-    let clock_x = fb.centered_x(clock_label, 2);
-    fb.text(clock_label, clock_x, 10, 2, CYAN);
+    let clock_x = centered_x(0, fb.width, clock_label, 2);
+    draw_text(renderer.buf, clock_label, clock_x, 10, 2, Color::role(Role::AccentLavender));
 
-    // Workspace indicators (right of center).
+    // Workspace indicators.
     let ws_start_x = fb.width as i64 / 2 + 80;
     let mut wpx = ws_start_x;
     for ws_id in &ui.workspaces {
         let label = format!("[{}]", ws_id);
-        let color = if *ws_id == ui.active_workspace { CYAN } else { DIM };
-        fb.text(&label, wpx, 12, 1, color);
+        let color = if *ws_id == ui.active_workspace {
+            Color::role(Role::DcAccent)
+        } else {
+            Color::role(Role::DcDisabled)
+        };
+        draw_text(renderer.buf, &label, wpx, 12, 1, color);
         wpx += (label.len() as i64 + 1) * 6;
     }
 
@@ -239,31 +380,34 @@ fn draw_desktop(fb: &mut Screen, ui: &UiState, wm: &mut WindowManager, cursor: O
         let label = format!("{name}:{}", if *up { "UP" } else { "DOWN" });
         let w = label.len() as u32 * 6 * 2 + 12;
         px -= w as i64;
-        fb.text(&label, px + 6, 12, 2, if *up { GREEN } else { RED });
+        let color = if *up { Color::role(Role::DcSuccess) } else { Color::role(Role::DcDanger) };
+        draw_text(renderer.buf, &label, px + 6, 12, 2, color);
         px -= 16;
     }
 
-    // Network / Storage pills (right side, below status).
+    // Network / Storage pills.
     let net_label = format!("NET:{}", if ui.network_up { "UP" } else { "DOWN" });
     let stor_label = format!("STOR:{}", if ui.storage_up { "UP" } else { "DOWN" });
     let net_w = net_label.len() as i64 * 12 + 12;
     let stor_w = stor_label.len() as i64 * 12 + 12;
-    fb.text(
+    draw_text(
+        renderer.buf,
         &net_label,
         fb.width as i64 - 16 - net_w,
         HEADER_H - 16,
         1,
-        if ui.network_up { GREEN } else { RED },
+        if ui.network_up { Color::role(Role::DcSuccess) } else { Color::role(Role::DcDanger) },
     );
-    fb.text(
+    draw_text(
+        renderer.buf,
         &stor_label,
         fb.width as i64 - 16 - net_w - stor_w - 8,
         HEADER_H - 16,
         1,
-        if ui.storage_up { GREEN } else { RED },
+        if ui.storage_up { Color::role(Role::DcSuccess) } else { Color::role(Role::DcDanger) },
     );
 
-    // Window chrome for every visible window.
+    // Window chrome — glass window with crystal frame.
     for w in wm
         .stacked()
         .into_iter()
@@ -271,47 +415,67 @@ fn draw_desktop(fb: &mut Screen, ui: &UiState, wm: &mut WindowManager, cursor: O
     {
         let (wx, wy) = (i64::from(w.x), i64::from(w.y));
         let ww = i64::from(w.width);
-        let focused_color = if w.focused { CYAN } else { DIM };
-        // Frame border.
-        fb.rect(wx, wy, w.width, w.height, focused_color);
-        // Title bar background.
-        fb.rect(wx + 1, wy + 1, w.width.saturating_sub(2), TITLE_H as u32 - 2, PANEL);
-        fb.text(&w.title.to_uppercase(), wx + 10, wy + 9, 2, FG);
+
+        // Glass window body with layered shadow.
+        renderer.buf.glass_window(
+            wx, wy, w.width, w.height, 12, // Md radius
+            w.focused, 0.7,
+        );
+
+        // Title bar text.
+        draw_text(
+            renderer.buf,
+            &w.title.to_uppercase(),
+            wx + 10,
+            wy + 9,
+            2,
+            Color::role(Role::TextPrimary),
+        );
         // Buttons right side: [_] [O] [X].
         let bx = wx + ww - BOX_W * 3 - 8;
-        fb.text("_", bx, wy + 8, 2, DIM);
-        fb.text("O", bx + BOX_W, wy + 8, 2, DIM);
-        fb.text("X", bx + BOX_W * 2, wy + 8, 2, if w.focused { RED } else { DIM });
+        draw_text(renderer.buf, "_", bx, wy + 8, 2, Color::role(Role::TextSecondary));
+        draw_text(renderer.buf, "O", bx + BOX_W, wy + 8, 2, Color::role(Role::TextSecondary));
+        let close_color =
+            if w.focused { Color::role(Role::DcDanger) } else { Color::role(Role::TextDisabled) };
+        draw_text(renderer.buf, "X", bx + BOX_W * 2, wy + 8, 2, close_color);
 
-        // Clean canvas for app content (app paints over it).
+        // Clean canvas for app content.
         let (cx, cy, cw, ch) = w.content_rect();
-        fb.rect(i64::from(cx), i64::from(cy), cw, ch, BG);
+        renderer.buf.rect(i64::from(cx), i64::from(cy), cw, ch, Color::role(Role::BgBase));
     }
 
     // Application launcher (left side panel).
     if ui.launcher_open {
-        draw_launcher(fb, ui);
+        draw_launcher(&mut renderer.buf, ui);
     }
 
-    // Taskbar.
+    // System monitor panel (right side).
+    if ui.monitor.visible {
+        draw_system_monitor(&mut renderer.buf, ui);
+    }
+
+    // Taskbar — glass panel with crystal accent.
     let tb_y = fb.height as i64 - TASKBAR_H;
-    fb.rect(0, tb_y, fb.width, TASKBAR_H as u32, PANEL);
-    fb.rect(0, tb_y, fb.width, 2, CYAN);
+    renderer.buf.glass_panel(0, tb_y, fb.width, TASKBAR_H as u32, 0, 0.5);
+    renderer.buf.glow_line(0, tb_y, fb.width, Color::role(Role::CrystalEdge), 0.3);
 
     // Workspace quick-switch buttons in taskbar.
     let mut ws_tx = 16i64;
     for ws_id in &ui.workspaces {
         let label = format!("WS{}", ws_id);
         let bw = 40u32;
-        let color = if *ws_id == ui.active_workspace { PANEL_HI } else { KEY_BG };
-        fb.rect(ws_tx, tb_y + 6, bw, TASKBAR_H as u32 - 12, color);
-        fb.text(
-            &label,
-            ws_tx + 4,
-            tb_y + 15,
-            2,
-            if *ws_id == ui.active_workspace { CYAN } else { DIM },
-        );
+        let bg = if *ws_id == ui.active_workspace {
+            Color::role(Role::DcSurfaceHover)
+        } else {
+            Color::role(Role::DcSurface)
+        };
+        renderer.buf.rounded_rect(ws_tx, tb_y + 6, bw, TASKBAR_H as u32 - 12, 6, bg);
+        let text_color = if *ws_id == ui.active_workspace {
+            Color::role(Role::DcAccent)
+        } else {
+            Color::role(Role::DcDisabled)
+        };
+        draw_text(renderer.buf, &label, ws_tx + 4, tb_y + 15, 2, text_color);
         ws_tx += bw as i64 + 4;
     }
 
@@ -325,15 +489,16 @@ fn draw_desktop(fb: &mut Screen, ui: &UiState, wm: &mut WindowManager, cursor: O
         let label = w.title.to_uppercase();
         let is_focused = w.focused;
         let bw = 150u32;
-        fb.rect(
-            tx,
-            tb_y + 6,
-            bw,
-            TASKBAR_H as u32 - 12,
-            if is_focused { PANEL_HI } else { KEY_BG },
-        );
+        let bg = if is_focused {
+            Color::role(Role::DcSurfaceHover)
+        } else {
+            Color::role(Role::DcSurface)
+        };
+        renderer.buf.rounded_rect(tx, tb_y + 6, bw, TASKBAR_H as u32 - 12, 6, bg);
         let label = if label.len() > 18 { format!("{}...", &label[..17]) } else { label };
-        fb.text(&label, tx + 8, tb_y + 15, 2, if is_focused { CYAN } else { DIM });
+        let text_color =
+            if is_focused { Color::role(Role::DcAccent) } else { Color::role(Role::DcDisabled) };
+        draw_text(renderer.buf, &label, tx + 8, tb_y + 15, 2, text_color);
         tx += bw as i64 + 8;
         if tx > fb.width as i64 - 260 {
             break;
@@ -346,39 +511,52 @@ fn draw_desktop(fb: &mut Screen, ui: &UiState, wm: &mut WindowManager, cursor: O
         .and_then(|id| wm.get(id))
         .map(|w| format!("ACTIVE: {}", w.title.to_uppercase()))
         .unwrap_or_else(|| "NO ACTIVE WINDOW".to_string());
-    fb.text(&active, fb.width as i64 - 16 - active.len() as i64 * 12, tb_y + 14, 2, GREEN);
+    draw_text(
+        renderer.buf,
+        &active,
+        fb.width as i64 - 16 - active.len() as i64 * 12,
+        tb_y + 14,
+        2,
+        Color::role(Role::DcSuccess),
+    );
 
     // AI conversation strip.
     let ai_y = tb_y - 24 * (ui.chat.len() as i64).min(3) - 8;
     for (i, entry) in ui.chat.iter().rev().take(3).enumerate() {
         let y = ai_y + (2 - i as i64) * 24;
-        fb.text(entry.prefix, 16, y, 2, entry.color);
-        fb.text(&entry.text.to_uppercase(), 70, y, 2, FG);
+        draw_text(renderer.buf, entry.prefix, 16, y, 2, entry.color);
+        draw_text(renderer.buf, &entry.text.to_uppercase(), 70, y, 2, Color::role(Role::DcText));
     }
 
-    // Cursor sprite last.
+    // Frosted glass toast notifications (bottom-right).
+    draw_toasts(&mut renderer.buf, ui);
+
+    // Cursor sprite last — glowing crystal cursor.
     if let Some((mx, my)) = cursor {
         let (cx, cy) = (i64::from(mx), i64::from(my));
-        fb.rect(cx, cy, 3, 12, FG);
-        fb.rect(cx, cy, 12, 3, FG);
-        fb.rect(cx, cy, 9, 9, DIM);
+        // Cursor glow.
+        renderer.buf.gradient_glow(cx - 4, cy - 4, 16, 16, Color::role(Role::CrystalPrism), 0.3);
+        renderer.buf.rect(cx, cy, 3, 12, Color::role(Role::CrystalShine));
+        renderer.buf.rect(cx, cy, 12, 3, Color::role(Role::CrystalShine));
+        renderer.buf.rect(cx, cy, 9, 9, Color::role(Role::DcAccent));
     }
 }
 
-fn draw_launcher(fb: &mut Screen, ui: &UiState) {
-    let lx = 4;
-    let ly = HEADER_H + 4;
+fn draw_launcher(buf: &mut PixelBuffer, ui: &UiState) {
+    let lx: i64 = 4;
+    let ly: i64 = HEADER_H + 4;
     let lw = LAUNCHER_W as u32;
     let apps = &ui.launcher_apps;
-    let lh = (apps.len() as i64 * LAUNCHER_ITEM_H + 32).min(fb.height as i64 - ly - TASKBAR_H - 8);
+    let lh = (apps.len() as i64 * LAUNCHER_ITEM_H as i64 + 32)
+        .min(buf.height as i64 - ly - TASKBAR_H - 8);
 
-    // Launcher background.
-    fb.rect(lx, ly, lw, lh as u32, PANEL);
-    fb.rect(lx, ly, lw, 2, CYAN);
-    fb.text("APPLICATIONS", lx + 8, ly + 6, 2, CYAN);
+    // Launcher background — frosted glass panel.
+    buf.glass_panel(lx, ly, lw, lh as u32, 12, 0.7);
+    buf.glow_line(lx + 8, ly, lw.saturating_sub(16), Color::role(Role::CrystalEdge), 0.3);
+    draw_text(buf, "APPLICATIONS", lx + 8, ly + 6, 2, Color::role(Role::DcAccent));
 
     if apps.is_empty() {
-        fb.text("NO APPS", lx + 8, ly + 28, 1, DIM);
+        draw_text(buf, "NO APPS", lx + 8, ly + 28, 1, Color::role(Role::DcDisabled));
         return;
     }
 
@@ -388,15 +566,346 @@ fn draw_launcher(fb: &mut Screen, ui: &UiState) {
             break;
         }
         let selected = i == ui.selected_launcher;
-        let bg = if selected { PANEL_HI } else { PANEL };
-        fb.rect(lx + 2, iy, lw - 4, LAUNCHER_ITEM_H as u32 - 2, bg);
+        let hovered = i == ui.hovered_launcher;
+        let item_w = lw - 4;
+        let item_h = LAUNCHER_ITEM_H as u32 - 2;
+
+        // Hover illumination: glow ring around the item.
+        if hovered && !selected {
+            buf.glass_panel_hover(lx + 2, iy, item_w, item_h, 6, 0.4, 0.6);
+        } else {
+            let bg = if selected {
+                Color::role(Role::DcSurfaceHover)
+            } else {
+                Color::role(Role::DcSurface)
+            };
+            buf.rounded_rect(lx + 2, iy, item_w, item_h, 6, bg);
+        }
+
+        // Selected item gets a crystal accent line.
+        if selected {
+            buf.glow_line(lx + 2, iy, item_w, Color::role(Role::DcAccent), 0.5);
+        }
+
         let label =
             if app.name.len() > 20 { format!("{}...", &app.name[..19]) } else { app.name.clone() };
-        fb.text(&label.to_uppercase(), lx + 10, iy + 7, 2, if selected { CYAN } else { FG });
+        let text_color = if selected {
+            Color::role(Role::DcAccent)
+        } else if hovered {
+            Color::role(Role::CrystalShine)
+        } else {
+            Color::role(Role::DcText)
+        };
+        draw_text(buf, &label.to_uppercase(), lx + 10, iy + 7, 2, text_color);
     }
 }
 
-const KEY_BG: Rgb = Rgb(38, 45, 56);
+fn draw_system_monitor(buf: &mut PixelBuffer, ui: &UiState) {
+    let snap = &ui.monitor.snapshot;
+    let mx = buf.width as i64 - ui.monitor.width as i64 - 4;
+    let my = HEADER_H + 4;
+    let mw = ui.monitor.width as u32;
+    let mh = ui.monitor.height as u32;
+
+    // Panel background — frosted glass.
+    buf.crystal_panel(mx, my, mw, mh, 12, 0.7);
+
+    // Header.
+    buf.rounded_rect(mx + 2, my + 2, mw - 4, 24, 8, Color::role(Role::DcSurfaceStrong));
+    draw_text(buf, "SYSTEM MONITOR", mx + 8, my + 7, 2, Color::role(Role::DcAccent));
+
+    let mut y = my + 32;
+    let row_h: i64 = 18;
+
+    // CPU bar.
+    draw_stat_bar(
+        buf,
+        mx + 8,
+        y,
+        mw - 16,
+        "CPU",
+        &format!("{:.0}%", snap.cpu_percent),
+        snap.cpu_percent / 100.0,
+    );
+    y += row_h + 8;
+
+    // Memory bar.
+    draw_stat_bar(buf, mx + 8, y, mw - 16, "MEM", &snap.memory, snap.memory_fraction);
+    y += row_h + 8;
+
+    // Uptime + process count.
+    draw_text(buf, &format!("UP: {}", snap.uptime), mx + 8, y, 1, Color::role(Role::DcMuted));
+    y += row_h;
+    draw_text(
+        buf,
+        &format!("PROC: {}", snap.process_count),
+        mx + 8,
+        y,
+        1,
+        Color::role(Role::DcMuted),
+    );
+    y += row_h + 4;
+
+    // Disks section.
+    if !snap.disks.is_empty() {
+        draw_text(buf, "DISK", mx + 8, y, 2, Color::role(Role::DcAccent));
+        y += row_h;
+        for disk in &snap.disks {
+            let frac = disk.fraction.unwrap_or(0.0);
+            draw_stat_bar(buf, mx + 8, y, mw - 16, &disk.label, &disk.value, frac);
+            y += row_h + 4;
+        }
+    }
+
+    // Network section.
+    if !snap.networks.is_empty() {
+        draw_text(buf, "NET", mx + 8, y, 2, Color::role(Role::DcAccent));
+        y += row_h;
+        for net in &snap.networks {
+            let color = if net.value == "UP" {
+                Color::role(Role::DcSuccess)
+            } else {
+                Color::role(Role::DcDanger)
+            };
+            draw_text(buf, &net.label, mx + 8, y, 1, Color::role(Role::DcMuted));
+            draw_text(buf, &net.value, mx + mw as i64 - 40, y, 1, color);
+            y += row_h;
+        }
+    }
+}
+
+fn draw_stat_bar(
+    buf: &mut PixelBuffer,
+    x: i64,
+    y: i64,
+    max_w: u32,
+    label: &str,
+    value: &str,
+    fraction: f32,
+) {
+    let bar_x = x + 40;
+    let bar_w = (max_w as i64 - 48) as u32;
+    let bar_h: u32 = 10;
+
+    // Label.
+    draw_text(buf, label, x, y, 1, Color::role(Role::DcMuted));
+
+    // Value.
+    draw_text(
+        buf,
+        value,
+        x + max_w as i64 - value.len() as i64 * 6,
+        y,
+        1,
+        Color::role(Role::DcText),
+    );
+
+    // Bar background.
+    let by = y + 12;
+    buf.rect(bar_x, by, bar_w, bar_h, Color::role(Role::DcSurfaceStrong));
+
+    // Bar fill.
+    let fill_w = (bar_w as f32 * fraction.clamp(0.0, 1.0)) as u32;
+    if fill_w > 0 {
+        let color = if fraction > 0.85 {
+            Color::role(Role::DcDanger)
+        } else if fraction > 0.6 {
+            Color::role(Role::DcAccent)
+        } else {
+            Color::role(Role::DcSuccess)
+        };
+        buf.rect(bar_x, by, fill_w, bar_h, color);
+    }
+
+    // Bar outline.
+    aether_renderer::draw_rect_outline(
+        buf,
+        bar_x,
+        by,
+        bar_w,
+        bar_h,
+        4,
+        Color::role(Role::DcBorder),
+    );
+}
+
+fn draw_toasts(buf: &mut PixelBuffer, ui: &UiState) {
+    if ui.toasts.is_empty() {
+        return;
+    }
+    let toast_w: u32 = 260;
+    let toast_h: u32 = 36;
+    let gap: i64 = 6;
+    let margin: i64 = 12;
+    let base_y = buf.height as i64 - margin;
+
+    for (i, toast) in ui.toasts.iter().enumerate() {
+        let age_ms = ui.frame_ms.saturating_sub(toast.created_ms);
+        // Fade in over 200ms, fade out after 4000ms.
+        let alpha = if age_ms < 200 {
+            age_ms as f32 / 200.0
+        } else if age_ms > 4000 {
+            1.0 - (age_ms - 4000) as f32 / 1000.0
+        } else {
+            1.0
+        };
+        let alpha = alpha.clamp(0.0, 1.0);
+        if alpha <= 0.0 {
+            continue;
+        }
+
+        let ty = base_y - (i as i64 + 1) * (toast_h as i64 + gap);
+        let tx = buf.width as i64 - toast_w as i64 - margin;
+
+        // Frosted glass background.
+        buf.glass_panel(tx, ty, toast_w, toast_h, 10, 0.75 * alpha);
+
+        // Kind accent line on the left.
+        let kind_color = toast.kind.color();
+        buf.rect(tx + 2, ty + 6, 3, toast_h - 12, kind_color);
+
+        // Kind label.
+        draw_text(buf, toast.kind.label(), tx + 10, ty + 6, 2, kind_color);
+
+        // Message text.
+        let msg = if toast.message.len() > 30 {
+            format!("{}...", &toast.message[..29])
+        } else {
+            toast.message.clone()
+        };
+        draw_text(buf, &msg.to_uppercase(), tx + 10, ty + 20, 1, Color::role(Role::DcText));
+    }
+}
+
+// ----------------------------------------------------------- monitor data
+
+fn refresh_monitor(ui: &mut UiState) {
+    use std::io::{BufRead, BufReader, Write};
+
+    let call_json = |port: u16, v: Value| -> Option<Value> {
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
+        s.set_read_timeout(Some(Duration::from_secs(2))).ok();
+        s.write_all(format!("{v}\n").as_bytes()).ok()?;
+        let mut line = String::new();
+        BufReader::new(s).read_line(&mut line).ok()?;
+        serde_json::from_str(line.trim()).ok()
+    };
+
+    // Memory from system.info.
+    let (mem_used, mem_total) = call_json(
+        4747,
+        json!({
+            "service_id": "aether-system-core",
+            "command": "info",
+            "parameters": {},
+        }),
+    )
+    .and_then(|v| {
+        let used = v["result"]["memory_used_mib"].as_f64().unwrap_or(0.0);
+        let total = v["result"]["memory_total_mib"].as_f64().unwrap_or(1.0);
+        Some((used, total))
+    })
+    .unwrap_or((0.0, 1.0));
+
+    let mem_frac = if mem_total > 0.0 { (mem_used / mem_total) as f32 } else { 0.0 };
+    let mem_str = format!("{:.1} / {:.1} MiB", mem_used, mem_total);
+
+    // Storage from storage.status.
+    let disks = call_json(
+        4747,
+        json!({
+            "service_id": "aether-system-core",
+            "command": "status",
+            "parameters": { "type": "storage" },
+        }),
+    )
+    .and_then(|v| {
+        let mounts = v["result"]["mounts"].as_array()?;
+        let mut rows = Vec::new();
+        for m in mounts {
+            let name = m["mount_point"].as_str().unwrap_or("?");
+            let used = m["used_bytes"].as_f64().unwrap_or(0.0);
+            let total = m["total_bytes"].as_f64().unwrap_or(1.0);
+            let frac = if total > 0.0 { (used / total) as f32 } else { 0.0 };
+            let used_gb = used / 1_073_741_824.0;
+            let total_gb = total / 1_073_741_824.0;
+            rows.push(StatRow {
+                label: name.to_string(),
+                value: format!("{:.1} / {:.1} GB", used_gb, total_gb),
+                fraction: Some(frac),
+            });
+        }
+        Some(rows)
+    })
+    .unwrap_or_default();
+
+    // Network.
+    let networks = call_json(
+        4747,
+        json!({
+            "service_id": "aether-system-core",
+            "command": "status",
+            "parameters": { "type": "network" },
+        }),
+    )
+    .and_then(|v| {
+        let ifaces = v["result"]["interfaces"].as_array()?;
+        let mut rows = Vec::new();
+        for iface in ifaces {
+            let name = iface["name"].as_str().unwrap_or("?");
+            let up = iface["up"].as_bool().unwrap_or(false);
+            rows.push(StatRow {
+                label: name.to_string(),
+                value: if up { "UP" } else { "DOWN" }.to_string(),
+                fraction: None,
+            });
+        }
+        Some(rows)
+    })
+    .unwrap_or_default();
+
+    // Process count.
+    let proc_count = call_json(
+        4747,
+        json!({
+            "service_id": "aether-system-core",
+            "command": "status",
+            "parameters": { "type": "process" },
+        }),
+    )
+    .and_then(|v| v["result"]["processes"].as_array().map(|a| a.len() as u32))
+    .unwrap_or(0);
+
+    // Uptime from system.info.
+    let uptime_ms = call_json(
+        4747,
+        json!({
+            "service_id": "aether-system-core",
+            "command": "info",
+            "parameters": {},
+        }),
+    )
+    .and_then(|v| v["result"]["uptime_ms"].as_f64())
+    .unwrap_or(0.0);
+    let secs = (uptime_ms / 1000.0) as u64;
+    let hours = secs / 3600;
+    let mins = (secs % 3600) / 60;
+    let uptime_str = if hours > 0 { format!("{}h {}m", hours, mins) } else { format!("{}m", mins) };
+
+    // CPU (estimate from process count — real CPU requires /proc/stat).
+    // In QEMU we don't have /proc/stat, so we use a heuristic.
+    let cpu_est = (proc_count as f32 * 0.3).min(100.0);
+
+    ui.monitor.update(SystemSnapshot {
+        cpu_percent: cpu_est,
+        memory: mem_str,
+        memory_fraction: mem_frac,
+        disks,
+        networks,
+        uptime: uptime_str,
+        process_count: proc_count,
+    });
+}
 
 // ------------------------------------------------------------ input decode
 
@@ -411,6 +920,7 @@ fn handle_key(
     const F3: u16 = 61;
     const F4: u16 = 62;
     const F5: u16 = 63;
+    const F6: u16 = 64;
     const LEFT_CTRL: u16 = 29;
     const RIGHT_CTRL: u16 = 97;
     const KEY_1: u16 = 2;
@@ -426,11 +936,13 @@ fn handle_key(
     match code {
         TAB => {
             wm.cycle_focus();
+            ui.start_animation("focus_ring", Animation::tap());
             None
         }
         F2 => {
             if let Some(id) = focused {
                 wm.apply(&WindowAction::Minimize(id));
+                ui.start_animation("window_state", Animation::window_state());
             }
             None
         }
@@ -445,12 +957,14 @@ fn handle_key(
                         wm.apply(&WindowAction::Maximize(id));
                     }
                 }
+                ui.start_animation("window_state", Animation::window_state());
             }
             None
         }
         F4 => {
             if let Some(id) = focused {
                 m_close(wm, id, tx);
+                ui.start_animation("window_state", Animation::window_state());
             }
             None
         }
@@ -460,7 +974,14 @@ fn handle_key(
             if ui.launcher_open {
                 ui.launcher_apps = query_registered_apps();
                 ui.selected_launcher = 0;
+                ui.start_animation("launcher", Animation::nav());
             }
+            None
+        }
+        F6 => {
+            // Toggle system monitor.
+            ui.monitor.visible = !ui.monitor.visible;
+            ui.start_animation("monitor", Animation::tap());
             None
         }
         LEFT_CTRL | RIGHT_CTRL => {
@@ -512,7 +1033,7 @@ fn launch_app(app_id: &str, tx: &Sender<UiEvent>) {
     let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", 4747)) else {
         let _ = tx.send(UiEvent::ChatReply(ChatEntry {
             prefix: "SYS>",
-            color: RED,
+            color: CHAT_RED,
             text: "LAUNCH FAILED - cannot connect to system core".to_string(),
         }));
         return;
@@ -529,7 +1050,7 @@ fn launch_app(app_id: &str, tx: &Sender<UiEvent>) {
     if s.write_all(format!("{req}\n").as_bytes()).is_err() {
         let _ = tx.send(UiEvent::ChatReply(ChatEntry {
             prefix: "SYS>",
-            color: RED,
+            color: CHAT_RED,
             text: "LAUNCH FAILED - send error".to_string(),
         }));
         return;
@@ -539,7 +1060,7 @@ fn launch_app(app_id: &str, tx: &Sender<UiEvent>) {
         Ok(0) | Err(_) => {
             let _ = tx.send(UiEvent::ChatReply(ChatEntry {
                 prefix: "SYS>",
-                color: YELLOW,
+                color: CHAT_YELLOW,
                 text: format!("LAUNCHING {}", app_id.to_uppercase()),
             }));
         }
@@ -549,14 +1070,14 @@ fn launch_app(app_id: &str, tx: &Sender<UiEvent>) {
             if ok {
                 let _ = tx.send(UiEvent::ChatReply(ChatEntry {
                     prefix: "OK >",
-                    color: GREEN,
+                    color: CHAT_GREEN,
                     text: format!("LAUNCHED {}", app_id.to_uppercase()),
                 }));
             } else {
                 let err = v["error"].as_str().unwrap_or("unknown");
                 let _ = tx.send(UiEvent::ChatReply(ChatEntry {
                     prefix: "ERR>",
-                    color: RED,
+                    color: CHAT_RED,
                     text: format!("LAUNCH FAILED - {err}"),
                 }));
             }
@@ -674,7 +1195,7 @@ fn spawn_serial_thread(tx: Sender<UiEvent>, port: u16) {
                             std::thread::spawn(move || {
                                 let _ = tx.send(UiEvent::ChatReply(ChatEntry {
                                     prefix: "YOU>",
-                                    color: FG,
+                                    color: CHAT_FG,
                                     text: prompt.clone(),
                                 }));
                                 let result = agent_chat(&prompt, port);
@@ -692,11 +1213,11 @@ fn spawn_serial_thread(tx: Sender<UiEvent>, port: u16) {
                                                     first_msg = Some(msg.to_string());
                                                 }
                                                 let (prefix, color) = match status {
-                                                    "Success" => ("OK >", GREEN),
-                                                    "Failed" => ("ERR>", RED),
-                                                    "Rejected" => ("!! >", RED),
-                                                    "RequiresConsent" => (".. >", DIM),
-                                                    _ => (" * >", CYAN),
+                                                    "Success" => ("OK >", CHAT_GREEN),
+                                                    "Failed" => ("ERR>", CHAT_RED),
+                                                    "Rejected" => ("!! >", CHAT_RED),
+                                                    "RequiresConsent" => (".. >", CHAT_DIM),
+                                                    _ => (" * >", CHAT_CYAN),
                                                 };
                                                 let _ = tx.send(UiEvent::ChatReply(ChatEntry {
                                                     prefix,
@@ -715,14 +1236,14 @@ fn spawn_serial_thread(tx: Sender<UiEvent>, port: u16) {
                                             if need_summary && !reply.response.is_empty() {
                                                 let _ = tx.send(UiEvent::ChatReply(ChatEntry {
                                                     prefix: "AI >",
-                                                    color: CYAN,
+                                                    color: CHAT_CYAN,
                                                     text: reply.response,
                                                 }));
                                             }
                                         } else {
                                             let _ = tx.send(UiEvent::ChatReply(ChatEntry {
                                                 prefix: "AI >",
-                                                color: CYAN,
+                                                color: CHAT_CYAN,
                                                 text: reply.response,
                                             }));
                                         }
@@ -730,7 +1251,7 @@ fn spawn_serial_thread(tx: Sender<UiEvent>, port: u16) {
                                     Err(e) => {
                                         let _ = tx.send(UiEvent::ChatReply(ChatEntry {
                                             prefix: "SYS>",
-                                            color: RED,
+                                            color: CHAT_RED,
                                             text: format!("ACTION FAILED - {e}"),
                                         }));
                                     }
@@ -748,8 +1269,52 @@ fn spawn_serial_thread(tx: Sender<UiEvent>, port: u16) {
 
 // -------------------------------------------------------------- main loop
 
+/// Headless mode: surface server runs but no framebuffer is available.
+/// The shell stays alive so app windows can still register via IPC.
+fn headless_mode() -> Result<(), String> {
+    eprintln!("[desktop] headless mode: surface server active on :{SURFACE_PORT}");
+
+    let area = ScreenArea { x: 0, y: 0, width: 1024, height: 768 };
+    let wm = Arc::new(Mutex::new(WindowManager::new(area)));
+    let clients: surface_server::Clients = Arc::new(Mutex::new(HashMap::new()));
+
+    let (stx, srx): (
+        Sender<surface_server::SurfaceCommand>,
+        Receiver<surface_server::SurfaceCommand>,
+    ) = channel();
+
+    surface_server::spawn(
+        SURFACE_PORT,
+        surface_server::SurfaceServer {
+            tx: stx,
+            wm: Arc::clone(&wm),
+            clients: Arc::clone(&clients),
+        },
+    )?;
+    eprintln!("[desktop] surface server ready on :{SURFACE_PORT}");
+
+    let (_tx, rx): (Sender<UiEvent>, Receiver<UiEvent>) = channel();
+    spawn_status_thread(_tx.clone());
+
+    loop {
+        while let Ok(surface_server::SurfaceCommand::Close(id)) = srx.try_recv() {
+            let _ = wm.lock().unwrap_or_else(|p| p.into_inner()).apply(&WindowAction::Close(id));
+        }
+        match rx.recv_timeout(Duration::from_secs(1)) {
+            Ok(UiEvent::StatusTick) => {}
+            _ => {}
+        }
+    }
+}
+
 fn run() -> Result<(), String> {
-    let mut fb = Screen::open()?;
+    let mut fb = match Screen::open() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[desktop][WARN] no framebuffer available ({e}); running in headless mode");
+            return headless_mode();
+        }
+    };
     eprintln!("[desktop] framebuffer {}x{}", fb.width, fb.height);
 
     let area = ScreenArea {
@@ -800,6 +1365,9 @@ fn run() -> Result<(), String> {
     }
 
     loop {
+        // Advance animations every frame (~60ms tick).
+        ui.tick_animations(60);
+
         let motion_due = cursor_dirty && last_repaint.elapsed() >= Duration::from_millis(70);
 
         match rx.recv_timeout(Duration::from_millis(60)) {
@@ -857,6 +1425,9 @@ fn run() -> Result<(), String> {
             }
             Ok(UiEvent::StatusTick) => {
                 refresh_status(&mut ui);
+                if ui.monitor.visible {
+                    refresh_monitor(&mut ui);
+                }
                 cursor_dirty = true;
             }
             Ok(UiEvent::ChatReply(entry)) => {

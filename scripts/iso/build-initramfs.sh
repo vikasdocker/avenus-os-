@@ -97,6 +97,7 @@ if [[ -d "$MODDIR" ]]; then
     DEPS_LIST="$WORK/module-deps.txt"
     {
         modprobe --set-version="$REL" --show-depends virtio_gpu 2>/dev/null || true
+        modprobe --set-version="$REL" --show-depends bochs 2>/dev/null || true
         modprobe --set-version="$REL" --show-depends virtio_net 2>/dev/null || true
         modprobe --set-version="$REL" --show-depends psmouse 2>/dev/null || true
     } >"$DEPS_LIST"

@@ -58,11 +58,7 @@ impl OcrWord {
     /// A new word.
     #[must_use]
     pub fn new(text: impl Into<String>, bbox: Region, confidence: f32) -> Self {
-        Self {
-            text: text.into(),
-            bbox,
-            confidence: confidence.clamp(0.0, 1.0),
-        }
+        Self { text: text.into(), bbox, confidence: confidence.clamp(0.0, 1.0) }
     }
 }
 
@@ -81,11 +77,7 @@ impl OcrLine {
     /// The joined text of the line.
     #[must_use]
     pub fn text(&self) -> String {
-        self.words
-            .iter()
-            .map(|w| w.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ")
+        self.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ")
     }
 
     /// The average confidence of the
@@ -131,11 +123,7 @@ impl OcrResult {
     /// newline-separated.
     #[must_use]
     pub fn text(&self) -> String {
-        self.lines
-            .iter()
-            .map(OcrLine::text)
-            .collect::<Vec<_>>()
-            .join("\n")
+        self.lines.iter().map(OcrLine::text).collect::<Vec<_>>().join("\n")
     }
 
     /// The average confidence of every
@@ -146,12 +134,7 @@ impl OcrResult {
         if n == 0 {
             return 0.0;
         }
-        let sum: f32 = self
-            .lines
-            .iter()
-            .flat_map(|l| l.words.iter())
-            .map(|w| w.confidence)
-            .sum();
+        let sum: f32 = self.lines.iter().flat_map(|l| l.words.iter()).map(|w| w.confidence).sum();
         sum / n as f32
     }
 
@@ -190,11 +173,7 @@ impl OcrRequest {
     /// frame.
     #[must_use]
     pub fn whole(frame: Frame) -> Self {
-        Self {
-            frame,
-            region: None,
-            language: alloc::string::String::from("en"),
-        }
+        Self { frame, region: None, language: alloc::string::String::from("en") }
     }
 
     /// Set the region.
@@ -288,11 +267,7 @@ impl<E: OcrEngine> OcrSession<E> {
     /// A new session.
     #[must_use]
     pub fn new(engine: E) -> Self {
-        Self {
-            engine,
-            last_result: None,
-            min_confidence: 0.0,
-        }
+        Self { engine, last_result: None, min_confidence: 0.0 }
     }
 
     /// Set the minimum acceptable
@@ -335,14 +310,7 @@ mod tests {
     use aether_vision_core::{PixelFormat, SourceId};
 
     fn frame(w: u32, h: u32) -> Frame {
-        Frame::solid(
-            w,
-            h,
-            PixelFormat::Rgb8,
-            [255, 255, 255, 255],
-            SourceId::new("t"),
-            0,
-        )
+        Frame::solid(w, h, PixelFormat::Rgb8, [255, 255, 255, 255], SourceId::new("t"), 0)
     }
 
     #[test]
@@ -368,10 +336,7 @@ mod tests {
 
     #[test]
     fn line_empty_text() {
-        let line = OcrLine {
-            words: Vec::new(),
-            bbox: Region::new(0, 0, 0, 0),
-        };
+        let line = OcrLine { words: Vec::new(), bbox: Region::new(0, 0, 0, 0) };
         assert_eq!(line.text(), "");
         assert_eq!(line.average_confidence(), 0.0);
     }
@@ -455,9 +420,7 @@ mod tests {
     #[test]
     fn ocr_error_display() {
         assert_eq!(OcrError::EmptyFrame.to_string(), "frame has no data");
-        assert!(OcrError::EngineFailure(String::from("x"))
-            .to_string()
-            .contains("x"));
+        assert!(OcrError::EngineFailure(String::from("x")).to_string().contains("x"));
     }
 
     #[test]

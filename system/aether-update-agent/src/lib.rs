@@ -53,11 +53,11 @@
 
 extern crate alloc;
 
+pub mod disk_engine;
 mod engine;
 
-pub use engine::{
-    sha256_inline, EngineAudit, FilesystemApplyEngine, FilesystemApplyError,
-};
+pub use disk_engine::{DiskApplyEngine, DiskApplyError, DiskEngineAudit};
+pub use engine::{sha256_inline, EngineAudit, FilesystemApplyEngine, FilesystemApplyError};
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -157,12 +157,9 @@ impl core::fmt::Display for ApplyError {
             Self::Refused { step, reason } => {
                 write!(f, "step '{}' refused: {reason}", step.as_str())
             }
-            Self::WrongStage { step, actual } => write!(
-                f,
-                "step '{}' not allowed in stage '{}'",
-                step.as_str(),
-                actual.as_str()
-            ),
+            Self::WrongStage { step, actual } => {
+                write!(f, "step '{}' not allowed in stage '{}'", step.as_str(), actual.as_str())
+            }
         }
     }
 }
@@ -178,11 +175,7 @@ pub trait ApplyEngine {
     /// Run the given step for the
     /// given plan. Returns `Ok(())`
     /// on success.
-    fn run(
-        &self,
-        step: ApplyStep,
-        plan: &UpdatePlan,
-    ) -> Result<(), ApplyError>;
+    fn run(&self, step: ApplyStep, plan: &UpdatePlan) -> Result<(), ApplyError>;
 }
 
 /// A null apply engine. Returns
@@ -336,36 +329,25 @@ impl<E: ApplyEngine> UpdateAgent<E> {
     /// order; the agent handles
     /// state transitions and
     /// retries.
-    pub fn run_step(
-        &mut self,
-        step: ApplyStep,
-        now_ms: u64,
-    ) -> Result<(), ApplyError> {
+    pub fn run_step(&mut self, step: ApplyStep, now_ms: u64) -> Result<(), ApplyError> {
         let attempt = self.status.attempt().saturating_add(1);
         self.audit.push(AgentAuditEvent::StepAttempted { step, attempt });
         // Move the state machine to
         // the step's stage.
         self.status.transition(step.stage(), now_ms, None);
 
-        let plan = self
-            .status
-            .current_plan()
-            .ok_or_else(|| ApplyError::Refused {
-                step,
-                reason: alloc::string::String::from("no current plan"),
-            })?;
+        let plan = self.status.current_plan().ok_or_else(|| ApplyError::Refused {
+            step,
+            reason: alloc::string::String::from("no current plan"),
+        })?;
         match self.engine.run(step, plan) {
             Ok(()) => {
                 self.audit.push(AgentAuditEvent::StepSucceeded { step });
                 Ok(())
             }
             Err(err) => {
-                self.audit.push(AgentAuditEvent::StepFailed {
-                    step,
-                    reason: err.to_string(),
-                });
-                self.status
-                    .transition(UpdateStage::Failed, now_ms, Some(err.to_string()));
+                self.audit.push(AgentAuditEvent::StepFailed { step, reason: err.to_string() });
+                self.status.transition(UpdateStage::Failed, now_ms, Some(err.to_string()));
                 Err(err)
             }
         }
@@ -374,11 +356,7 @@ impl<E: ApplyEngine> UpdateAgent<E> {
     /// Apply a step with retries
     /// driven by the policy engine.
     /// Returns the final decision.
-    pub fn apply_with_retry(
-        &mut self,
-        step: ApplyStep,
-        now_ms: u64,
-    ) -> Decision {
+    pub fn apply_with_retry(&mut self, step: ApplyStep, now_ms: u64) -> Decision {
         let policy = self.retries.policy_for(&step_task_id(step)).cloned();
         let max = policy.as_ref().map(|p| p.max_attempts).unwrap_or(1);
         let mut last_err: Option<ApplyError> = None;
@@ -392,22 +370,14 @@ impl<E: ApplyEngine> UpdateAgent<E> {
                 }
                 Err(e) => {
                     last_err = Some(e);
-                    let decision = self
-                        .retries
-                        .decide(&step_task_id(step), attempt);
+                    let decision = self.retries.decide(&step_task_id(step), attempt);
                     match decision {
                         Decision::Retry { delay_ms } => {
-                            self.audit.push(AgentAuditEvent::RetryScheduled {
-                                step,
-                                delay_ms,
-                            });
+                            self.audit.push(AgentAuditEvent::RetryScheduled { step, delay_ms });
                             continue;
                         }
-                        Decision::GiveUp
-                        | Decision::CircuitBreak
-                        | Decision::Fallback { .. } => {
-                            self.audit
-                                .push(AgentAuditEvent::StepGaveUp { step });
+                        Decision::GiveUp | Decision::CircuitBreak | Decision::Fallback { .. } => {
+                            self.audit.push(AgentAuditEvent::StepGaveUp { step });
                             return decision;
                         }
                     }
@@ -444,8 +414,7 @@ impl<E: ApplyEngine> UpdateAgent<E> {
                 });
             }
         }
-        self.status
-            .transition(UpdateStage::Done, now_ms, None);
+        self.status.transition(UpdateStage::Done, now_ms, None);
         Ok(())
     }
 
@@ -457,8 +426,7 @@ impl<E: ApplyEngine> UpdateAgent<E> {
         self.audit.push(AgentAuditEvent::RollbackTriggered {
             reason: alloc::format!("step '{}' failed", failed_step.as_str()),
         });
-        self.status
-            .transition(UpdateStage::Failed, now_ms, None);
+        self.status.transition(UpdateStage::Failed, now_ms, None);
         // Apply engine is asked to
         // restore the snapshot. We
         // don't run the engine here
@@ -467,10 +435,8 @@ impl<E: ApplyEngine> UpdateAgent<E> {
         // caller (or the supervisor)
         // drives it. We just mark the
         // status as RolledBack.
-        self.status
-            .transition(UpdateStage::RolledBack, now_ms, None);
-        self.audit
-            .push(AgentAuditEvent::RollbackCompleted);
+        self.status.transition(UpdateStage::RolledBack, now_ms, None);
+        self.audit.push(AgentAuditEvent::RollbackCompleted);
     }
 
     /// Reset the agent to `Idle`
@@ -502,10 +468,7 @@ impl<E: ApplyEngine> UpdateAgent<E> {
                 step_task_id(step),
                 RetryPolicy {
                     max_attempts: 3,
-                    backoff: BackoffStrategy::Exponential {
-                        base_ms: 100,
-                        max_ms: 5_000,
-                    },
+                    backoff: BackoffStrategy::Exponential { base_ms: 100, max_ms: 5_000 },
                     fallbacks: Vec::new(),
                     circuit_breaker_threshold: 0,
                     group: None,
@@ -579,18 +542,12 @@ mod tests {
 
     #[test]
     fn event_kind() {
-        assert_eq!(
-            AgentAuditEvent::RollbackCompleted.kind(),
-            "rollback-completed"
-        );
+        assert_eq!(AgentAuditEvent::RollbackCompleted.kind(), "rollback-completed");
     }
 
     #[test]
     fn apply_error_display() {
-        let e = ApplyError::NonZeroExit {
-            step: ApplyStep::Download,
-            code: -1,
-        };
+        let e = ApplyError::NonZeroExit { step: ApplyStep::Download, code: -1 };
         assert!(e.to_string().contains("download"));
         assert!(e.to_string().contains("-1"));
     }
@@ -637,10 +594,7 @@ mod tests {
         assert_eq!(a.status().stage(), UpdateStage::Done);
         // A successful full apply must NOT
         // have rolled back.
-        assert!(!a
-            .audit()
-            .iter()
-            .any(|e| matches!(e, AgentAuditEvent::RollbackTriggered { .. })));
+        assert!(!a.audit().iter().any(|e| matches!(e, AgentAuditEvent::RollbackTriggered { .. })));
         // And every step must have been
         // attempted.
         for step in [
@@ -676,35 +630,22 @@ mod tests {
             fail_first: core::sync::atomic::AtomicBool,
         }
         impl ApplyEngine for FlakyEngine {
-            fn run(
-                &self,
-                step: ApplyStep,
-                _plan: &UpdatePlan,
-            ) -> Result<(), ApplyError> {
+            fn run(&self, step: ApplyStep, _plan: &UpdatePlan) -> Result<(), ApplyError> {
                 if step == ApplyStep::Download
-                    && self
-                        .fail_first
-                        .swap(false, core::sync::atomic::Ordering::SeqCst)
+                    && self.fail_first.swap(false, core::sync::atomic::Ordering::SeqCst)
                 {
-                    return Err(ApplyError::NonZeroExit {
-                        step,
-                        code: -1,
-                    });
+                    return Err(ApplyError::NonZeroExit { step, code: -1 });
                 }
                 Ok(())
             }
         }
-        let mut a = UpdateAgent::new(FlakyEngine {
-            fail_first: core::sync::atomic::AtomicBool::new(true),
-        });
+        let mut a =
+            UpdateAgent::new(FlakyEngine { fail_first: core::sync::atomic::AtomicBool::new(true) });
         a.install_default_policies();
         a.accept(plan(), 0);
         a.apply(0).unwrap();
         assert_eq!(a.status().stage(), UpdateStage::Done);
-        assert!(a
-            .audit()
-            .iter()
-            .any(|e| matches!(e, AgentAuditEvent::RetryScheduled { .. })));
+        assert!(a.audit().iter().any(|e| matches!(e, AgentAuditEvent::RetryScheduled { .. })));
     }
 
     #[test]
@@ -713,10 +654,7 @@ mod tests {
         a.accept(plan(), 0);
         a.fail_and_rollback(ApplyStep::Download, 0);
         assert_eq!(a.status().stage(), UpdateStage::RolledBack);
-        assert!(a
-            .audit()
-            .iter()
-            .any(|e| matches!(e, AgentAuditEvent::RollbackCompleted)));
+        assert!(a.audit().iter().any(|e| matches!(e, AgentAuditEvent::RollbackCompleted)));
     }
 
     #[test]

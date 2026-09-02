@@ -1,0 +1,62 @@
+# Build artifacts
+target/
+target-linux/
+build/
+dist/
+*.o
+*.a
+*.so
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE & editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Cargo
+Cargo.lock
+.cargo/
+
+# Documentation
+docs/
+*.md
+LICENSE
+CHANGELOG.md
+
+# Test artifacts
+tests/
+*.log
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Cache
+.claude/
+.aider.tags.cache.v4/
+.aider.chat.history.md
+.aider.input.history
+
+# Node modules (if any frontend tools)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Temporary files
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db

@@ -290,12 +290,7 @@ impl Default for SendButton {
 
 impl Component for SendButton {
     fn layout(&self) -> LayoutBox {
-        LayoutBox::new(
-            self.origin.0,
-            self.origin.1,
-            self.width,
-            ButtonSize::Large.height_px(),
-        )
+        LayoutBox::new(self.origin.0, self.origin.1, self.width, ButtonSize::Large.height_px())
     }
 
     fn style(&self) -> ComponentStyle {
@@ -385,7 +380,8 @@ impl CommandBarSurface {
     pub fn tabs_box(&self) -> LayoutBox {
         LayoutBox::new(
             self.panel.origin.0 + Spacing::Md.px(),
-            self.panel.origin.1 + (self.panel.height as i32 - CommandTabs::width_px() as i32 / 8) / 2,
+            self.panel.origin.1
+                + (self.panel.height as i32 - CommandTabs::width_px() as i32 / 8) / 2,
             CommandTabs::width_px(),
             self.panel.height.saturating_sub(Spacing::Md.px_u32() * 2),
         )
@@ -399,7 +395,12 @@ impl CommandBarSurface {
         let send = self.send_box();
         let x = tabs.right() + Spacing::Lg.px();
         let width = (send.x - x - Spacing::Lg.px()).max(0) as u32;
-        LayoutBox::new(x, self.panel.origin.1 + Spacing::Md.px(), width, PromptField::default_height_px())
+        LayoutBox::new(
+            x,
+            self.panel.origin.1 + Spacing::Md.px(),
+            width,
+            PromptField::default_height_px(),
+        )
     }
 
     /// The send button's `LayoutBox`. Anchored to the
@@ -407,7 +408,9 @@ impl CommandBarSurface {
     #[must_use]
     pub fn send_box(&self) -> LayoutBox {
         let right_pad = Spacing::Md.px();
-        let x = self.panel.origin.0 + self.panel.width as i32 - SendButton::default_width_px() as i32 - right_pad;
+        let x = self.panel.origin.0 + self.panel.width as i32
+            - SendButton::default_width_px() as i32
+            - right_pad;
         LayoutBox::new(
             x,
             self.panel.origin.1 + Spacing::Md.px(),
@@ -515,10 +518,7 @@ mod tests {
     fn prompt_focused_uses_lavender_border() {
         let p = PromptField::new("Ask Aether");
         let s = p.style();
-        assert_eq!(
-            s.border,
-            Color::role(aether_design_tokens::Role::AccentLavenderStrong)
-        );
+        assert_eq!(s.border, Color::role(aether_design_tokens::Role::AccentLavenderStrong));
     }
 
     #[test]
@@ -555,9 +555,7 @@ mod tests {
 
     #[test]
     fn surface_layout_lays_three_regions() {
-        let b = CommandBarSurface::new(CommandMode::Ai)
-            .at(0, 0)
-            .with_size(800, 56);
+        let b = CommandBarSurface::new(CommandMode::Ai).at(0, 0).with_size(800, 56);
         let tabs = b.tabs_box();
         let prompt = b.prompt_box();
         let send = b.send_box();

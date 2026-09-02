@@ -298,10 +298,7 @@ where
                     let text = result.text.clone();
                     let conf = result.confidence;
                     self.pending_transcript = Some(result.clone());
-                    self.log.push(VoiceEvent::Transcript {
-                        text: text.clone(),
-                        confidence: conf,
-                    });
+                    self.log.push(VoiceEvent::Transcript { text: text.clone(), confidence: conf });
                     let reply = self.agent.reply(&text);
                     self.pending_reply = Some(reply.clone());
                     self.log.push(VoiceEvent::Reply { text: reply });
@@ -321,8 +318,7 @@ where
             }
             VoiceSessionState::Thinking => {
                 if let Some(reply) = self.pending_reply.clone() {
-                    self.tts
-                        .enqueue(SpeakRequest::new(reply, self.voice.clone()));
+                    self.tts.enqueue(SpeakRequest::new(reply, self.voice.clone()));
                     self.transition(VoiceSessionState::Speaking);
                 }
             }
@@ -388,10 +384,7 @@ impl VoiceLog {
     /// The number of state transitions.
     #[must_use]
     pub fn transitions(&self) -> usize {
-        self.events
-            .iter()
-            .filter(|e| matches!(e, VoiceEvent::StateChange { .. }))
-            .count()
+        self.events.iter().filter(|e| matches!(e, VoiceEvent::StateChange { .. })).count()
     }
 }
 
@@ -420,10 +413,7 @@ mod tests {
 
     fn loud() -> AudioBuffer {
         let samples: Vec<i16> = (0..1600).map(|i| ((i * 200) % 30000) as i16).collect();
-        AudioBuffer {
-            sample_rate_hz: 16000,
-            samples,
-        }
+        AudioBuffer { sample_rate_hz: 16000, samples }
     }
 
     #[test]
@@ -513,9 +503,7 @@ mod tests {
     fn voice_log_collects_events() {
         let mut log = VoiceLog::new();
         log.push(VoiceEvent::Stopped);
-        log.push(VoiceEvent::Reply {
-            text: String::from("hi"),
-        });
+        log.push(VoiceEvent::Reply { text: String::from("hi") });
         assert_eq!(log.events().len(), 2);
         assert_eq!(log.transitions(), 0);
     }

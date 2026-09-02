@@ -59,6 +59,7 @@ dependencies = [
 name = "aether-agent-runtime"
 version = "0.1.0"
 dependencies = [
+ "aether-agent-core",
  "aether-core",
  "aether-sdk",
  "serde",
@@ -203,6 +204,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-device-runtime"
+version = "0.1.0"
+dependencies = [
+ "aether-agent-core",
+ "aether-device-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aether-diagnostics"
 version = "0.1.0"
 dependencies = [
@@ -213,7 +224,44 @@ dependencies = [
 name = "aether-graphical-shell"
 version = "0.1.0"
 dependencies = [
+ "aether-a11y",
+ "aether-animation",
+ "aether-design-tokens",
+ "aether-renderer",
+ "aether-ui-components",
  "aether-wm",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "aether-graphics-backend"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "aether-hal"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "aether-hal-mock"
+version = "0.1.0"
+dependencies = [
+ "aether-hal",
+ "serde",
+]
+
+[[package]]
+name = "aether-hardware-profiles"
+version = "0.1.0"
+dependencies = [
+ "aether-hal",
  "serde",
  "serde_json",
 ]
@@ -241,6 +289,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "aether-installer"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -302,6 +357,14 @@ version = "0.1.0"
 dependencies = [
  "aether-agent-core",
  "aether-diagnostics",
+]
+
+[[package]]
+name = "aether-renderer"
+version = "0.1.0"
+dependencies = [
+ "aether-design-tokens",
+ "aether-ui-components",
 ]
 
 [[package]]
@@ -423,6 +486,7 @@ name = "aether-system-core"
 version = "0.1.0"
 dependencies = [
  "aether-agent-core",
+ "aether-agent-runtime",
  "aether-application-manager",
  "aether-core",
  "aether-device-core",
@@ -434,6 +498,22 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "aether-telemetry"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "aether-transport"
+version = "0.1.0"
+dependencies = [
+ "aether-device-core",
+ "serde",
 ]
 
 [[package]]

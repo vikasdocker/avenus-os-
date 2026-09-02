@@ -133,7 +133,52 @@ fn run() -> Result<(), String> {
     );
 
     nlog("registered ok");
-    let mut region = Region::open(rect)?;
+    let mut region = match Region::open(rect) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[notes][WARN] no framebuffer ({e}); running headless");
+            let lines_state = Arc::new(Mutex::new(vec![String::new()]));
+            let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            {
+                let lines_state = Arc::clone(&lines_state);
+                let closed = Arc::clone(&closed);
+                std::thread::spawn(move || loop {
+                    match surface.poll() {
+                        Some(SurfaceEvent::CloseRequested) | None => {
+                            closed.store(true, std::sync::atomic::Ordering::SeqCst);
+                            break;
+                        }
+                        Some(SurfaceEvent::Key(c)) => {
+                            let mut lines = lines_state.lock().unwrap_or_else(|p| p.into_inner());
+                            if lines.last().is_some_and(|l| l.chars().count() > 30) {
+                                lines.push(String::new());
+                            }
+                            if let Some(last) = lines.last_mut() {
+                                last.push(c);
+                            }
+                        }
+                        Some(SurfaceEvent::Backspace) => {
+                            if let Some(last) =
+                                lines_state.lock().unwrap_or_else(|p| p.into_inner()).last_mut()
+                            {
+                                last.pop();
+                            }
+                        }
+                        Some(SurfaceEvent::Enter) => {
+                            lines_state
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .push(String::new());
+                        }
+                    }
+                });
+            }
+            while !closed.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            return Ok(());
+        }
+    };
     nlog("region opened");
     let lines_state = Arc::new(Mutex::new(vec![String::new()]));
     let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));

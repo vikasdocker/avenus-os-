@@ -318,11 +318,7 @@ impl ActionQueue {
 /// `last_fired` map) after it has surfaced the
 /// actions.
 #[must_use]
-pub fn tick(
-    state: &mut BackgroundState,
-    events: &[AgentEvent],
-    now_ms: u64,
-) -> ActionQueue {
+pub fn tick(state: &mut BackgroundState, events: &[AgentEvent], now_ms: u64) -> ActionQueue {
     let mut queue = ActionQueue::new();
 
     for event in events {
@@ -546,7 +542,11 @@ fn recovery_payload(action: &RecoveryAction) -> (TaskKind, serde_json::Value) {
 /// caller supplies the `task_id` (the runner's
 /// UUIDv7 base) and the wall-clock timestamp.
 #[must_use]
-pub fn action_to_task(item: &ActionItem, task_id: &TaskId, _timestamp_ms: u64) -> Option<AgentTask> {
+pub fn action_to_task(
+    item: &ActionItem,
+    task_id: &TaskId,
+    _timestamp_ms: u64,
+) -> Option<AgentTask> {
     let mut task = AgentTask::new(
         task_id.as_str().to_string(),
         item.task_kind,
@@ -587,9 +587,9 @@ pub use aether_diagnostics::default_rules as default_diagnostic_rules;
 #[allow(unused_imports)]
 use FailurePolicy as _;
 #[allow(unused_imports)]
-use WorkflowStep as _;
-#[allow(unused_imports)]
 use StepAction as _;
+#[allow(unused_imports)]
+use WorkflowStep as _;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -725,11 +725,7 @@ mod tests {
     #[test]
     fn tick_ingests_signals() {
         let mut s = make_state();
-        let q = tick(
-            &mut s,
-            &[AgentEvent::SignalUpdate(high_cpu_signal(0.9))],
-            1000,
-        );
+        let q = tick(&mut s, &[AgentEvent::SignalUpdate(high_cpu_signal(0.9))], 1000);
         let _ = q;
         // After ingesting a high-CPU signal, the
         // diagnostics rule should fire.
@@ -739,11 +735,7 @@ mod tests {
     #[test]
     fn tick_plans_recovery_for_cpu_overload() {
         let mut s = make_state();
-        let q = tick(
-            &mut s,
-            &[AgentEvent::SignalUpdate(high_cpu_signal(0.9))],
-            1000,
-        );
+        let q = tick(&mut s, &[AgentEvent::SignalUpdate(high_cpu_signal(0.9))], 1000);
         let titles: Vec<String> = q.items.iter().map(|i| i.title.clone()).collect();
         // cpu_overload -> InformUser action.
         assert!(titles.iter().any(|t| t.contains("CPU")));
@@ -752,11 +744,7 @@ mod tests {
     #[test]
     fn tick_plans_recovery_for_memory_pressure() {
         let mut s = make_state();
-        let q = tick(
-            &mut s,
-            &[AgentEvent::SignalUpdate(high_mem_signal(0.9))],
-            1000,
-        );
+        let q = tick(&mut s, &[AgentEvent::SignalUpdate(high_mem_signal(0.9))], 1000);
         let titles: Vec<String> = q.items.iter().map(|i| i.title.clone()).collect();
         // memory_pressure -> DropPageCache.
         assert!(titles.iter().any(|t| t.contains("Drop page cache")));
@@ -766,10 +754,8 @@ mod tests {
 
     #[test]
     fn kill_process_action_requires_consent() {
-        let plan = RecoveryPlan::new("x").with_action(RecoveryAction::KillProcess {
-            pid: 1234,
-            reason: "runaway".into(),
-        });
+        let plan = RecoveryPlan::new("x")
+            .with_action(RecoveryAction::KillProcess { pid: 1234, reason: "runaway".into() });
         let q = plan_recovery_actions(&[plan], 0);
         assert_eq!(q.len(), 1);
         assert!(q.items[0].requires_consent);
@@ -779,11 +765,7 @@ mod tests {
     #[test]
     fn time_tick_fires_morning_setup() {
         let mut s = make_state();
-        let q = tick(
-            &mut s,
-            &[AgentEvent::TimeTick { hour: 9, minute: 0 }],
-            1000,
-        );
+        let q = tick(&mut s, &[AgentEvent::TimeTick { hour: 9, minute: 0 }], 1000);
         let titles: Vec<String> = q.items.iter().map(|i| i.title.clone()).collect();
         // morning_setup has 3 steps.
         assert_eq!(titles.len(), 3);
@@ -793,16 +775,8 @@ mod tests {
     #[test]
     fn time_tick_does_not_fire_twice_in_same_minute() {
         let mut s = make_state();
-        let q1 = tick(
-            &mut s,
-            &[AgentEvent::TimeTick { hour: 9, minute: 0 }],
-            1000,
-        );
-        let q2 = tick(
-            &mut s,
-            &[AgentEvent::TimeTick { hour: 9, minute: 0 }],
-            30_000,
-        );
+        let q1 = tick(&mut s, &[AgentEvent::TimeTick { hour: 9, minute: 0 }], 1000);
+        let q2 = tick(&mut s, &[AgentEvent::TimeTick { hour: 9, minute: 0 }], 30_000);
         assert!(!q1.is_empty());
         assert!(q2.is_empty());
     }
@@ -810,27 +784,15 @@ mod tests {
     #[test]
     fn time_tick_refires_after_a_minute() {
         let mut s = make_state();
-        let _ = tick(
-            &mut s,
-            &[AgentEvent::TimeTick { hour: 9, minute: 0 }],
-            1000,
-        );
-        let q = tick(
-            &mut s,
-            &[AgentEvent::TimeTick { hour: 9, minute: 0 }],
-            70_000,
-        );
+        let _ = tick(&mut s, &[AgentEvent::TimeTick { hour: 9, minute: 0 }], 1000);
+        let q = tick(&mut s, &[AgentEvent::TimeTick { hour: 9, minute: 0 }], 70_000);
         assert!(!q.is_empty());
     }
 
     #[test]
     fn time_tick_does_not_fire_at_other_hours() {
         let mut s = make_state();
-        let q = tick(
-            &mut s,
-            &[AgentEvent::TimeTick { hour: 14, minute: 30 }],
-            1000,
-        );
+        let q = tick(&mut s, &[AgentEvent::TimeTick { hour: 14, minute: 30 }], 1000);
         // No workflow at 14:30 in the default
         // registry, and no signal-induced
         // symptoms.
@@ -843,11 +805,8 @@ mod tests {
         let id = WorkflowId::new("before_meeting").unwrap();
         let q = tick(&mut s, &[AgentEvent::WorkflowTrigger(id)], 1000);
         assert!(!q.is_empty());
-        let reasons: BTreeSet<String> = q
-            .items
-            .iter()
-            .filter_map(|i| i.workflow_id().map(|s| s.to_string()))
-            .collect();
+        let reasons: BTreeSet<String> =
+            q.items.iter().filter_map(|i| i.workflow_id().map(|s| s.to_string())).collect();
         assert!(reasons.contains("before_meeting"));
     }
 
@@ -902,9 +861,7 @@ mod tests {
 
     #[test]
     fn recovery_payload_inform_user() {
-        let a = RecoveryAction::InformUser {
-            explanation: Explanation::new("c", "cause", "fix"),
-        };
+        let a = RecoveryAction::InformUser { explanation: Explanation::new("c", "cause", "fix") };
         let (kind, payload) = recovery_payload(&a);
         assert_eq!(kind, TaskKind::Notify);
         assert_eq!(payload["cause"], "cause");
@@ -941,10 +898,7 @@ mod tests {
         let id = WorkflowId::new("before_meeting").unwrap();
         let q = tick(
             &mut s,
-            &[
-                AgentEvent::SignalUpdate(high_mem_signal(0.9)),
-                AgentEvent::WorkflowTrigger(id),
-            ],
+            &[AgentEvent::SignalUpdate(high_mem_signal(0.9)), AgentEvent::WorkflowTrigger(id)],
             1000,
         );
         // memory_pressure -> DropPageCache +
@@ -987,11 +941,7 @@ mod tests {
         // second tick (no new signals) should
         // not re-plan it.
         let mut s = make_state();
-        let q1 = tick(
-            &mut s,
-            &[AgentEvent::SignalUpdate(high_cpu_signal(0.9))],
-            1000,
-        );
+        let q1 = tick(&mut s, &[AgentEvent::SignalUpdate(high_cpu_signal(0.9))], 1000);
         let q2 = tick(&mut s, &[], 2000);
         assert!(!q1.is_empty());
         assert!(q2.is_empty());
@@ -1021,7 +971,10 @@ mod more_tests {
 
     #[test]
     fn recovery_payload_restart_service() {
-        let a = RecoveryAction::RestartService { service: "aether-supervisor".into(), reason: "x".into() };
+        let a = RecoveryAction::RestartService {
+            service: "aether-supervisor".into(),
+            reason: "x".into(),
+        };
         let (kind, payload) = recovery_payload(&a);
         assert_eq!(kind, TaskKind::RestartService);
         assert_eq!(payload["service"], "aether-supervisor");
@@ -1045,7 +998,8 @@ mod more_tests {
 
     #[test]
     fn recovery_payload_resolve_dependency() {
-        let a = RecoveryAction::ResolveDependency { dependency: "libssl3".into(), reason: "x".into() };
+        let a =
+            RecoveryAction::ResolveDependency { dependency: "libssl3".into(), reason: "x".into() };
         let (kind, payload) = recovery_payload(&a);
         assert_eq!(kind, TaskKind::Custom);
         assert_eq!(payload["dependency"], "libssl3");
@@ -1103,19 +1057,9 @@ mod more_tests {
         // 2 high-CPU signals should not change
         // the symptom set (idempotent).
         let _ = tick(&mut s, &[AgentEvent::SignalUpdate(high_cpu_signal(0.9))], 1);
-        let before_count = s
-            .report
-            .symptoms
-            .iter()
-            .filter(|x| x.id == "cpu_overload")
-            .count();
+        let before_count = s.report.symptoms.iter().filter(|x| x.id == "cpu_overload").count();
         let _ = tick(&mut s, &[AgentEvent::SignalUpdate(high_cpu_signal(0.95))], 2);
-        let after_count = s
-            .report
-            .symptoms
-            .iter()
-            .filter(|x| x.id == "cpu_overload")
-            .count();
+        let after_count = s.report.symptoms.iter().filter(|x| x.id == "cpu_overload").count();
         assert_eq!(before_count, after_count);
     }
 

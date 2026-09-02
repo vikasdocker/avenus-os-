@@ -65,8 +65,6 @@ fn show_banner() {
 
 #[cfg(target_os = "linux")]
 fn early_mounts() {
-    // Each entry: (fstype, source, target) — sources are conventional
-    // pseudo-device names required by busybox/util-linux mount.
     let mounts: &[(&str, &str, &str)] = &[
         ("proc", "proc", "/proc"),
         ("sysfs", "sysfs", "/sys"),
@@ -165,7 +163,7 @@ fn net_up() {}
 /// Failures are silent: the guest simply keeps the legacy console.
 #[cfg(target_os = "linux")]
 fn gpu_drivers() {
-    for module in ["virtio_gpu", "bochs_drm"] {
+    for module in ["virtio_gpu", "bochs"] {
         match Command::new("modprobe").arg(module).status() {
             Ok(s) if s.success() => log("early-mounts", &format!("{module} loaded")),
             _ => {}

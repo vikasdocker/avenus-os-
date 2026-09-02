@@ -361,6 +361,17 @@ fn all_tool_definitions() -> Vec<ToolDefinition> {
             5_000,
             false,
         ),
+        tool(
+            "service.restart",
+            "Restart an Aether service unit.",
+            "service.restart",
+            serde_json::json!({"required": ["service_id"]}),
+            Medium,
+            "service.restart",
+            &["service.restart"],
+            30_000,
+            true,
+        ),
         // ---- Storage ----
         tool(
             "storage.status",
@@ -572,6 +583,7 @@ fn all_action_names() -> Vec<&'static str> {
         "system.info",
         "system.resources",
         "system.uptime",
+        "service.restart",
         "storage.status",
         "context.get",
         "display.list",
@@ -602,10 +614,7 @@ pub fn register_all_tools() -> ToolRegistry {
         // it as a panic via a debug_assert (no expect/unwrap
         // allowed in this crate's lint policy).
         let result = reg.register(t);
-        debug_assert!(
-            result.is_ok(),
-            "tools.rs: duplicate tool id (sync bug): {result:?}",
-        );
+        debug_assert!(result.is_ok(), "tools.rs: duplicate tool id (sync bug): {result:?}",);
     }
     reg
 }
@@ -613,10 +622,7 @@ pub fn register_all_tools() -> ToolRegistry {
 /// Convenience: look up the IPC command for a tool. Returns
 /// `(service, command)` if the tool has a routing hint in its
 /// output schema.
-pub fn routing_for(
-    registry: &ToolRegistry,
-    id: &crate::tool::ToolId,
-) -> Option<(String, String)> {
+pub fn routing_for(registry: &ToolRegistry, id: &crate::tool::ToolId) -> Option<(String, String)> {
     let tool = registry.get(id)?;
     let out = &tool.output_schema;
     let service = out.get("service")?.as_str()?.to_string();
@@ -692,16 +698,15 @@ mod tests {
         // Action for each variant and reading action_name().
         let _reg = register_all_tools();
         let names = all_action_names();
-    #[allow(unused_imports)]
-    use crate::action::ActionVariant;
+        #[allow(unused_imports)]
+        use crate::action::ActionVariant;
         let mut registry = register_all_tools();
         // The duplicate-register check in `register_all_tools`
         // would already have panicked if there were dups, but
         // re-assert here for explicit safety.
         for tool in all_tool_definitions() {
             assert!(
-                registry.register(tool.clone()).is_ok()
-                    || registry.get(&tool.id).is_some(),
+                registry.register(tool.clone()).is_ok() || registry.get(&tool.id).is_some(),
                 "duplicate tool id {}",
                 tool.id
             );
@@ -785,11 +790,7 @@ mod tests {
         // the behavioural version that goes through
         // action.action_name() with a real Action.
         let reg = register_all_tools();
-        let a = Action::new(
-            "s1",
-            ActionVariant::SystemStatus,
-            "check",
-        );
+        let a = Action::new("s1", ActionVariant::SystemStatus, "check");
         assert!(reg.get(&ToolId::new(a.action_name())).is_some());
     }
 
@@ -802,8 +803,7 @@ mod tests {
                     for f in fields {
                         let name = f.as_str().unwrap_or_default();
                         assert!(
-                            !["root", "admin", "allow", "skip_policy", "trusted"]
-                                .contains(&name),
+                            !["root", "admin", "allow", "skip_policy", "trusted"].contains(&name),
                             "tool {} declares privileged field '{}' in schema",
                             tool.id,
                             name,

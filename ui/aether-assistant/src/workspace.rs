@@ -18,9 +18,7 @@
 //!   a step is `Working`).
 
 use aether_design_tokens::{AiVisualState, Spacing};
-use aether_ui_components::{
-    Component, ComponentStyle, Insets, LayoutBox, Panel, PanelSide,
-};
+use aether_ui_components::{Component, ComponentStyle, Insets, LayoutBox, Panel, PanelSide};
 
 use crate::plan::{PlanStep, WorkspacePlan};
 
@@ -179,12 +177,7 @@ impl WorkspaceView {
     /// 96 px tall.
     #[must_use]
     pub fn header_box(&self) -> LayoutBox {
-        LayoutBox::new(
-            self.panel.origin.0,
-            self.panel.origin.1,
-            self.panel.width,
-            96,
-        )
+        LayoutBox::new(self.panel.origin.0, self.panel.origin.1, self.panel.width, 96)
     }
 
     /// The timeline region: the area between the
@@ -281,9 +274,7 @@ mod tests {
     #[test]
     fn state_select_prev_wraps() {
         let s = WorkspaceViewState::new()
-            .with_plan(
-                WorkspacePlan::new("p").with_step(PlanStep::new(PlanStepKind::File, "a")),
-            )
+            .with_plan(WorkspacePlan::new("p").with_step(PlanStep::new(PlanStepKind::File, "a")))
             .with_selected(Some(0));
         let s2 = s.select_prev();
         assert_eq!(s2.selected, Some(0));

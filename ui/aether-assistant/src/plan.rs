@@ -219,9 +219,10 @@ impl WorkspacePlan {
     #[must_use]
     pub fn is_complete(&self) -> bool {
         !self.steps.is_empty()
-            && self.steps.iter().all(|s| {
-                matches!(s.state, PlanStepState::Done | PlanStepState::Skipped)
-            })
+            && self
+                .steps
+                .iter()
+                .all(|s| matches!(s.state, PlanStepState::Done | PlanStepState::Skipped))
     }
 
     /// The index of the currently running step, if
@@ -270,10 +271,7 @@ mod tests {
 
     #[test]
     fn visual_uses_running_substate() {
-        assert_eq!(
-            PlanStepState::Running(AiVisualState::Working).visual(),
-            AiVisualState::Working
-        );
+        assert_eq!(PlanStepState::Running(AiVisualState::Working).visual(), AiVisualState::Working);
     }
 
     #[test]

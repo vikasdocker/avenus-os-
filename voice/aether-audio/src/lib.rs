@@ -289,12 +289,7 @@ impl InMemorySink {
     /// A new sink.
     #[must_use]
     pub fn new(device: AudioDeviceId, role: AudioRole) -> Self {
-        Self {
-            device,
-            role,
-            last: None,
-            delivered: 0,
-        }
+        Self { device, role, last: None, delivered: 0 }
     }
 
     /// The most recently delivered
@@ -323,9 +318,7 @@ impl AudioBufferSink for InMemorySink {
 
     fn write(&mut self, buffer: &AudioBuffer) -> Result<(), AudioError> {
         if buffer.sample_rate_hz == 0 {
-            return Err(AudioError::SinkRejected {
-                reason: String::from("sample rate is zero"),
-            });
+            return Err(AudioError::SinkRejected { reason: String::from("sample rate is zero") });
         }
         self.last = Some(buffer.clone());
         self.delivered = self.delivered.saturating_add(1);
@@ -349,12 +342,7 @@ impl AudioService {
     /// policy.
     #[must_use]
     pub fn new(policy: AudioPolicy) -> Self {
-        Self {
-            policy,
-            devices: BTreeMap::new(),
-            routes: BTreeMap::new(),
-            log: Vec::new(),
-        }
+        Self { policy, devices: BTreeMap::new(), routes: BTreeMap::new(), log: Vec::new() }
     }
 
     /// The policy.
@@ -381,20 +369,14 @@ impl AudioService {
         let role = sink.role();
         let device = sink.device().clone();
         self.devices.insert((role, device.clone()), sink);
-        self.log.push(AudioEvent::DeviceRegistered {
-            role,
-            device: device.clone(),
-        });
+        self.log.push(AudioEvent::DeviceRegistered { role, device: device.clone() });
     }
 
     /// Unregister a sink.
     pub fn unregister(&mut self, role: AudioRole, device: &AudioDeviceId) -> bool {
         let removed = self.devices.remove(&(role, device.clone())).is_some();
         if removed {
-            self.log.push(AudioEvent::DeviceUnregistered {
-                role,
-                device: device.clone(),
-            });
+            self.log.push(AudioEvent::DeviceUnregistered { role, device: device.clone() });
             if self.routes.get(&role) == Some(device) {
                 self.routes.remove(&role);
             }
@@ -443,10 +425,7 @@ impl AudioService {
             self.log.push(AudioEvent::RoutingRejected {
                 role,
                 device: device.clone(),
-                reason: alloc::format!(
-                    "role '{}' has no slots (max {limit})",
-                    role.as_str()
-                ),
+                reason: alloc::format!("role '{}' has no slots (max {limit})", role.as_str()),
             });
             return Err(AudioError::RoleExhausted { role, max: limit });
         }
@@ -457,15 +436,8 @@ impl AudioService {
             // activated.
         }
         self.routes.insert(role, device.clone());
-        let route = AudioRoute {
-            role,
-            device: device.clone(),
-            established_at_ms: now_ms,
-        };
-        self.log.push(AudioEvent::RouteActivated {
-            role,
-            device: device.clone(),
-        });
+        let route = AudioRoute { role, device: device.clone(), established_at_ms: now_ms };
+        self.log.push(AudioEvent::RouteActivated { role, device: device.clone() });
         Ok(route)
     }
 
@@ -497,11 +469,7 @@ impl AudioService {
                 Ok(())
             }
             Err(e) => {
-                self.log.push(AudioEvent::RoutingRejected {
-                    role,
-                    device,
-                    reason: e.to_string(),
-                });
+                self.log.push(AudioEvent::RoutingRejected { role, device, reason: e.to_string() });
                 Err(e)
             }
         }
@@ -537,10 +505,7 @@ mod tests {
 
     fn loud_buffer(rate: u32) -> AudioBuffer {
         let samples: Vec<i16> = (0..rate as usize / 10).map(|i| (i % 1000) as i16).collect();
-        AudioBuffer {
-            sample_rate_hz: rate,
-            samples,
-        }
+        AudioBuffer { sample_rate_hz: rate, samples }
     }
 
     #[test]
@@ -655,9 +620,7 @@ mod tests {
         let mut s = AudioService::new(AudioPolicy::default_policy());
         s.register(Box::new(sink_for("s1", AudioRole::Playback)));
         s.register(Box::new(sink_for("s2", AudioRole::Playback)));
-        let r = s
-            .auto_switch_playback(&AudioDeviceId::new("s2"), 100)
-            .unwrap();
+        let r = s.auto_switch_playback(&AudioDeviceId::new("s2"), 100).unwrap();
         assert!(r.is_some());
         assert_eq!(s.route_for(AudioRole::Playback).unwrap().as_str(), "s2");
     }
@@ -668,18 +631,14 @@ mod tests {
         p.auto_switch_playback = false;
         let mut s = AudioService::new(p);
         s.register(Box::new(sink_for("s1", AudioRole::Playback)));
-        let r = s
-            .auto_switch_playback(&AudioDeviceId::new("s1"), 100)
-            .unwrap();
+        let r = s.auto_switch_playback(&AudioDeviceId::new("s1"), 100).unwrap();
         assert!(r.is_none());
     }
 
     #[test]
     fn service_auto_switch_unknown_device() {
         let mut s = AudioService::new(AudioPolicy::default_policy());
-        let r = s
-            .auto_switch_playback(&AudioDeviceId::new("ghost"), 100)
-            .unwrap();
+        let r = s.auto_switch_playback(&AudioDeviceId::new("ghost"), 100).unwrap();
         assert!(r.is_none());
     }
 
@@ -716,10 +675,7 @@ mod tests {
 
     #[test]
     fn audio_error_display() {
-        let e = AudioError::RoleExhausted {
-            role: AudioRole::Capture,
-            max: 1,
-        };
+        let e = AudioError::RoleExhausted { role: AudioRole::Capture, max: 1 };
         assert!(e.to_string().contains("capture"));
         assert!(e.to_string().contains("1"));
     }

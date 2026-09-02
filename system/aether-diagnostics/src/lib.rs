@@ -306,9 +306,7 @@ impl SymptomRule {
     pub fn matches(&self, signals: &[Signal]) -> Option<Symptom> {
         match self {
             Self::AboveThreshold { subsystem, tag, threshold, symptom_id, severity } => {
-                let s = signals
-                    .iter()
-                    .find(|s| s.subsystem == *subsystem && s.tag == *tag)?;
+                let s = signals.iter().find(|s| s.subsystem == *subsystem && s.tag == *tag)?;
                 if s.value >= *threshold {
                     Some(Symptom::new(
                         symptom_id.clone(),
@@ -323,9 +321,7 @@ impl SymptomRule {
             Self::AnyAlarming { tags, symptom_id, severity } => {
                 let matching: Vec<String> = tags
                     .iter()
-                    .filter(|t| {
-                        signals.iter().any(|s| &s.tag == *t && s.is_alarming())
-                    })
+                    .filter(|t| signals.iter().any(|s| &s.tag == *t && s.is_alarming()))
                     .cloned()
                     .collect();
                 if matching.is_empty() {
@@ -337,12 +333,7 @@ impl SymptomRule {
                         .iter()
                         .find(|s| matching.contains(&s.tag))
                         .map_or(Subsystem::Other, |s| s.subsystem);
-                    Some(Symptom::new(
-                        symptom_id.clone(),
-                        sub,
-                        *severity,
-                        matching,
-                    ))
+                    Some(Symptom::new(symptom_id.clone(), sub, *severity, matching))
                 }
             }
         }
@@ -363,7 +354,12 @@ pub fn default_rules() -> RulesTable {
                 symptom_id: "cpu_overload".into(),
                 severity: ObservationSeverity::Warning,
             },
-            Symptom::new("cpu_overload", Subsystem::Cpu, ObservationSeverity::Warning, alloc::vec!["cpu.load".into()]),
+            Symptom::new(
+                "cpu_overload",
+                Subsystem::Cpu,
+                ObservationSeverity::Warning,
+                alloc::vec!["cpu.load".into()],
+            ),
         )
         // Memory pressure
         .with_rule(
@@ -374,7 +370,12 @@ pub fn default_rules() -> RulesTable {
                 symptom_id: "memory_pressure".into(),
                 severity: ObservationSeverity::Critical,
             },
-            Symptom::new("memory_pressure", Subsystem::Memory, ObservationSeverity::Critical, alloc::vec!["memory.pressure".into()]),
+            Symptom::new(
+                "memory_pressure",
+                Subsystem::Memory,
+                ObservationSeverity::Critical,
+                alloc::vec!["memory.pressure".into()],
+            ),
         )
         // Disk nearly full
         .with_rule(
@@ -385,7 +386,12 @@ pub fn default_rules() -> RulesTable {
                 symptom_id: "disk_full".into(),
                 severity: ObservationSeverity::Critical,
             },
-            Symptom::new("disk_full", Subsystem::Disk, ObservationSeverity::Critical, alloc::vec!["disk.used_ratio".into()]),
+            Symptom::new(
+                "disk_full",
+                Subsystem::Disk,
+                ObservationSeverity::Critical,
+                alloc::vec!["disk.used_ratio".into()],
+            ),
         )
         // Service down
         .with_rule(
@@ -396,7 +402,12 @@ pub fn default_rules() -> RulesTable {
                 symptom_id: "service_down".into(),
                 severity: ObservationSeverity::Critical,
             },
-            Symptom::new("service_down", Subsystem::Service, ObservationSeverity::Critical, alloc::vec!["service.down".into()]),
+            Symptom::new(
+                "service_down",
+                Subsystem::Service,
+                ObservationSeverity::Critical,
+                alloc::vec!["service.down".into()],
+            ),
         )
         // App crash loop: 3+ crashes in 5 min
         .with_rule(
@@ -407,7 +418,12 @@ pub fn default_rules() -> RulesTable {
                 symptom_id: "app_crash_loop".into(),
                 severity: ObservationSeverity::Warning,
             },
-            Symptom::new("app_crash_loop", Subsystem::App, ObservationSeverity::Warning, alloc::vec!["app.crash_rate".into()]),
+            Symptom::new(
+                "app_crash_loop",
+                Subsystem::App,
+                ObservationSeverity::Warning,
+                alloc::vec!["app.crash_rate".into()],
+            ),
         )
         // Correlated: high CPU + OOM + crash
         .with_rule(
@@ -416,30 +432,55 @@ pub fn default_rules() -> RulesTable {
                 symptom_id: "system_unstable".into(),
                 severity: ObservationSeverity::Critical,
             },
-            Symptom::new("system_unstable", Subsystem::Other, ObservationSeverity::Critical, Vec::new()),
+            Symptom::new(
+                "system_unstable",
+                Subsystem::Other,
+                ObservationSeverity::Critical,
+                Vec::new(),
+            ),
         )
         // Default explanations
         .with_explanation(
-            Explanation::new("cpu_overload", "A process is using the CPU heavily.", "Open the taskbar's CPU chip to see the top process.")
-                .self_healing(),
+            Explanation::new(
+                "cpu_overload",
+                "A process is using the CPU heavily.",
+                "Open the taskbar's CPU chip to see the top process.",
+            )
+            .self_healing(),
         )
         .with_explanation(
-            Explanation::new("memory_pressure", "Memory is nearly full.", "Close a few large apps, or restart the most memory-hungry one.")
-                .self_healing(),
+            Explanation::new(
+                "memory_pressure",
+                "Memory is nearly full.",
+                "Close a few large apps, or restart the most memory-hungry one.",
+            )
+            .self_healing(),
         )
+        .with_explanation(Explanation::new(
+            "disk_full",
+            "The disk is almost full.",
+            "Run the disk cleanup, or archive old files.",
+        ))
         .with_explanation(
-            Explanation::new("disk_full", "The disk is almost full.", "Run the disk cleanup, or archive old files."),
+            Explanation::new(
+                "service_down",
+                "A required system service is not running.",
+                "Restart the service.",
+            )
+            .self_healing(),
         )
+        .with_explanation(Explanation::new(
+            "app_crash_loop",
+            "An application is repeatedly crashing.",
+            "Open the app to see the crash report, or uninstall it.",
+        ))
         .with_explanation(
-            Explanation::new("service_down", "A required system service is not running.", "Restart the service.")
-                .self_healing(),
-        )
-        .with_explanation(
-            Explanation::new("app_crash_loop", "An application is repeatedly crashing.", "Open the app to see the crash report, or uninstall it."),
-        )
-        .with_explanation(
-            Explanation::new("system_unstable", "Multiple subsystems are alarming at once.", "The system is in an unstable state. Consider restarting.")
-                .self_healing(),
+            Explanation::new(
+                "system_unstable",
+                "Multiple subsystems are alarming at once.",
+                "The system is in an unstable state. Consider restarting.",
+            )
+            .self_healing(),
         )
 }
 

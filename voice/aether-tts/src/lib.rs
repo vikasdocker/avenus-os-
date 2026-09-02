@@ -53,17 +53,8 @@ pub struct Voice {
 impl Voice {
     /// A new voice.
     #[must_use]
-    pub fn new(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        locale: impl Into<String>,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            name: name.into(),
-            locale: locale.into(),
-            description: String::new(),
-        }
+    pub fn new(id: impl Into<String>, name: impl Into<String>, locale: impl Into<String>) -> Self {
+        Self { id: id.into(), name: name.into(), locale: locale.into(), description: String::new() }
     }
 
     /// A description.
@@ -95,12 +86,7 @@ impl SpeechStyle {
     /// The default style.
     #[must_use]
     pub const fn default_style() -> Self {
-        Self {
-            rate: 1.0,
-            pitch_semitones: 0,
-            volume_db: 0,
-            emphasis: 0,
-        }
+        Self { rate: 1.0, pitch_semitones: 0, volume_db: 0, emphasis: 0 }
     }
 
     /// Set the rate.
@@ -237,10 +223,7 @@ pub fn parse_ssml(input: &str) -> Utterance {
             i += 1;
         }
     }
-    Utterance {
-        text: text.trim().to_string(),
-        tags,
-    }
+    Utterance { text: text.trim().to_string(), tags }
 }
 
 /// A request to speak.
@@ -261,12 +244,7 @@ impl SpeakRequest {
     /// and 22 kHz output.
     #[must_use]
     pub fn new(text: impl Into<String>, voice: Voice) -> Self {
-        Self {
-            text: text.into(),
-            voice,
-            style: SpeechStyle::default(),
-            sample_rate_hz: 22_050,
-        }
+        Self { text: text.into(), voice, style: SpeechStyle::default(), sample_rate_hz: 22_050 }
     }
 
     /// Set the style.
@@ -475,8 +453,7 @@ mod tests {
     use super::*;
 
     fn voice() -> Voice {
-        Voice::new("aether", "Aether", "en-US")
-            .with_description("warm, low, conversational")
+        Voice::new("aether", "Aether", "en-US").with_description("warm, low, conversational")
     }
 
     #[test]
@@ -604,9 +581,7 @@ mod tests {
             TtsError::UnknownVoice(String::from("x")).to_string(),
             "voice 'x' is not loaded"
         );
-        assert!(TtsError::EngineFailure(String::from("oops"))
-            .to_string()
-            .contains("oops"));
+        assert!(TtsError::EngineFailure(String::from("oops")).to_string().contains("oops"));
     }
 
     #[test]

@@ -79,16 +79,12 @@ impl CommandView {
                 focus: self.focus,
                 visible: self.visible,
             },
-            CommandAction::FocusNext => Self {
-                state: self.state.clone(),
-                focus: self.focus.next(),
-                visible: self.visible,
-            },
-            CommandAction::FocusPrev => Self {
-                state: self.state.clone(),
-                focus: self.focus.prev(),
-                visible: self.visible,
-            },
+            CommandAction::FocusNext => {
+                Self { state: self.state.clone(), focus: self.focus.next(), visible: self.visible }
+            }
+            CommandAction::FocusPrev => {
+                Self { state: self.state.clone(), focus: self.focus.prev(), visible: self.visible }
+            }
             CommandAction::Submit => self.clone(),
             CommandAction::ShowHelp => self.clone(),
             CommandAction::Close => Self { visible: false, ..self.clone() },

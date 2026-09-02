@@ -158,7 +158,48 @@ fn run() -> Result<(), String> {
         rect.height
     );
 
-    let mut region = Region::open(rect)?;
+    let mut region = match Region::open(rect) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[calculator][WARN] no framebuffer ({e}); running headless");
+            let display_state = Arc::new(Mutex::new(String::from("0")));
+            let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            {
+                let display_state = Arc::clone(&display_state);
+                let closed = Arc::clone(&closed);
+                std::thread::spawn(move || loop {
+                    match surface.poll() {
+                        Some(SurfaceEvent::CloseRequested) | None => {
+                            closed.store(true, std::sync::atomic::Ordering::SeqCst);
+                            break;
+                        }
+                        Some(SurfaceEvent::Key(c)) => {
+                            let mut d = display_state.lock().unwrap_or_else(|p| p.into_inner());
+                            if d.as_str() == "0" {
+                                d.clear();
+                            }
+                            d.push(c);
+                        }
+                        Some(SurfaceEvent::Backspace) => {
+                            let mut d = display_state.lock().unwrap_or_else(|p| p.into_inner());
+                            d.pop();
+                            if d.is_empty() {
+                                d.push('0');
+                            }
+                        }
+                        Some(SurfaceEvent::Enter) => {
+                            *display_state.lock().unwrap_or_else(|p| p.into_inner()) =
+                                "0".to_string();
+                        }
+                    }
+                });
+            }
+            while !closed.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            return Ok(());
+        }
+    };
     let display_state = Arc::new(Mutex::new(String::from("0")));
     let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
 

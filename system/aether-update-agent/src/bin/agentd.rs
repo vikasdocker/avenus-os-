@@ -40,9 +40,7 @@ use std::io::{self, BufRead};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use aether_update_agent::{
-    ApplyStep, NullApplyEngine, UpdateAgent,
-};
+use aether_update_agent::{ApplyStep, NullApplyEngine, UpdateAgent};
 use aether_update_core::plan::UpdatePlan;
 
 fn main() -> ExitCode {
@@ -72,16 +70,8 @@ fn main() -> ExitCode {
 
     println!(
         "aether-update-agentd: plan accepted (target={} version={} kind={:?} action={:?})",
-        agent
-            .status()
-            .current_plan()
-            .map(|p| p.target.as_str())
-            .unwrap_or("?"),
-        agent
-            .status()
-            .current_plan()
-            .map(|p| p.version.as_str())
-            .unwrap_or("?"),
+        agent.status().current_plan().map(|p| p.target.as_str()).unwrap_or("?"),
+        agent.status().current_plan().map(|p| p.version.as_str()).unwrap_or("?"),
         agent.status().current_plan().map(|p| p.kind),
         agent.status().current_plan().map(|p| p.action),
     );
@@ -99,9 +89,7 @@ fn main() -> ExitCode {
         ApplyStep::Apply,
     ] {
         if let Err(e) = agent.run_step(step, parsed.now_ms) {
-            eprintln!(
-                "aether-update-agentd: step {step:?} failed: {e}; rolling back"
-            );
+            eprintln!("aether-update-agentd: step {step:?} failed: {e}; rolling back");
             agent.fail_and_rollback(step, parsed.now_ms);
             print_audit(&agent);
             return ExitCode::from(4);
@@ -125,19 +113,13 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
         match args[i].as_str() {
             "--plan" => {
                 i += 1;
-                let value = args
-                    .get(i)
-                    .ok_or_else(|| "--plan requires a value".to_string())?;
+                let value = args.get(i).ok_or_else(|| "--plan requires a value".to_string())?;
                 plan_path = Some(PathBuf::from(value));
             }
             "--now-ms" => {
                 i += 1;
-                let value = args
-                    .get(i)
-                    .ok_or_else(|| "--now-ms requires a value".to_string())?;
-                now_ms = value
-                    .parse::<u64>()
-                    .map_err(|e| format!("invalid --now-ms: {e}"))?;
+                let value = args.get(i).ok_or_else(|| "--now-ms requires a value".to_string())?;
+                now_ms = value.parse::<u64>().map_err(|e| format!("invalid --now-ms: {e}"))?;
             }
             "--help" | "-h" => {
                 print_help();
@@ -165,14 +147,10 @@ fn print_help() {
 
 fn read_plan(cli: &Cli) -> Result<UpdatePlan, String> {
     let json = if let Some(path) = &cli.plan_path {
-        std::fs::read_to_string(path)
-            .map_err(|e| format!("read {}: {e}", path.display()))?
+        std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?
     } else {
         let mut buf = String::new();
-        io::stdin()
-            .lock()
-            .read_line(&mut buf)
-            .map_err(|e| format!("stdin: {e}"))?;
+        io::stdin().lock().read_line(&mut buf).map_err(|e| format!("stdin: {e}"))?;
         buf
     };
     serde_json::from_str(&json).map_err(|e| format!("json: {e}"))
@@ -187,10 +165,7 @@ fn print_audit<E: aether_update_agent::ApplyEngine>(agent: &UpdateAgent<E>) {
     println!();
     println!("== final state ==");
     println!("stage: {:?}", agent.status().stage());
-    println!(
-        "history entries: {}",
-        agent.history().len()
-    );
+    println!("history entries: {}", agent.history().len());
 }
 
 #[cfg(test)]
@@ -203,10 +178,7 @@ mod tests {
         // --help calls process::exit;
         // we just sanity-check the
         // unknown-arg path.
-        let result = parse_args(&[
-            "aether-update-agentd".to_string(),
-            "--bogus".to_string(),
-        ]);
+        let result = parse_args(&["aether-update-agentd".to_string(), "--bogus".to_string()]);
         assert!(result.is_err());
     }
 

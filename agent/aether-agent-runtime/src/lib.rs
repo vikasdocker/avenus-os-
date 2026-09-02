@@ -24,10 +24,13 @@ pub mod memory;
 pub mod memory_store;
 pub mod observation;
 pub mod planner;
+pub mod proposal_generator;
+pub mod proposal_runner;
 pub mod recovery;
 pub mod request;
 pub mod session;
 pub mod structured_intent;
+pub mod task_to_action;
 pub mod tool;
 pub mod tools;
 pub mod validator;
@@ -58,6 +61,7 @@ pub use structured_intent::{
     build_intent_prompt, parse_envelope, parse_intent, IntentEnvelope, StructuredIntentError,
     INTENT_SCHEMA,
 };
+pub use task_to_action::{task_to_action, TaskToActionError};
 pub use tool::{ToolDefinition, ToolId, ToolRegistry};
 pub use tools::{register_all_tools, routing_for};
 pub use validator::{ValidationResult, Validator};

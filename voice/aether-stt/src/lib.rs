@@ -55,10 +55,7 @@ impl AudioBuffer {
     #[must_use]
     pub fn silence(sample_rate_hz: u32, duration_ms: u32) -> Self {
         let n = (u64::from(sample_rate_hz) * u64::from(duration_ms) / 1000) as usize;
-        Self {
-            sample_rate_hz,
-            samples: alloc::vec![0i16; n],
-        }
+        Self { sample_rate_hz, samples: alloc::vec![0i16; n] }
     }
 
     /// The duration of the buffer in
@@ -68,8 +65,7 @@ impl AudioBuffer {
         if self.sample_rate_hz == 0 {
             return 0;
         }
-        (u64::try_from(self.samples.len()).unwrap_or(0) * 1000)
-            / u64::from(self.sample_rate_hz)
+        (u64::try_from(self.samples.len()).unwrap_or(0) * 1000) / u64::from(self.sample_rate_hz)
     }
 
     /// The peak amplitude in the buffer
@@ -116,10 +112,7 @@ impl AudioBuffer {
         if self.sample_rate_hz == other.sample_rate_hz {
             let mut samples = self.samples.clone();
             samples.extend_from_slice(&other.samples);
-            return Self {
-                sample_rate_hz: self.sample_rate_hz,
-                samples,
-            };
+            return Self { sample_rate_hz: self.sample_rate_hz, samples };
         }
         // Linear resample.
         let mut samples = self.samples.clone();
@@ -138,10 +131,7 @@ impl AudioBuffer {
                 samples.push(mixed.round().clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16);
             }
         }
-        Self {
-            sample_rate_hz: self.sample_rate_hz,
-            samples,
-        }
+        Self { sample_rate_hz: self.sample_rate_hz, samples }
     }
 }
 
@@ -247,11 +237,7 @@ impl SttRequest {
     /// threshold.
     #[must_use]
     pub fn new(audio: AudioBuffer) -> Self {
-        Self {
-            audio,
-            language: Language::Auto,
-            min_confidence: 0.0,
-        }
+        Self { audio, language: Language::Auto, min_confidence: 0.0 }
     }
 
     /// Set the language hint.
@@ -395,8 +381,8 @@ impl EndOfSpeechDetector {
                 self.silence_streak_samples = 0;
             }
         }
-        let silence_ms = (u64::from(self.silence_streak_samples) * 1000)
-            / u64::from(self.sample_rate_hz.max(1));
+        let silence_ms =
+            (u64::from(self.silence_streak_samples) * 1000) / u64::from(self.sample_rate_hz.max(1));
         silence_ms >= u64::from(self.silence_duration_ms) && self.utterance_samples > 0
     }
 
@@ -471,9 +457,7 @@ impl<E: SttEngine> SttSession<E> {
     /// Feed a buffer of audio. Advances the
     /// state machine.
     pub fn feed(&mut self, buffer: &AudioBuffer) {
-        if self.state == SttSessionState::Idle
-            || self.state == SttSessionState::Done
-        {
+        if self.state == SttSessionState::Idle || self.state == SttSessionState::Done {
             return;
         }
         if buffer.sample_rate_hz != self.buffer.sample_rate_hz {
@@ -485,9 +469,7 @@ impl<E: SttEngine> SttSession<E> {
         {
             self.state = SttSessionState::Speaking;
         }
-        if self.state == SttSessionState::Speaking
-            && self.detector.feed(buffer)
-        {
+        if self.state == SttSessionState::Speaking && self.detector.feed(buffer) {
             self.state = SttSessionState::Pending;
         }
     }
@@ -544,10 +526,7 @@ mod tests {
     use super::*;
 
     fn buffer_of(samples: &[i16], rate: u32) -> AudioBuffer {
-        AudioBuffer {
-            sample_rate_hz: rate,
-            samples: samples.to_vec(),
-        }
+        AudioBuffer { sample_rate_hz: rate, samples: samples.to_vec() }
     }
 
     #[test]
@@ -561,10 +540,7 @@ mod tests {
 
     #[test]
     fn duration_handles_zero_rate() {
-        let b = AudioBuffer {
-            sample_rate_hz: 0,
-            samples: alloc::vec![0; 100],
-        };
+        let b = AudioBuffer { sample_rate_hz: 0, samples: alloc::vec![0; 100] };
         assert_eq!(b.duration_ms(), 0);
     }
 
@@ -612,12 +588,7 @@ mod tests {
 
     #[test]
     fn segment_duration() {
-        let s = Segment {
-            text: String::new(),
-            start_ms: 100,
-            end_ms: 350,
-            confidence: 0.9,
-        };
+        let s = Segment { text: String::new(), start_ms: 100, end_ms: 350, confidence: 0.9 };
         assert_eq!(s.duration_ms(), 250);
     }
 
@@ -645,9 +616,7 @@ mod tests {
     #[test]
     fn null_stt_rejects_empty_audio() {
         let s = NullStt;
-        let err = s
-            .transcribe(&SttRequest::new(AudioBuffer::silence(16000, 0)))
-            .unwrap_err();
+        let err = s.transcribe(&SttRequest::new(AudioBuffer::silence(16000, 0))).unwrap_err();
         assert_eq!(err, SttError::EmptyAudio);
     }
 
@@ -666,9 +635,7 @@ mod tests {
     #[test]
     fn null_stt_returns_empty_for_silence() {
         let s = NullStt;
-        let r = s
-            .transcribe(&SttRequest::new(AudioBuffer::silence(16000, 500)))
-            .unwrap();
+        let r = s.transcribe(&SttRequest::new(AudioBuffer::silence(16000, 500))).unwrap();
         assert_eq!(r.text, "");
         assert_eq!(r.confidence, 1.0);
     }

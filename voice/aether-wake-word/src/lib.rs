@@ -70,12 +70,7 @@ impl WakeWord {
     /// sample recording).
     #[must_use]
     pub fn new(id: impl Into<String>, text: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            text: text.into(),
-            fingerprint: Vec::new(),
-            threshold: 0.7,
-        }
+        Self { id: id.into(), text: text.into(), fingerprint: Vec::new(), threshold: 0.7 }
     }
 
     /// Set the threshold.
@@ -247,9 +242,7 @@ impl WakeEngine for ReferenceEngine {
             })
             .collect();
         out.sort_by(|a, b| {
-            b.similarity
-                .partial_cmp(&a.similarity)
-                .unwrap_or(core::cmp::Ordering::Equal)
+            b.similarity.partial_cmp(&a.similarity).unwrap_or(core::cmp::Ordering::Equal)
         });
         Ok(out)
     }
@@ -384,9 +377,7 @@ impl<E: WakeEngine> WakeDetector<E> {
         // would otherwise suppress the
         // very first hit.
         if self.last_fire_at_ms > 0
-            && self
-                .total_ms_seen
-                .saturating_sub(self.last_fire_at_ms)
+            && self.total_ms_seen.saturating_sub(self.last_fire_at_ms)
                 < u64::from(self.refractory_ms)
         {
             return None;
@@ -418,17 +409,12 @@ mod tests {
     use super::*;
 
     fn word(id: &str, text: &str, fp: Vec<f32>, threshold: f32) -> WakeWord {
-        WakeWord::new(id, text)
-            .with_fingerprint(fp)
-            .with_threshold(threshold)
+        WakeWord::new(id, text).with_fingerprint(fp).with_threshold(threshold)
     }
 
     fn loud_buffer() -> AudioBuffer {
         let samples: Vec<i16> = (0..1600).map(|i| ((i * 100) % 20000) as i16).collect();
-        AudioBuffer {
-            sample_rate_hz: 16000,
-            samples,
-        }
+        AudioBuffer { sample_rate_hz: 16000, samples }
     }
 
     fn silent_buffer() -> AudioBuffer {
@@ -491,9 +477,7 @@ mod tests {
     fn engine_rejects_empty_buffer() {
         let e = ReferenceEngine;
         let words = alloc::vec![word("a", "alpha", alloc::vec![0.1; 16], 0.5)];
-        let err = e
-            .detect(&AudioBuffer::silence(16000, 0), &words)
-            .unwrap_err();
+        let err = e.detect(&AudioBuffer::silence(16000, 0), &words).unwrap_err();
         assert_eq!(err, WakeError::EmptyAudio);
     }
 

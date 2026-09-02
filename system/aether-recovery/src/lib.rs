@@ -147,7 +147,8 @@ impl RecoveryAction {
                 format!("Restart `{app_id}`: {reason}")
             }
             Self::ReconnectNetwork { interface, reason } => {
-                let if_name = if interface.is_empty() { "the default network" } else { interface.as_str() };
+                let if_name =
+                    if interface.is_empty() { "the default network" } else { interface.as_str() };
                 format!("Reconnect {if_name}: {reason}")
             }
             Self::ResolveDependency { dependency, reason } => {
@@ -269,10 +270,7 @@ impl RecoveryPolicy {
         self.recipes
             .iter()
             .find(|(id, _)| id == symptom_id)
-            .map(|(id, actions)| RecoveryPlan {
-                symptom_id: id.clone(),
-                actions: actions.clone(),
-            })
+            .map(|(id, actions)| RecoveryPlan { symptom_id: id.clone(), actions: actions.clone() })
     }
 }
 
@@ -353,14 +351,8 @@ pub fn default_policy() -> RecoveryPolicy {
 /// one `RecoveryPlan` per symptom; symptoms with
 /// no recipe are dropped.
 #[must_use]
-pub fn plan_recovery(
-    symptoms: &[Symptom],
-    policy: &RecoveryPolicy,
-) -> Vec<RecoveryPlan> {
-    symptoms
-        .iter()
-        .filter_map(|s| policy.plan_for(&s.id))
-        .collect()
+pub fn plan_recovery(symptoms: &[Symptom], policy: &RecoveryPolicy) -> Vec<RecoveryPlan> {
+    symptoms.iter().filter_map(|s| policy.plan_for(&s.id)).collect()
 }
 
 #[cfg(test)]
@@ -371,19 +363,13 @@ mod tests {
 
     #[test]
     fn restart_service_subsystem() {
-        let a = RecoveryAction::RestartService {
-            service: "x".into(),
-            reason: "y".into(),
-        };
+        let a = RecoveryAction::RestartService { service: "x".into(), reason: "y".into() };
         assert_eq!(a.subsystem(), Subsystem::Service);
     }
 
     #[test]
     fn restart_app_subsystem() {
-        let a = RecoveryAction::RestartApp {
-            app_id: "x".into(),
-            reason: "y".into(),
-        };
+        let a = RecoveryAction::RestartApp { app_id: "x".into(), reason: "y".into() };
         assert_eq!(a.subsystem(), Subsystem::App);
     }
 
@@ -418,20 +404,16 @@ mod tests {
 
     #[test]
     fn reconnect_network_with_default_interface() {
-        let a = RecoveryAction::ReconnectNetwork {
-            interface: String::new(),
-            reason: "down".into(),
-        };
+        let a =
+            RecoveryAction::ReconnectNetwork { interface: String::new(), reason: "down".into() };
         let s = a.summary();
         assert!(s.contains("default network"));
     }
 
     #[test]
     fn reconnect_network_with_specific_interface() {
-        let a = RecoveryAction::ReconnectNetwork {
-            interface: "wlan0".into(),
-            reason: "down".into(),
-        };
+        let a =
+            RecoveryAction::ReconnectNetwork { interface: "wlan0".into(), reason: "down".into() };
         let s = a.summary();
         assert!(s.contains("wlan0"));
     }
@@ -446,19 +428,16 @@ mod tests {
 
     #[test]
     fn plan_with_action() {
-        let p = RecoveryPlan::new("x").with_action(RecoveryAction::DropPageCache {
-            reason: "y".into(),
-        });
+        let p = RecoveryPlan::new("x")
+            .with_action(RecoveryAction::DropPageCache { reason: "y".into() });
         assert_eq!(p.len(), 1);
         assert!(!p.needs_consent());
     }
 
     #[test]
     fn plan_needs_consent_when_action_does() {
-        let p = RecoveryPlan::new("x").with_action(RecoveryAction::KillProcess {
-            pid: 1,
-            reason: "y".into(),
-        });
+        let p = RecoveryPlan::new("x")
+            .with_action(RecoveryAction::KillProcess { pid: 1, reason: "y".into() });
         assert!(p.needs_consent());
     }
 
@@ -478,10 +457,8 @@ mod tests {
 
     #[test]
     fn policy_plan_for_known() {
-        let p = RecoveryPolicy::new().with_recipe(
-            "x",
-            alloc::vec![RecoveryAction::DropPageCache { reason: "y".into() }],
-        );
+        let p = RecoveryPolicy::new()
+            .with_recipe("x", alloc::vec![RecoveryAction::DropPageCache { reason: "y".into() }]);
         let plan = p.plan_for("x");
         assert!(plan.is_some());
         let plan = plan.unwrap();

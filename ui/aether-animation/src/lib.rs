@@ -373,9 +373,7 @@ mod tests {
 
     #[test]
     fn progress_with_from_to_maps_correctly() {
-        let a = Animation::new(DurationMs::from_ms(100), Easing::Linear)
-            .from(0.2)
-            .to(0.8);
+        let a = Animation::new(DurationMs::from_ms(100), Easing::Linear).from(0.2).to(0.8);
         assert_eq!(a.progress(0), 0.2);
         assert_eq!(a.progress(100), 0.8);
         let mid = a.progress(50);
@@ -405,9 +403,7 @@ mod tests {
 
     #[test]
     fn reversed_swaps_from_and_to() {
-        let a = Animation::new(DurationMs::from_ms(100), Easing::Linear)
-            .from(0.2)
-            .to(0.8);
+        let a = Animation::new(DurationMs::from_ms(100), Easing::Linear).from(0.2).to(0.8);
         let r = a.reversed();
         assert_eq!(r.from, 0.8);
         assert_eq!(r.to, 0.2);
@@ -453,7 +449,8 @@ mod tests {
 
     #[test]
     fn queue_progress_of_known_reads() {
-        let q = AnimationQueue::new().push("a", Animation::new(DurationMs::from_ms(100), Easing::Linear));
+        let q = AnimationQueue::new()
+            .push("a", Animation::new(DurationMs::from_ms(100), Easing::Linear));
         // Just-started animation, 0 ms elapsed.
         assert_eq!(q.progress("a"), 0.0);
     }
@@ -482,9 +479,7 @@ mod tests {
 
     #[test]
     fn queue_remove_by_name() {
-        let mut q = AnimationQueue::new()
-            .push("a", Animation::tap())
-            .push("b", Animation::hover());
+        let mut q = AnimationQueue::new().push("a", Animation::tap()).push("b", Animation::hover());
         q.remove("a");
         assert_eq!(q.len(), 1);
         assert_eq!(q.progress("a"), 0.0);

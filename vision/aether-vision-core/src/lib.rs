@@ -123,14 +123,7 @@ impl Frame {
             }
             let _ = i;
         }
-        Self {
-            width,
-            height,
-            format,
-            data,
-            source,
-            timestamp_ms,
-        }
+        Self { width, height, format, data, source, timestamp_ms }
     }
 
     /// The total number of pixels.
@@ -173,8 +166,8 @@ impl Frame {
         if x >= self.width || y >= self.height {
             return [0, 0, 0, 0];
         }
-        let idx = ((y as usize) * (self.width as usize) + (x as usize))
-            * self.format.bytes_per_pixel();
+        let idx =
+            ((y as usize) * (self.width as usize) + (x as usize)) * self.format.bytes_per_pixel();
         match self.format {
             PixelFormat::Gray8 => [self.data[idx], self.data[idx], self.data[idx], 255],
             PixelFormat::Rgb8 => {
@@ -186,24 +179,14 @@ impl Frame {
             }
             PixelFormat::Rgba8 => {
                 if idx + 3 < self.data.len() {
-                    [
-                        self.data[idx],
-                        self.data[idx + 1],
-                        self.data[idx + 2],
-                        self.data[idx + 3],
-                    ]
+                    [self.data[idx], self.data[idx + 1], self.data[idx + 2], self.data[idx + 3]]
                 } else {
                     [0, 0, 0, 0]
                 }
             }
             PixelFormat::Bgra8 => {
                 if idx + 3 < self.data.len() {
-                    [
-                        self.data[idx + 2],
-                        self.data[idx + 1],
-                        self.data[idx],
-                        self.data[idx + 3],
-                    ]
+                    [self.data[idx + 2], self.data[idx + 1], self.data[idx], self.data[idx + 3]]
                 } else {
                     [0, 0, 0, 0]
                 }
@@ -231,12 +214,7 @@ impl Region {
     /// A new region.
     #[must_use]
     pub const fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
+        Self { x, y, width, height }
     }
 
     /// A region covering the whole
@@ -378,19 +356,8 @@ pub struct SourceInfo {
 impl SourceInfo {
     /// A new source info.
     #[must_use]
-    pub fn new(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        width: u32,
-        height: u32,
-    ) -> Self {
-        Self {
-            id: SourceId::new(id),
-            name: name.into(),
-            width,
-            height,
-            is_primary: false,
-        }
+    pub fn new(id: impl Into<String>, name: impl Into<String>, width: u32, height: u32) -> Self {
+        Self { id: SourceId::new(id), name: name.into(), width, height, is_primary: false }
     }
 
     /// Mark as primary.
@@ -425,13 +392,7 @@ pub struct NullSource;
 
 impl ScreenSource for NullSource {
     fn enumerate(&self) -> Vec<SourceInfo> {
-        alloc::vec![SourceInfo::new(
-            "null:0",
-            "Null Display",
-            1920,
-            1080,
-        )
-        .primary()]
+        alloc::vec![SourceInfo::new("null:0", "Null Display", 1920, 1080,).primary()]
     }
 
     fn primary(&self) -> Option<SourceId> {
@@ -442,14 +403,7 @@ impl ScreenSource for NullSource {
         if source.as_str() != "null:0" {
             return None;
         }
-        Some(Frame::solid(
-            1920,
-            1080,
-            PixelFormat::Rgb8,
-            [0, 0, 0, 255],
-            source.clone(),
-            now_ms,
-        ))
+        Some(Frame::solid(1920, 1080, PixelFormat::Rgb8, [0, 0, 0, 255], source.clone(), now_ms))
     }
 }
 
@@ -474,14 +428,8 @@ mod tests {
 
     #[test]
     fn frame_solid_creates_data() {
-        let f = Frame::solid(
-            10,
-            5,
-            PixelFormat::Rgb8,
-            [100, 200, 50, 255],
-            SourceId::new("test"),
-            0,
-        );
+        let f =
+            Frame::solid(10, 5, PixelFormat::Rgb8, [100, 200, 50, 255], SourceId::new("test"), 0);
         assert_eq!(f.width, 10);
         assert_eq!(f.height, 5);
         assert_eq!(f.expected_size(), 150);
@@ -491,14 +439,7 @@ mod tests {
 
     #[test]
     fn frame_pixel_count_and_aspect() {
-        let f = Frame::solid(
-            1920,
-            1080,
-            PixelFormat::Rgb8,
-            [0; 4],
-            SourceId::new("test"),
-            0,
-        );
+        let f = Frame::solid(1920, 1080, PixelFormat::Rgb8, [0; 4], SourceId::new("test"), 0);
         assert_eq!(f.pixel_count(), 1920 * 1080);
         assert!((f.aspect_ratio() - 16.0 / 9.0).abs() < 1e-4);
     }
@@ -511,42 +452,21 @@ mod tests {
 
     #[test]
     fn frame_pixel_gray() {
-        let f = Frame::solid(
-            4,
-            4,
-            PixelFormat::Gray8,
-            [200, 0, 0, 0],
-            SourceId::new("t"),
-            0,
-        );
+        let f = Frame::solid(4, 4, PixelFormat::Gray8, [200, 0, 0, 0], SourceId::new("t"), 0);
         let p = f.pixel(2, 2);
         assert_eq!(p, [200, 200, 200, 255]);
     }
 
     #[test]
     fn frame_pixel_rgb() {
-        let f = Frame::solid(
-            4,
-            4,
-            PixelFormat::Rgb8,
-            [10, 20, 30, 255],
-            SourceId::new("t"),
-            0,
-        );
+        let f = Frame::solid(4, 4, PixelFormat::Rgb8, [10, 20, 30, 255], SourceId::new("t"), 0);
         let p = f.pixel(1, 1);
         assert_eq!(p, [10, 20, 30, 255]);
     }
 
     #[test]
     fn frame_pixel_bgra() {
-        let f = Frame::solid(
-            4,
-            4,
-            PixelFormat::Bgra8,
-            [10, 20, 30, 40],
-            SourceId::new("t"),
-            0,
-        );
+        let f = Frame::solid(4, 4, PixelFormat::Bgra8, [10, 20, 30, 40], SourceId::new("t"), 0);
         let p = f.pixel(1, 1);
         // BGRA -> RGB: 30,20,10,40
         assert_eq!(p, [30, 20, 10, 40]);
@@ -638,14 +558,8 @@ mod tests {
 
     #[test]
     fn region_crop_subsample() {
-        let frame = Frame::solid(
-            10,
-            10,
-            PixelFormat::Rgb8,
-            [50, 100, 150, 255],
-            SourceId::new("t"),
-            0,
-        );
+        let frame =
+            Frame::solid(10, 10, PixelFormat::Rgb8, [50, 100, 150, 255], SourceId::new("t"), 0);
         let cropped = Region::new(0, 0, 5, 5).crop(&frame);
         assert_eq!(cropped.width, 5);
         assert_eq!(cropped.height, 5);
@@ -654,14 +568,7 @@ mod tests {
 
     #[test]
     fn region_crop_empty() {
-        let frame = Frame::solid(
-            10,
-            10,
-            PixelFormat::Rgb8,
-            [0; 4],
-            SourceId::new("t"),
-            0,
-        );
+        let frame = Frame::solid(10, 10, PixelFormat::Rgb8, [0; 4], SourceId::new("t"), 0);
         let cropped = Region::new(50, 50, 10, 10).crop(&frame);
         assert_eq!(cropped.width, 0);
     }

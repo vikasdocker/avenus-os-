@@ -20,9 +20,9 @@
 
 use alloc::string::String;
 
-use crate::{Capability, CapabilityResult, Device, DeviceKind, HardwareService};
 #[cfg(test)]
 use crate::DeviceState;
+use crate::{Capability, CapabilityResult, Device, DeviceKind, HardwareService};
 
 /// A typed capability request. Bundles the
 /// capability, the target device, and the
@@ -43,11 +43,7 @@ pub struct CapabilityRequest {
 impl CapabilityRequest {
     /// A new request.
     #[must_use]
-    pub fn new(
-        capability: Capability,
-        target_device_id: impl Into<String>,
-        actor: Actor,
-    ) -> Self {
+    pub fn new(capability: Capability, target_device_id: impl Into<String>, actor: Actor) -> Self {
         Self { capability, target_device_id: target_device_id.into(), actor }
     }
 }
@@ -418,11 +414,7 @@ mod tests {
 
     #[test]
     fn describe_format() {
-        let d = describe(
-            &DeviceKind::AudioOutput,
-            &Capability::RouteAudio,
-            "USB Speakers",
-        );
+        let d = describe(&DeviceKind::AudioOutput, &Capability::RouteAudio, "USB Speakers");
         assert!(d.contains("USB Speakers"));
     }
 
